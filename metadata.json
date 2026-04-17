@@ -1,0 +1,6 @@
+{
+  "name": "Tide Analysis Tools",
+  "description": "Python-based sea level analysis including outlier detection, filtering, and harmonic analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
