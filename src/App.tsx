@@ -90,7 +90,8 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Configuration State
-  const [selectedSensor, setSelectedSensor] = useState('PRS1 (m)');
+  const [availableSensors, setAvailableSensors] = useState<string[]>([]);
+  const [selectedSensor, setSelectedSensor] = useState('');
   const [constituentSet, setConstituentSet] = useState<'4' | '9' | 'UKHO'>('9');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -175,8 +176,11 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[]) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string) => {
     if (!rawRows.length) return;
+    const currentSensor = sensorToUse || selectedSensor;
+    if (!currentSensor) return;
+
     setIsLoading(true);
 
     // Simulate async for loading state
@@ -186,7 +190,7 @@ export default function App() {
         let processed: TideRecord[] = rawRows.map(row => {
           let tsStr = (row['Timestamp'] || row[0] || "").trim();
           // Use selected sensor
-          let valStr = (row[selectedSensor] || "").trim();
+          let valStr = (row[currentSensor] || "").trim();
           
           tsStr = tsStr.replace(/\s+/g, ' ');
 
@@ -285,8 +289,15 @@ export default function App() {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
+          const fields = results.meta.fields || [];
+          const detectedSensors = fields.filter(f => f.toLowerCase().includes('(m)'));
+          
+          setAvailableSensors(detectedSensors);
+          const initialSensor = detectedSensors.length > 0 ? detectedSensors[0] : '';
+          setSelectedSensor(initialSensor);
+          
           setRawData(results.data);
-          runAnalysis(results.data);
+          runAnalysis(results.data, initialSensor);
           setActiveTab('dashboard');
         }
       });
@@ -422,25 +433,35 @@ export default function App() {
         </nav>
 
         <div className="mt-auto space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Sensor Source</label>
-            <select 
-              value={selectedSensor}
-              onChange={(e) => setSelectedSensor(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
-            >
-              <option value="PRS1 (m)">Sensor PRS1</option>
-              <option value="PRS2 (m)">Sensor PRS2</option>
-              <option value="PRS3 (m)">Sensor PRS3</option>
-            </select>
-          </div>
+          {availableSensors.length > 0 && (
+            <div className="space-y-1.5 animate-in fade-in slide-in-from-bottom-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 italic font-serif">Sensor Terdeteksi</label>
+              <select 
+                value={selectedSensor}
+                onChange={(e) => {
+                  setSelectedSensor(e.target.value);
+                  runAnalysis(rawData, e.target.value);
+                }}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer hover:border-sky-300 transition-colors"
+              >
+                {availableSensors.map(sensor => (
+                  <option key={sensor} value={sensor}>{sensor}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Constituent Set</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 italic font-serif">Constituent Set</label>
             <select 
               value={constituentSet}
-              onChange={(e) => setConstituentSet(e.target.value as any)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
+              onChange={(e) => {
+                const val = e.target.value as any;
+                setConstituentSet(val);
+                // Trigger re-analysis when set changes
+                runAnalysis(rawData);
+              }}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
             >
               <option value="4">4 Constants (Fast)</option>
               <option value="9">9 Constants (Standard)</option>
@@ -746,34 +767,47 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
           <div className="space-y-3">
             <label className="text-sm font-bold text-slate-700 italic font-serif">Tanggal Mulai</label>
-            <div className="relative">
-              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+            <div className="relative group">
+              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0284c7] transition-colors" size={20} />
               <input 
                 type="date"
-                value={startDate} onChange={(e) => setStartDate(e.target.value)}
+                value={startDate} 
+                onChange={(e) => setStartDate(e.target.value)}
                 className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-slate-800 outline-none focus:ring-4 focus:ring-sky-100 transition-all font-mono"
               />
             </div>
           </div>
           <div className="space-y-3">
             <label className="text-sm font-bold text-slate-700 italic font-serif">Tanggal Selesai</label>
-            <div className="relative">
-              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+            <div className="relative group">
+              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0284c7] transition-colors" size={20} />
               <input 
                 type="date"
-                value={endDate} onChange={(e) => setEndDate(e.target.value)}
-                className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-slate-800 outline-none focus:ring-4 focus:ring-sky-100 transition-all font-mono"
+                value={endDate}
+                min={startDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className={cn(
+                  "w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-slate-800 outline-none focus:ring-4 focus:ring-sky-100 transition-all font-mono",
+                  endDate < startDate && "border-red-300 focus:ring-red-100"
+                )}
               />
             </div>
           </div>
-          <button 
-            onClick={onGenerate}
-            disabled={isLoading}
-            className="w-full py-3.5 bg-[#0284c7] text-white rounded-2xl font-black hover:bg-[#0ea5e9] transition-all flex items-center justify-center gap-3 shadow-xl shadow-sky-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoading ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />} 
-            Hitung Prediksi
-          </button>
+          <div className="flex flex-col gap-2">
+            {endDate < startDate && (
+              <span className="text-[10px] text-red-500 font-bold uppercase animate-pulse px-2">
+                <AlertCircle size={10} className="inline mr-1" /> Tanggal Tidak Valid
+              </span>
+            )}
+            <button 
+              onClick={onGenerate}
+              disabled={isLoading || !startDate || !endDate || endDate < startDate}
+              className="w-full py-3.5 bg-[#0284c7] text-white rounded-2xl font-black hover:bg-[#0ea5e9] transition-all flex items-center justify-center gap-3 shadow-xl shadow-sky-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />} 
+              Hitung Prediksi
+            </button>
+          </div>
         </div>
       </div>
 
