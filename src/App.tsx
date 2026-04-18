@@ -130,6 +130,8 @@ export default function App() {
   const [selectedSensor, setSelectedSensor] = useState('');
   const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('9');
   const [isLoading, setIsLoading] = useState(false);
+  const [verticalOffset, setVerticalOffset] = useState<number>(0);
+  const [timeOffset, setTimeOffset] = useState<number>(0);
 
   // Analysis State
   const [zThreshold, setZThreshold] = useState(3.0);
@@ -224,7 +226,7 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset) => {
     if (!rawRows.length) return;
     const currentSensor = sensorToUse || selectedSensor;
     if (!currentSensor) return;
@@ -255,7 +257,11 @@ export default function App() {
 
           if (!isValid(dateObj)) dateObj = new Date(tsStr);
           
-          const valRaw = parseFloat(valStr.replace(',', '.'));
+          if (isValid(dateObj) && tOffset !== 0) {
+              dateObj = new Date(dateObj.getTime() + tOffset * 3600000);
+          }
+
+          const valRaw = parseFloat(valStr.replace(',', '.')) + vOffset;
           const val = isNaN(valRaw) ? 0 : parseFloat(valRaw.toFixed(3)); // Round to 3 decimals
 
           return {
@@ -607,7 +613,7 @@ export default function App() {
                 const val = e.target.value as any;
                 setConstituentSet(val);
                 // Trigger re-analysis when set changes
-                runAnalysis(rawData);
+                runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset);
               }}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
             >
@@ -627,6 +633,39 @@ export default function App() {
               placeholder="Enter chart name..."
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 placeholder:text-slate-400 mb-2"
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">V-Offset (m)</label>
+                <input 
+                  type="number"
+                  step="0.01"
+                  value={verticalOffset === 0 ? '' : verticalOffset}
+                  placeholder="0.00"
+                  onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setVerticalOffset(val);
+                      runAnalysis(rawData, selectedSensor, val, timeOffset);
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
+                />
+            </div>
+            <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">T-Offset (Hr)</label>
+                <input 
+                  type="number"
+                  step="0.5"
+                  value={timeOffset === 0 ? '' : timeOffset}
+                  placeholder="0.0"
+                  onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setTimeOffset(val);
+                      runAnalysis(rawData, selectedSensor, verticalOffset, val);
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
+                />
+            </div>
           </div>
 
           <button 
@@ -751,7 +790,13 @@ export default function App() {
 // --- SUB-VIEWS ---
 
 function DashboardView({ records, z0, trend, datums, title }: { records: TideRecord[], z0: number, trend: any, datums: any, title: string }) {
+  const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const outliers = useMemo(() => records.filter(r => r.isOutlier).length, [records]);
+
+  const handleLegendClick = (e: any) => {
+    const { dataKey } = e;
+    setHiddenLines(prev => ({ ...prev, [dataKey]: !prev[dataKey] }));
+  };
 
   const chartData = useMemo(() => {
     if (!trend || !records.length) return records;
@@ -801,11 +846,6 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
       <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-black text-slate-800 px-2 font-display">{title}</h3>
-          <div className="flex gap-4 text-[10px] font-bold uppercase text-slate-400">
-              <span className="flex items-center gap-1.5 font-mono"><div className="w-2 h-2 rounded-full bg-[#0284c7] opacity-20"></div> Raw</span>
-              <span className="flex items-center gap-1.5 font-mono"><div className="w-2 h-2 rounded-full bg-[#f59e0b]"></div> Filtered</span>
-              <span className="flex items-center gap-1.5 font-mono"><div className="w-2 h-2 rounded-full bg-red-500"></div> Trendline</span>
-          </div>
         </div>
         <div className="h-[420px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -821,7 +861,12 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                 contentStyle={{fontSize: '11px', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
                 labelStyle={{fontWeight: 'bold', marginBottom: '4px'}}
               />
-              <Legend verticalAlign="top" height={36} wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold'}} />
+              <Legend 
+                verticalAlign="top" 
+                height={36} 
+                wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold', cursor: 'pointer'}} 
+                onClick={handleLegendClick}
+              />
               
               {datums && (
                 <>
@@ -835,9 +880,9 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                 <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 16 }} />
               ))}
 
-              <Scatter dataKey="raw" fill="#0284c7" opacity={0.4} name="Raw Level" />
-              <Line type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
-              <Line type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
+              <Line hide={hiddenLines.raw} type="monotone" dataKey="raw" stroke="none" dot={{r: 1.5, fill: "#0284c7", strokeWidth: 0, opacity: 0.5}} isAnimationActive={false} name="Raw Level" />
+              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
+              <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
               
               <Brush dataKey="timeStr" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
             </ComposedChart>
