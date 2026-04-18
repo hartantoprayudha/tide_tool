@@ -661,7 +661,7 @@ export default function App() {
       content = `Tide Prediction Report\nRange: ${predStartDate} to ${predEndDate}\n`;
       content += `------------------------------------------\n`;
       predictions.forEach(p => {
-          content += `${format(p.timestamp, 'dd/MM HH:mm')}: ${p.value} m\n`;
+          content += `${format(p.timestamp, 'ddMMyyyy HH:mm')}\t${typeof p.value === 'number' ? p.value.toFixed(3) : p.value}\n`;
       });
     }
     const blob = new Blob([content], { type: 'text/plain' });
@@ -1387,26 +1387,26 @@ const PredictionTooltip = ({ active, payload }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5 z-50">
-        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">{data.fullTime}</p>
-        <div className="flex items-center justify-between gap-6 text-[11px] mb-2">
+      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-4 rounded-xl shadow-xl ring-1 ring-black/5 z-50 min-w-[220px]">
+        <p className="font-bold text-slate-800 text-[13px] mb-3 pb-2 border-b border-slate-100">{data.fullTime}</p>
+        <div className="flex items-center justify-between gap-6 text-xs mb-3">
           <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: "#0284c7" }} />
-            <span className="font-semibold text-slate-600">Prediksi Level</span>
+            <div className="w-2.5 h-2.5 rounded-sm bg-[#0284c7]" />
+            <span className="font-bold text-slate-500 uppercase tracking-widest text-[10px]">Prediksi Level</span>
           </div>
-          <span className="font-bold text-slate-800 font-mono">
+          <span className="font-black text-[#0284c7] font-mono text-[13px]">
             {typeof data.value === 'number' ? data.value.toFixed(3) : data.value} m
           </span>
         </div>
         {(data.dayMax !== undefined && data.dayMin !== undefined) && (
-            <div className="pt-2 border-t border-slate-100 flex justify-between gap-4 text-[10px]">
+            <div className="pt-3 border-t border-slate-100 flex justify-between gap-4">
                 <div className="flex flex-col">
-                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-0.5">Harian Max</span>
-                    <span className="text-emerald-600 font-bold font-mono">{typeof data.dayMax === 'number' ? data.dayMax.toFixed(3) : data.dayMax} m</span>
+                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-1">Harian Max</span>
+                    <span className="text-emerald-600 font-bold font-mono text-[11px]">{typeof data.dayMax === 'number' ? data.dayMax.toFixed(3) : data.dayMax} m</span>
                 </div>
                 <div className="flex flex-col text-right">
-                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-0.5">Harian Min</span>
-                    <span className="text-amber-600 font-bold font-mono">{typeof data.dayMin === 'number' ? data.dayMin.toFixed(3) : data.dayMin} m</span>
+                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-1">Harian Min</span>
+                    <span className="text-amber-600 font-bold font-mono text-[11px]">{typeof data.dayMin === 'number' ? data.dayMin.toFixed(3) : data.dayMin} m</span>
                 </div>
             </div>
         )}
@@ -1484,7 +1484,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
       {predictions.length > 0 && (
         <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
           <div className="flex justify-between items-center mb-8 px-2">
-            <h3 className="font-bold text-slate-800">Kurva Prediksi Masa Depan</h3>
+            <h3 className="font-black text-slate-800 text-lg font-display">Predicted Mean Sea Level (m)</h3>
             <div className="flex gap-2">
               <button 
                 onClick={() => onExport('csv')}
