@@ -16,7 +16,10 @@ import {
   CheckCircle2,
   Trash2,
   RefreshCw,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ZoomIn,
+  ZoomOut,
+  Maximize
 } from 'lucide-react';
 import { 
   ComposedChart,
@@ -37,6 +40,10 @@ import {
 import Papa from 'papaparse';
 import { cn } from '@/src/lib/utils';
 import { format, addDays, parse, isValid } from 'date-fns';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+// @ts-ignore
+import readmeText from '../README.md?raw';
 
 // --- TYPES ---
 interface TideRecord {
@@ -590,11 +597,15 @@ export default function App() {
   return (
     <div className="flex h-screen w-full bg-[#f1f5f9] font-sans antialiased overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-[#e2e8f0] flex flex-col p-6 shrink-0 shadow-sm">
-        <div className="flex items-center gap-2 font-extrabold text-xl text-[#0284c7] mb-10">
+      <aside className="w-64 bg-white border-r border-[#e2e8f0] flex flex-col p-6 shrink-0 shadow-sm z-20 relative">
+        <button 
+          onClick={() => setActiveTab('readme')}
+          className="flex items-center gap-2 font-extrabold text-xl text-[#0284c7] mb-10 hover:opacity-80 transition-opacity text-left"
+          title="Baca Petunjuk Penggunaan"
+        >
           <span className="text-2xl">🌊</span>
-          <span>TideScript</span>
-        </div>
+          <span>Tide Tools</span>
+        </button>
         
         <nav className="flex-1 space-y-1">
           {['dashboard', 'outlier', 'filter', 'harmonic', 'predictions'].map((tab) => (
@@ -719,11 +730,19 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col p-8 gap-6 overflow-y-auto">
         <header className="flex justify-between items-start">
-          <div>
-            <h1 className="text-3xl font-black text-[#1e293b] font-display tracking-tight">Marine Tide Analytics</h1>
-            <p className="text-sm text-[#64748b] mt-1">
-              {fileName ? `Processing: ${fileName}` : "Silakan import file CSV dengan kolom Timestamp & PRS1 (m)"}
-            </p>
+          <div className="flex items-center gap-6">
+            <a href="https://www.big.go.id" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 transition-opacity">
+              <img src="https://upload.wikimedia.org/wikipedia/commons/b/b8/Badan_Informasi_Geospasial_logo.png" alt="Logo Badan Informasi Geospasial" className="h-20 w-auto object-contain" referrerPolicy="no-referrer" />
+            </a>
+            <div>
+              <h1 className="text-3xl font-black text-[#1e293b] font-display tracking-tight">BIG Tidal Analysis</h1>
+              <p className="text-[12px] font-bold text-sky-600 tracking-wide uppercase mt-1">
+                 Created by Direktorat Sistem Referensi Geospasial BIG
+              </p>
+              <p className="text-sm text-[#64748b] mt-1.5">
+                {fileName ? `Processing: ${fileName}` : "Silakan import file CSV dengan kolom Timestamp & Data Sensor"}
+              </p>
+            </div>
           </div>
           {records.length > 0 && (
             <div className="flex gap-2">
@@ -745,7 +764,7 @@ export default function App() {
           )}
         </header>
 
-        {!records.length ? (
+        {!records.length && activeTab !== 'readme' ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-2xl border border-[#e2e8f0] p-12 text-center gap-6 shadow-sm">
             <div className="w-20 h-20 bg-sky-50 rounded-3xl flex items-center justify-center text-[#0284c7] rotate-3 hover:rotate-0 transition-transform duration-300">
               <Waves size={40} />
@@ -765,8 +784,15 @@ export default function App() {
           </div>
         ) : (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-            {activeTab === 'dashboard' && <DashboardView records={records} z0={z0} trend={linearTrend} datums={datums} title={chartTitle} />}
-            {activeTab === 'outlier' && (
+            {activeTab === 'readme' && (
+                <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 shadow-sm">
+                    <div className="prose prose-slate max-w-none prose-headings:font-display prose-headings:font-black prose-a:text-[#0284c7]">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{readmeText}</ReactMarkdown>
+                    </div>
+                </div>
+            )}
+            {activeTab === 'dashboard' && records.length > 0 && <DashboardView records={records} z0={z0} trend={linearTrend} datums={datums} title={chartTitle} />}
+            {activeTab === 'outlier' && records.length > 0 && (
                 <OutlierView 
                   records={records} 
                   threshold={zThreshold} 
@@ -774,7 +800,7 @@ export default function App() {
                   onUpdate={() => runAnalysis(rawData)} 
                 />
             )}
-            {activeTab === 'filter' && (
+            {activeTab === 'filter' && records.length > 0 && (
                 <FilterView 
                    type={filterType}
                    setType={setFilterType}
@@ -787,8 +813,8 @@ export default function App() {
                    onUpdate={() => runAnalysis(rawData)} 
                 />
             )}
-            {activeTab === 'harmonic' && <HarmonicView results={harmonicResults} />}
-            {activeTab === 'predictions' && (
+            {activeTab === 'harmonic' && records.length > 0 && <HarmonicView results={harmonicResults} />}
+            {activeTab === 'predictions' && records.length > 0 && (
                 <PredictionView 
                     predictions={predictions} 
                     startDate={predStartDate}
@@ -823,6 +849,7 @@ export default function App() {
 
 function DashboardView({ records, z0, trend, datums, title }: { records: TideRecord[], z0: number, trend: any, datums: any, title: string }) {
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
+  const [vZoom, setVZoom] = useState(1);
   const outliers = useMemo(() => records.filter(r => r.isOutlier).length, [records]);
 
   const handleLegendClick = (e: any) => {
@@ -861,6 +888,35 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
 
   const moonEvents = useMemo(() => getMoonEvents(displayData), [displayData]);
 
+  const yDomain = useMemo(() => {
+    if (!displayData.length) return ['auto', 'auto'];
+    
+    let min = Number.MAX_VALUE;
+    let max = -Number.MAX_VALUE;
+    displayData.forEach(d => {
+        if (d.raw < min) min = d.raw;
+        if (d.raw > max) max = d.raw;
+    });
+    if (datums) {
+        if (datums.lat < min) min = datums.lat;
+        if (datums.hat > max) max = datums.hat;
+    }
+    
+    if (min === Number.MAX_VALUE) return ['auto', 'auto'];
+    
+    const pad = (max - min) * 0.1;
+    const boundedMin = min - pad;
+    const boundedMax = max + pad;
+    
+    const center = (boundedMax + boundedMin) / 2;
+    const span = (boundedMax - boundedMin) / 2;
+    
+    return [
+        center - (span / vZoom),
+        center + (span / vZoom)
+    ];
+  }, [displayData, datums, vZoom]);
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -879,12 +935,23 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-black text-slate-800 px-2 font-display">{title}</h3>
         </div>
-        <div className="h-[420px] w-full">
+        <div className="relative h-[420px] w-full group">
+          <div className="absolute right-2 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={() => setVZoom(z => z * 1.25)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom In Vertical">
+              <ZoomIn size={14} />
+            </button>
+            <button onClick={() => setVZoom(1)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Reset Vertical Zoom">
+              <Maximize size={14} />
+            </button>
+            <button onClick={() => setVZoom(z => z * 0.8)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom Out Vertical">
+              <ZoomOut size={14} />
+            </button>
+          </div>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={displayData} margin={{ bottom: 20 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
               <XAxis dataKey="timeStr" tick={{fontSize: 9, fill:'#64748b'}} interval={Math.floor(displayData.length/12)} axisLine={false} />
-              <YAxis tick={{fontSize: 9, fill:'#64748b'}} axisLine={false} domain={['auto', 'auto']} />
+              <YAxis tick={{fontSize: 9, fill:'#64748b'}} axisLine={false} domain={yDomain} />
               <Tooltip 
                 formatter={(value: any, name: string) => {
                   if (typeof value === 'number') return [value.toFixed(3), name];
