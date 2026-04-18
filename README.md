@@ -30,10 +30,10 @@ print(values)
 ---
 
 ## 2. Petunjuk Penggunaan (API)
-Aplikasi ini berjalan sebagai Single Page Application (SPA). Jika Anda ingin mengintegrasikannya ke sistem lain via web:
+Aplikasi ini berjalan sebagai Single Page Application (SPA). Untuk integrasi sistem:
 
-1. **Upload**: Kirim file CSV Anda melalui antarmuka web untuk diproses di sisi klien.
-2. **Export**: Klik tombol **Export CSV** atau **Generate Text Report** untuk mendapatkan hasil analisis dalam format terstruktur yang siap digunakan oleh API/Sistem lain.
+- **Dashboard & API Interface**: [https://ais-dev-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.app](https://ais-dev-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.app)
+- **Data Exchange**: Gunakan tombol **Export CSV** untuk mendapatkan hasil analisis terstruktur yang dapat dikonsumsi oleh sistem backend Anda.
 
 ---
 

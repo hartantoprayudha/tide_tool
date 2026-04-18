@@ -401,37 +401,83 @@ export default function App() {
             }
 
             const diffHours = Math.ceil((end.getTime() - start.getTime()) / 3600000);
+            const diffDays = diffHours / 24;
+            
             if (diffHours <= 0) {
                 alert("Tanggal akhir harus setelah tanggal awal");
                 return;
             }
 
             const predData = [];
-            for (let h = 0; h <= diffHours; h++) {
-                const d = new Date(start.getTime() + h * 3600000);
-                // Time relative to the input data's start time for the harmonic components
-                const t = (d.getTime() - records[0].timestamp.getTime()) / 3600000;
-                
+            const t0 = records[0].timestamp.getTime();
+
+            const calcValue = (d: Date) => {
+                const t = (d.getTime() - t0) / 3600000;
                 let val = z0;
                 harmonicResults.forEach(res => {
                     const w = 2 * Math.PI * res.freq;
                     const ph = res.phase * (Math.PI / 180);
                     val += res.amp * Math.cos(w * t - ph);
                 });
+                return val;
+            };
 
-                predData.push({
-                    time: format(d, 'ddMMyy'),
-                    fullTime: format(d, 'dd/MM/yy HH:mm'),
-                    value: parseFloat(val.toFixed(3)),
-                    timestamp: d,
-                    dayKey: format(d, 'yyyyMMdd')
-                });
+            if (diffDays > 365) {
+                // EXTREMES ONLY MODE (> 1 Year)
+                // Iterate day by day, sample every hour within that day to find extremes
+                for (let dIdx = 0; dIdx <= diffDays; dIdx++) {
+                    const dayStart = new Date(start.getTime() + dIdx * 24 * 3600000);
+                    let dayMax = -Infinity;
+                    let dayMin = Infinity;
+                    let maxDate = dayStart;
+                    let minDate = dayStart;
+
+                    for (let h = 0; h < 24; h++) {
+                        const checkTime = new Date(dayStart.getTime() + h * 3600000);
+                        if (checkTime > end) break;
+                        const val = calcValue(checkTime);
+                        if (val > dayMax) { dayMax = val; maxDate = checkTime; }
+                        if (val < dayMin) { dayMin = val; minDate = checkTime; }
+                    }
+
+                    // Push extremes in chronological order
+                    const extremes = [
+                        { date: minDate, val: dayMin },
+                        { date: maxDate, val: dayMax }
+                    ].sort((a,b) => a.date.getTime() - b.date.getTime());
+
+                    extremes.forEach(ex => {
+                         predData.push({
+                            time: format(ex.date, 'ddMMyy'),
+                            fullTime: format(ex.date, 'dd/MM/yy HH:mm'),
+                            value: parseFloat(ex.val.toFixed(3)),
+                            timestamp: ex.date,
+                            dayKey: format(ex.date, 'yyyyMMdd')
+                        });
+                    });
+                }
+            } else {
+                // HOURLY MODE (<= 1 Year)
+                for (let h = 0; h <= diffHours; h++) {
+                    const d = new Date(start.getTime() + h * 3600000);
+                    const val = calcValue(d);
+
+                    predData.push({
+                        time: format(d, 'ddMMyy'),
+                        fullTime: format(d, 'dd/MM/yy HH:mm'),
+                        value: parseFloat(val.toFixed(3)),
+                        timestamp: d,
+                        dayKey: format(d, 'yyyyMMdd')
+                    });
+                }
             }
             setPredictions(predData);
+        } catch (err) {
+            console.error("Prediction failed:", err);
         } finally {
             setIsLoading(false);
         }
-    }, 500);
+    }, 300);
   };
 
   const exportPredictions = (formatType: 'csv' | 'txt') => {
@@ -978,37 +1024,6 @@ function HarmonicView({ results }: { results: ConstituentResult[] }) {
 }
 
 function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title }: any) {
-  const optimizedData = useMemo(() => {
-    if (!predictions.length) return [];
-    
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-
-    // If duration > 1 year (365 days), display ONLY daily extremes
-    if (diffDays > 365) {
-        const dailyGroups: Record<string, any[]> = {};
-        predictions.forEach((p: any) => {
-            if (!dailyGroups[p.dayKey]) dailyGroups[p.dayKey] = [];
-            dailyGroups[p.dayKey].push(p);
-        });
-
-        const extremes: any[] = [];
-        Object.keys(dailyGroups).sort().forEach(day => {
-            const group = dailyGroups[day];
-            const max = group.reduce((prev, curr) => (prev.value > curr.value) ? prev : curr);
-            const min = group.reduce((prev, curr) => (prev.value < curr.value) ? prev : curr);
-            
-            // To maintain chart order and structure, we push both
-            extremes.push(min);
-            extremes.push(max);
-        });
-        return extremes;
-    }
-
-    return predictions;
-  }, [predictions, startDate, endDate]);
-
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 shadow-sm">
@@ -1091,7 +1106,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           </div>
           <div className="h-[400px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={optimizedData} margin={{ bottom: 20 }}>
+              <AreaChart data={predictions} margin={{ bottom: 20 }}>
               <defs>
                 <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#0284c7" stopOpacity={0.2}/>
@@ -1099,13 +1114,23 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(optimizedData.length/12)} axisLine={false} />
+              <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(predictions.length/12)} axisLine={false} />
               <YAxis tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} domain={['auto', 'auto']} />
               <Tooltip 
                 contentStyle={{fontSize: '11px', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
                 labelFormatter={(value, payload) => payload[0]?.payload?.fullTime || value}
               />
-              <Area type="monotone" dataKey="value" stroke="#0284c7" strokeWidth={2} fillOpacity={1} fill="url(#colorVal)" animationDuration={1000} connectNulls />
+              <Area 
+                type="monotone" 
+                dataKey="value" 
+                stroke="#0284c7" 
+                strokeWidth={2} 
+                fillOpacity={1} 
+                fill="url(#colorVal)" 
+                animationDuration={1000} 
+                connectNulls 
+                isAnimationActive={predictions.length < 5000}
+              />
               <Brush dataKey="time" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
             </AreaChart>
             </ResponsiveContainer>
