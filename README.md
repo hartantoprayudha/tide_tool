@@ -5,9 +5,6 @@ Direktorat Sistem Referensi Geospasial
 
 Aplikasi BIG Tidal Analysis adalah platform analisis deret waktu pasang surut air laut yang dirancang untuk memproses data dari berbagai sensor tekanan (CSV data) dan memberikan hasil analisis harmonik presisi, ekspor datum, serta prediksi masa depan.
 
-![Dashboard Preview](https://images.unsplash.com/photo-1541888040510-91494abb163d?q=80&w=1200&h=450&fit=crop&blur=2)
-*(Screenshot representasi dashboard analitik dengan gelombang laut)*
-
 ---
 
 ## 1. Petunjuk Penggunaan (WebApp Dashboard)
@@ -15,9 +12,8 @@ Aplikasi BIG Tidal Analysis adalah platform analisis deret waktu pasang surut ai
 - **Akses Dashboard**: Cukup memuat file observasi Anda berformat `.csv` (memiliki kolom Timestamp & Sensor).
 - **Interactive Toggles**: Pada bagian grafik/chart, Anda dapat mengklik legenda (contoh: *Analyzed Level* atau *Prediction*) untuk menampilkan atau menyembunyikannya.
 - **Prediksi Interaktif**: Terdapat panel prediction yang bisa dikalkulasi berdasarkan set konstanta harmonik (misal: UKHO, 9 Constants, dll). Grafik prediksi maksimal dirender s/d 1 tahun untuk menjaga performa (HW Accel by default).
+<img width="2878" height="1400" alt="Screenshot 2026-04-18 115643" src="https://github.com/user-attachments/assets/307682ea-ee30-4a5f-92ff-29ec46d5dac2" />
 
-![Prediction & Filter Module](https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=1200&h=450&fit=crop&blur=2)
-*(Ilustrasi Panel Filter Data & Visualisasi Prediksi Harmonik)*
 
 ---
 
