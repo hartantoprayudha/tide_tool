@@ -19,6 +19,8 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { 
+  ComposedChart,
+  Scatter,
   LineChart, 
   Line, 
   XAxis, 
@@ -126,7 +128,7 @@ export default function App() {
   // Configuration State
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
-  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('15');
+  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('9');
   const [isLoading, setIsLoading] = useState(false);
 
   // Analysis State
@@ -807,11 +809,15 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
         </div>
         <div className="h-[420px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={displayData} margin={{ bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+            <ComposedChart data={displayData} margin={{ bottom: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
               <XAxis dataKey="timeStr" tick={{fontSize: 9, fill:'#64748b'}} interval={Math.floor(displayData.length/12)} axisLine={false} />
               <YAxis tick={{fontSize: 9, fill:'#64748b'}} axisLine={false} domain={['auto', 'auto']} />
               <Tooltip 
+                formatter={(value: any, name: string) => {
+                  if (typeof value === 'number') return [value.toFixed(3), name];
+                  return [value, name];
+                }}
                 contentStyle={{fontSize: '11px', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
                 labelStyle={{fontWeight: 'bold', marginBottom: '4px'}}
               />
@@ -829,12 +835,12 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                 <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 16 }} />
               ))}
 
-              <Line type="monotone" dataKey="raw" stroke="#0284c7" strokeWidth={1} dot={false} opacity={0.15} name="Raw Level" />
+              <Scatter dataKey="raw" fill="#0284c7" opacity={0.4} name="Raw Level" />
               <Line type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
               <Line type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
               
               <Brush dataKey="timeStr" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
         <div className="mt-4 flex items-center gap-2 justify-center">
