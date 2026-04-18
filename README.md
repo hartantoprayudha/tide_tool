@@ -47,6 +47,51 @@ print(values)
 
 ---
 
+## 3. Integrasi Sistem (Web API)
+
+Untuk kebutuhan automasi *pipeline* data geospasial, sistem *machine learning*, atau integrasi ke dasbor eksternal, BIG Tidal Analysis menyediakan jalur Web API (Representational State Transfer). 
+
+**Endpoint Master URL**:  
+`https://ais-dev-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.app/api/analyze`
+
+![Web API & JSON Response](https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&h=450&fit=crop&blur=2)
+*(Ilustrasi console terminal dalam mengakses Web API BIG Tidal Analysis)*
+
+### Alur Eksekusi API
+Fungsi API ini menerima data deret waktu format CSV murni, memproses nilai harmoniknya di sisi server (Backend), lalu mengembalikan respon datum dan amplitudo secara terstruktur dalam format `JSON`.
+
+**Contoh Pemanggilan via Console (cURL):**
+```bash
+# Upload file CSV observasi untuk mendapatkan respon JSON
+curl -X POST https://ais-dev-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.app/api/analyze \
+  -H "Authorization: Bearer <API_KEY_ANDA>" \
+  -F "file=@data_observasi_pasut.csv" \
+  -F "constituents=9"
+```
+
+**Struktur Respon (JSON Array):**
+```json
+{
+  "status": "success",
+  "data_points": 744,
+  "datum": {
+    "msl": 1.205,
+    "hat": 2.450,
+    "lat": 0.150
+  },
+  "constituents": [
+    {"comp": "M2", "amp": 0.855, "phase": 120.450},
+    {"comp": "S2", "amp": 0.342, "phase": 145.210}
+  ],
+  "message": "Harmonic mapping completed successfully"
+}
+```
+
+![Integrasi Backend API](https://images.unsplash.com/photo-1558494949-ef010cbdcc31?q=80&w=1200&h=450&fit=crop&blur=2)
+*(Ilustrasi integrasi arsitektur Backend Data Center)*
+
+---
+
 ## Fitur Unggulan:
 - **IHO Compliant Constituents**: Pilihan algoritma Harmonic Set (9 konstanta, 37 komponen, hingga UKHO).
 - **Moon Phase Indicator**: Menampilkan overlay fase-fase bulan pada puncak data (Purnama / Bulan Baru) sesuai standar IHO.
