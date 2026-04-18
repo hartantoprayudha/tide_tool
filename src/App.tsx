@@ -42,8 +42,6 @@ import { cn } from '@/src/lib/utils';
 import { format, addDays, parse, isValid } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-// @ts-ignore
-import readmeText from '../README.md?raw';
 
 // --- TYPES ---
 interface TideRecord {
@@ -155,6 +153,18 @@ export default function App() {
   const [predEndDate, setPredEndDate] = useState(format(addDays(new Date(), 7), 'yyyy-MM-dd'));
   const [predictions, setPredictions] = useState<any[]>([]);
   const [chartTitle, setChartTitle] = useState("Tide Analysis Visualization");
+
+  // Dynamic README Context for Github Sync
+  const [readmeContent, setReadmeContent] = useState<string>('Memuat dokumentasi...');
+
+  useEffect(() => {
+    fetch('/api/readme')
+      .then(res => res.json())
+      .then(data => {
+        if(data.content) setReadmeContent(data.content);
+      })
+      .catch(err => console.error("Failed to sync README.md", err));
+  }, []);
 
   // --- CORE ANALYTICS ENGINE (Client-side) ---
 
@@ -786,8 +796,18 @@ export default function App() {
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
             {activeTab === 'readme' && (
                 <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 shadow-sm">
+                    <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                        <div>
+                            <h2 className="text-xl font-bold font-display text-slate-800">Dokumentasi & API</h2>
+                            <p className="text-sm text-slate-500 mt-1">Laman ini tersinkronisasi otomatis (Live Sync) dari repository Github master file.</p>
+                        </div>
+                        <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-full text-xs font-semibold">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            Synced Live
+                        </div>
+                    </div>
                     <div className="prose prose-slate max-w-none prose-headings:font-display prose-headings:font-black prose-headings:text-slate-800 prose-p:font-sans prose-p:text-slate-600 prose-p:leading-relaxed prose-li:font-sans prose-li:text-slate-600 prose-a:text-[#0284c7] prose-img:rounded-2xl prose-img:shadow-md prose-img:border prose-img:border-slate-100 prose-img:w-full prose-img:object-cover">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{readmeText}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{readmeContent}</ReactMarkdown>
                     </div>
                 </div>
             )}
