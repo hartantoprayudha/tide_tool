@@ -786,7 +786,7 @@ export default function App() {
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
             {activeTab === 'readme' && (
                 <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 shadow-sm">
-                    <div className="prose prose-slate max-w-none prose-headings:font-display prose-headings:font-black prose-a:text-[#0284c7]">
+                    <div className="prose prose-slate max-w-none prose-headings:font-display prose-headings:font-black prose-headings:text-slate-800 prose-p:font-sans prose-p:text-slate-600 prose-p:leading-relaxed prose-li:font-sans prose-li:text-slate-600 prose-a:text-[#0284c7] prose-img:rounded-2xl prose-img:shadow-md prose-img:border prose-img:border-slate-100 prose-img:w-full prose-img:object-cover">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{readmeText}</ReactMarkdown>
                     </div>
                 </div>
