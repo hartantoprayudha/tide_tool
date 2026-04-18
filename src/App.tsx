@@ -279,38 +279,78 @@ export default function App() {
           return;
         }
 
-        // 2. Outlier Removal
-        const validRaw = processed.map(p => p.raw);
-        const mean = validRaw.reduce((a, b) => a + b, 0) / validRaw.length;
-        const std = Math.sqrt(validRaw.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b, 0) / (validRaw.length || 1));
-        
-        processed = processed.map(r => ({
-          ...r,
-          isOutlier: Math.abs(r.raw - mean) > (zThreshold * std)
-        }));
+        // 2. Harmonic Outlier Detection (Two-Pass Logic)
+        let compsToFit: string[] = [];
+        if (constituentSet === '4') compsToFit = ['M2', 'S2', 'K1', 'O1'];
+        else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
+        else if (constituentSet === '15') compsToFit = ['M2', 'S2', 'N2', 'K2', 'K1', 'O1', 'P1', 'Q1', 'Mf', 'Mm', 'M4', 'MS4', 'MN4', 'S4', 'M6'];
+        else compsToFit = Object.keys(HARMONIC_FREQS); // UKHO
 
-        // 3. Filter Logic
+        // A. Quick 1st Pass Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
+        const t_hours_raw = processed.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
+        const y_vals_raw = processed.map(r => r.raw);
+        const roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, compsToFit);
+        const roughZ0 = roughSolution[0];
+        let roughHatAmpSum = 0;
+        for (let i = 0; i < compsToFit.length; i++) {
+            const a = roughSolution[1 + 2 * i];
+            const b = roughSolution[1 + 2 * i + 1];
+            roughHatAmpSum += Math.sqrt(a * a + b * b);
+        }
+        const roughHAT = roughZ0 + roughHatAmpSum;
+        const roughLAT = roughZ0 - roughHatAmpSum;
+
+        // B. Mark Outliers (either via statistical Z-score OR being strictly outside HAT/LAT bounds)
+        const meanRaw = y_vals_raw.reduce((a, b) => a + b, 0) / y_vals_raw.length;
+        const stdRaw = Math.sqrt(y_vals_raw.map(x => Math.pow(x - meanRaw, 2)).reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1));
+        
+        processed = processed.map(r => {
+            const isStatOutlier = Math.abs(r.raw - meanRaw) > (zThreshold * stdRaw);
+            const isHarmonicOutlier = r.raw > roughHAT || r.raw < roughLAT;
+            return {
+                ...r,
+                isOutlier: isStatOutlier || isHarmonicOutlier
+            };
+        });
+
+        // C. Interpolate Outliers to create a Cleaned Continuous Input Array for Low Pass Filter
+        // (This mathematically prevents the Low Pass Filter, especially Butterworth IIR, from oscillating/ringing due to giant anomalous spikes)
+        const cleanedInput = new Array(processed.length);
+        for (let i = 0; i < processed.length; i++) {
+            if (!processed[i].isOutlier) {
+                cleanedInput[i] = processed[i].raw;
+            } else {
+                let prev = roughZ0;
+                for (let j = i - 1; j >= 0; j--) {
+                    if (!processed[j].isOutlier) { prev = processed[j].raw; break; }
+                }
+                let next = roughZ0;
+                for (let j = i + 1; j < processed.length; j++) {
+                    if (!processed[j].isOutlier) { next = processed[j].raw; break; }
+                }
+                cleanedInput[i] = (prev + next) / 2; 
+            }
+        }
+
+        // 3. Low-Pass Filter Logic (Using interpolatable 'cleanedInput')
         if (filterType === 'ma') {
           processed = processed.map((r, i) => {
             const start = Math.max(0, i - Math.floor(filterWindow / 2));
-            const end = Math.min(processed.length, i + Math.ceil(filterWindow / 2));
-            const window = processed.slice(start, end).filter(p => !p.isOutlier);
-            const avg = window.length > 0 ? window.reduce((s, x) => s + x.raw, 0) / window.length : r.raw;
+            const end = Math.min(cleanedInput.length, i + Math.ceil(filterWindow / 2));
+            const windowVals = cleanedInput.slice(start, end);
+            const avg = windowVals.reduce((s, x) => s + x, 0) / windowVals.length;
             return { ...r, filtered: parseFloat(avg.toFixed(3)) }; 
           });
         } else if (filterType === 'median') {
           processed = processed.map((r, i) => {
             const start = Math.max(0, i - Math.floor(medianWindow / 2));
-            const end = Math.min(processed.length, i + Math.ceil(medianWindow / 2));
-            const window = processed.slice(start, end).filter(p => !p.isOutlier).map(p => p.raw);
-            if (window.length === 0) return { ...r, filtered: r.raw };
-            window.sort((a, b) => a - b);
-            const median = window[Math.floor(window.length / 2)];
+            const end = Math.min(cleanedInput.length, i + Math.ceil(medianWindow / 2));
+            const windowVals = cleanedInput.slice(start, end);
+            windowVals.sort((a, b) => a - b);
+            const median = windowVals[Math.floor(windowVals.length / 2)];
             return { ...r, filtered: parseFloat(median.toFixed(3)) };
           });
         } else if (filterType === 'butterworth') {
-            // Simple 2nd Order Butterworth Low-pass
-            // Assumes relatively uniform sampling for this simplified implementation
             const wc = Math.tan(Math.PI * butterCutoff);
             const k1 = Math.SQRT2 * wc;
             const k2 = wc * wc;
@@ -321,14 +361,12 @@ export default function App() {
             const a1 = 2 * (k2 - 1) / a0;
             const a2 = (1 - k1 + k2) / a0;
 
-            const input = processed.map(r => r.raw);
-            const output = new Array(input.length).fill(0);
-            
-            for(let i = 0; i < input.length; i++) {
+            const output = new Array(cleanedInput.length).fill(0);
+            for(let i = 0; i < cleanedInput.length; i++) {
                 if (i < 2) {
-                    output[i] = input[i];
+                    output[i] = cleanedInput[i];
                 } else {
-                    output[i] = b0 * input[i] + b1 * input[i-1] + b2 * input[i-2] - a1 * output[i-1] - a2 * output[i-2];
+                    output[i] = b0 * cleanedInput[i] + b1 * cleanedInput[i-1] + b2 * cleanedInput[i-2] - a1 * output[i-1] - a2 * output[i-2];
                 }
             }
             
@@ -338,13 +376,7 @@ export default function App() {
             }));
         }
 
-        // 4. Harmonic Analysis
-        let compsToFit: string[] = [];
-        if (constituentSet === '4') compsToFit = ['M2', 'S2', 'K1', 'O1'];
-        else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
-        else if (constituentSet === '15') compsToFit = ['M2', 'S2', 'N2', 'K2', 'K1', 'O1', 'P1', 'Q1', 'Mf', 'Mm', 'M4', 'MS4', 'MN4', 'S4', 'M6'];
-        else compsToFit = Object.keys(HARMONIC_FREQS); // UKHO
-
+        // 4. Final Precise Harmonic Analysis (on the mathematically cleaned and filtered data)
         const t_hours = processed.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
         const y_vals = processed.map(r => r.filtered);
         
