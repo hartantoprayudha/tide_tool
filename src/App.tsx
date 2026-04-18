@@ -289,7 +289,7 @@ export default function App() {
             raw: val,
             filtered: 0,
             isOutlier: false,
-            timeStr: isValid(dateObj) ? format(dateObj, 'dd/MM HH:mm') : "Invalid"
+            timeStr: isValid(dateObj) ? format(dateObj, 'dd/MM/yy HH:mm') : "Invalid"
           };
         }).filter(r => isValid(r.timestamp));
 
@@ -995,7 +995,7 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
             <button onClick={() => handleDownload('pdf')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
           </div>
         </div>
-        <div ref={chartRef} className="relative h-[420px] w-full group bg-white pt-2 pb-4">
+        <div ref={chartRef} className="relative h-[540px] w-full group bg-white pt-2 pb-4">
           <div className="export-exclude absolute right-2 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
             <button onClick={() => setVZoom(z => z * 1.25)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom In Vertical">
               <ZoomIn size={14} />
@@ -1008,35 +1008,45 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
             </button>
           </div>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={displayData} margin={{ bottom: 20, left: 10, right: 20 }}>
+            <ComposedChart data={displayData} margin={{ bottom: 30, left: 30, right: 20, top: 40 }} style={{ cursor: 'crosshair' }}>
               <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
-              <XAxis dataKey="timeStr" tick={{fontSize: 9, fill:'#64748b'}} interval={Math.floor(displayData.length/12)} axisLine={false} />
+              <XAxis 
+                dataKey="timeStr" 
+                tick={{fontSize: 9, fill:'#64748b'}} 
+                interval={Math.floor(displayData.length/12)} 
+                axisLine={false} 
+                label={{ value: 'Waktu ddmmyy hh:mm', position: 'insideBottom', offset: -20, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
+              />
               <YAxis 
                 tickFormatter={(val: number) => val.toFixed(3)}
-                label={{ value: 'Tinggi Muka Laut (m)', angle: -90, position: 'insideLeft', offset: -10, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
+                label={{ value: 'Tinggi Muka Laut (m)', angle: -90, position: 'insideLeft', offset: -15, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
                 tick={{fontSize: 9, fill:'#64748b'}} 
                 axisLine={false} 
                 domain={yDomain} 
                 width={80}
               />
               <Tooltip 
+                cursor={{ stroke: '#94a3b8', strokeWidth: 1.5, strokeDasharray: '4 4' }}
                 content={({ active, payload, label }) => {
                   if (active && payload && payload.length) {
                     return (
-                      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5">
-                        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">{label}</p>
+                      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5 pointer-events-none">
+                        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">Waktu Pengamatan: {label}</p>
                         <div className="space-y-2 w-full">
-                          {payload.map((entry: any, index: number) => (
-                            <div key={index} className="flex items-center justify-between gap-6 text-[11px]">
-                              <div className="flex items-center gap-2">
-                                <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: entry.color }} />
-                                <span className="font-semibold text-slate-600">{entry.name}</span>
+                          {payload.map((entry: any, index: number) => {
+                            if (entry.dataKey !== 'raw' && entry.dataKey !== 'filtered') return null;
+                            return (
+                              <div key={index} className="flex items-center justify-between gap-6 text-[11px]">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: entry.color }} />
+                                  <span className="font-semibold text-slate-600">{entry.name}</span>
+                                </div>
+                                <span className="font-bold text-slate-800 font-mono">
+                                  {typeof entry.value === 'number' ? entry.value.toFixed(3) : entry.value} m
+                                </span>
                               </div>
-                              <span className="font-bold text-slate-800 font-mono">
-                                {typeof entry.value === 'number' ? entry.value.toFixed(3) : entry.value} m
-                              </span>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -1046,8 +1056,8 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
               />
               <Legend 
                 verticalAlign="top" 
-                height={36} 
-                wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold', cursor: 'pointer'}} 
+                height={50} 
+                wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold', cursor: 'pointer', paddingBottom: '20px'}} 
                 onClick={handleLegendClick}
               />
               
@@ -1060,10 +1070,10 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
               )}
 
               {moonEvents.map((me, i) => (
-                <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 16 }} />
+                <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 18 }} />
               ))}
 
-              <Scatter hide={hiddenLines.raw} dataKey="raw" fill="#1e3a8a" fillOpacity={0.5} name="Raw Level" isAnimationActive={false} />
+              <Scatter hide={hiddenLines.raw} dataKey="raw" fill="#94a3b8" fillOpacity={0.4} name="Raw Level" isAnimationActive={false} />
               <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
               
