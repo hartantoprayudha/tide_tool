@@ -282,7 +282,7 @@ export default function App() {
           }
 
           const valRaw = parseFloat(valStr.replace(',', '.')) + vOffset;
-          const val = isNaN(valRaw) ? 0 : parseFloat(valRaw.toFixed(3)); // Round to 3 decimals
+          const val = isNaN(valRaw) ? NaN : parseFloat(valRaw.toFixed(3)); 
 
           return {
             timestamp: dateObj,
@@ -291,13 +291,48 @@ export default function App() {
             isOutlier: false,
             timeStr: isValid(dateObj) ? format(dateObj, 'dd/MM/yy HH:mm') : "Invalid"
           };
-        }).filter(r => isValid(r.timestamp));
+        }).filter(r => isValid(r.timestamp) && r.timeStr !== "Invalid");
 
         if (processed.length === 0) {
           alert("Gagal memproses data. Kolom sensor atau format waktu mungkin salah.");
           setIsLoading(false);
           return;
         }
+
+        // --- Data Regularization (Infer missing rows & Gap Definition) ---
+        processed.sort((a,b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+        let dts = [];
+        for (let i = 0; i < processed.length - 1; i++) {
+            dts.push(processed[i+1].timestamp.getTime() - processed[i].timestamp.getTime());
+        }
+        dts.sort((a,b) => a - b);
+        const dt = dts.length > 0 ? dts[Math.floor(dts.length / 2)] : 60000;
+
+        const regularized: TideRecord[] = [];
+        let currIdx = 0;
+        const startT = processed[0].timestamp.getTime();
+        const endT = processed[processed.length - 1].timestamp.getTime();
+
+        for (let t = startT; t <= endT; t += dt) {
+            while (currIdx < processed.length && processed[currIdx].timestamp.getTime() < t - dt / 2) {
+                currIdx++;
+            }
+            if (currIdx < processed.length && Math.abs(processed[currIdx].timestamp.getTime() - t) <= dt / 2) {
+                const rec = processed[currIdx];
+                regularized.push({ ...rec, timestamp: new Date(t), timeStr: format(new Date(t), 'dd/MM/yy HH:mm') });
+            } else {
+                regularized.push({
+                    timestamp: new Date(t),
+                    raw: NaN,
+                    filtered: 0,
+                    isOutlier: false,
+                    timeStr: format(new Date(t), 'dd/MM/yy HH:mm')
+                });
+            }
+        }
+        processed = regularized;
+        // -----------------------------------------------------------------
 
         // 2. Harmonic Outlier Detection (Two-Pass Logic)
         let compsToFit: string[] = [];
@@ -307,24 +342,28 @@ export default function App() {
         else compsToFit = Object.keys(HARMONIC_FREQS); // UKHO
 
         // A. Quick 1st Pass Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
-        const t_hours_raw = processed.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
-        const y_vals_raw = processed.map(r => r.raw);
+        const validForRough = processed.filter(r => !isNaN(r.raw));
+        const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
+        const y_vals_raw = validForRough.map(r => r.raw);
         const roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, compsToFit);
-        const roughZ0 = roughSolution[0];
+        const roughZ0 = roughSolution[0] || 0;
         let roughHatAmpSum = 0;
         for (let i = 0; i < compsToFit.length; i++) {
-            const a = roughSolution[1 + 2 * i];
-            const b = roughSolution[1 + 2 * i + 1];
+            const a = roughSolution[1 + 2 * i] || 0;
+            const b = roughSolution[1 + 2 * i + 1] || 0;
             roughHatAmpSum += Math.sqrt(a * a + b * b);
         }
         const roughHAT = roughZ0 + roughHatAmpSum;
         const roughLAT = roughZ0 - roughHatAmpSum;
 
         // B. Mark Outliers (either via statistical Z-score OR being strictly outside HAT/LAT bounds)
-        const meanRaw = y_vals_raw.reduce((a, b) => a + b, 0) / y_vals_raw.length;
+        const meanRaw = y_vals_raw.reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1);
         const stdRaw = Math.sqrt(y_vals_raw.map(x => Math.pow(x - meanRaw, 2)).reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1));
         
         processed = processed.map(r => {
+            if (isNaN(r.raw)) {
+                return { ...r, isOutlier: true };
+            }
             const isStatOutlier = Math.abs(r.raw - meanRaw) > (zThreshold * stdRaw);
             const isHarmonicOutlier = r.raw > roughHAT || r.raw < roughLAT;
             return {
@@ -334,21 +373,46 @@ export default function App() {
         });
 
         // C. Interpolate Outliers to create a Cleaned Continuous Input Array for Low Pass Filter
-        // (This mathematically prevents the Low Pass Filter, especially Butterworth IIR, from oscillating/ringing due to giant anomalous spikes)
         const cleanedInput = new Array(processed.length);
         for (let i = 0; i < processed.length; i++) {
-            if (!processed[i].isOutlier) {
-                cleanedInput[i] = processed[i].raw;
+            cleanedInput[i] = processed[i].raw;
+        }
+
+        let i = 0;
+        while (i < processed.length) {
+            if (processed[i].isOutlier || isNaN(processed[i].raw)) {
+                let startGap = i;
+                let endGap = i;
+                while (endGap < processed.length && (processed[endGap].isOutlier || isNaN(processed[endGap].raw))) {
+                    endGap++;
+                }
+                const gapLength = endGap - startGap;
+                const gapDurationMins = (gapLength * dt) / 60000;
+
+                let prevVal = startGap > 0 ? cleanedInput[startGap - 1] : roughZ0;
+                let nextVal = endGap < processed.length ? (isNaN(processed[endGap]?.raw) ? roughZ0 : processed[endGap].raw) : roughZ0;
+                
+                if (isNaN(prevVal)) prevVal = roughZ0;
+                if (isNaN(nextVal)) nextVal = roughZ0;
+
+                if (gapDurationMins <= 15) {
+                    for (let j = startGap; j < endGap; j++) {
+                        const fraction = (j - startGap + 1) / (gapLength + 1);
+                        const interp = prevVal + fraction * (nextVal - prevVal);
+                        
+                        cleanedInput[j] = parseFloat(interp.toFixed(3));
+                        processed[j].raw = cleanedInput[j];
+                        processed[j].isOutlier = false;
+                    }
+                } else {
+                    for (let j = startGap; j < endGap; j++) {
+                        const fraction = (j - startGap + 1) / (gapLength + 1);
+                        cleanedInput[j] = prevVal + fraction * (nextVal - prevVal);
+                    }
+                }
+                i = endGap;
             } else {
-                let prev = roughZ0;
-                for (let j = i - 1; j >= 0; j--) {
-                    if (!processed[j].isOutlier) { prev = processed[j].raw; break; }
-                }
-                let next = roughZ0;
-                for (let j = i + 1; j < processed.length; j++) {
-                    if (!processed[j].isOutlier) { next = processed[j].raw; break; }
-                }
-                cleanedInput[i] = (prev + next) / 2; 
+                i++;
             }
         }
 
@@ -463,26 +527,56 @@ export default function App() {
     }, 500);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setFileName(file.name);
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          const fields = results.meta.fields || [];
-          const detectedSensors = fields.filter(f => f.toLowerCase().includes('(m)'));
-          
-          setAvailableSensors(detectedSensors);
-          const initialSensor = detectedSensors.length > 0 ? detectedSensors[0] : '';
-          setSelectedSensor(initialSensor);
-          
-          setRawData(results.data);
-          runAnalysis(results.data, initialSensor);
-          setActiveTab('dashboard');
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      setFileName(files.length === 1 ? files[0].name : `${files.length} Files Selected`);
+      setIsLoading(true);
+
+      try {
+        const filePromises = Array.from(files).map((file) => {
+          return new Promise<Papa.ParseResult<any>>((resolve, reject) => {
+            Papa.parse(file, {
+              header: true,
+              skipEmptyLines: true,
+              complete: resolve,
+              error: reject
+            });
+          });
+        });
+
+        const results = await Promise.all(filePromises);
+        
+        // Validate headers if merging multiple files
+        if (results.length > 1) {
+          const firstHeader = JSON.stringify(results[0].meta.fields);
+          for (let i = 1; i < results.length; i++) {
+            if (JSON.stringify(results[i].meta.fields) !== firstHeader) {
+              alert('Error: File CSV yang di-merge tidak memiliki judul header yang sama persis!');
+              setIsLoading(false);
+              return; // Abort if headers mismatch
+            }
+          }
         }
-      });
+
+        // Merge Data
+        let mergedData: any[] = [];
+        results.forEach(res => {
+          mergedData = mergedData.concat(res.data);
+        });
+
+        const fields = results[0].meta.fields || [];
+        const detectedSensors = fields.filter((f:string) => f.toLowerCase().includes('(m)'));
+        setAvailableSensors(detectedSensors);
+        const initialSensor = detectedSensors.length > 0 ? detectedSensors[0] : '';
+        setSelectedSensor(initialSensor);
+        setRawData(mergedData);
+        runAnalysis(mergedData, initialSensor);
+        setActiveTab('dashboard');
+      } catch (err) {
+        alert("Terjadi kesalahan saat membaca file CSV.");
+      }
+      setIsLoading(false);
     }
   };
 
@@ -731,7 +825,7 @@ export default function App() {
             <Upload size={14} />
             Import CSV Data
           </button>
-          <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".csv" />
+          <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".csv" />
           
           <div className="flex items-center gap-3 px-3 py-2 text-[#64748b] text-[10px] font-bold uppercase tracking-wider">
             <div className={cn("w-2 h-2 rounded-full", records.length ? "bg-[#10b981]" : "bg-slate-300")}></div>
