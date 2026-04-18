@@ -28,7 +28,9 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
-  Legend
+  Legend,
+  Brush,
+  ReferenceLine
 } from 'recharts';
 import Papa from 'papaparse';
 import { cn } from '@/src/lib/utils';
@@ -85,6 +87,7 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [records, setRecords] = useState<TideRecord[]>([]);
+  const [datums, setDatums] = useState<{ mhws: number, mlws: number, hat: number, lat: number } | null>(null);
   const [rawData, setRawData] = useState<any[]>([]);
   const [fileName, setFileName] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -97,9 +100,13 @@ export default function App() {
 
   // Analysis State
   const [zThreshold, setZThreshold] = useState(3.0);
+  const [filterType, setFilterType] = useState<'ma' | 'median' | 'butterworth'>('ma');
   const [filterWindow, setFilterWindow] = useState(10);
+  const [medianWindow, setMedianWindow] = useState(11);
+  const [butterCutoff, setButterCutoff] = useState(0.1);
   const [harmonicResults, setHarmonicResults] = useState<ConstituentResult[]>([]);
   const [z0, setZ0] = useState(0);
+  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number } | null>(null);
   
   // Prediction State
   const [predStartDate, setPredStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -235,14 +242,54 @@ export default function App() {
           isOutlier: Math.abs(r.raw - mean) > (zThreshold * std)
         }));
 
-        // 3. Filter (Moving Average)
-        processed = processed.map((r, i) => {
-          const start = Math.max(0, i - Math.floor(filterWindow / 2));
-          const end = Math.min(processed.length, i + Math.ceil(filterWindow / 2));
-          const window = processed.slice(start, end).filter(p => !p.isOutlier);
-          const avg = window.length > 0 ? window.reduce((s, x) => s + x.raw, 0) / window.length : r.raw;
-          return { ...r, filtered: parseFloat(avg.toFixed(3)) }; // Round
-        });
+        // 3. Filter Logic
+        if (filterType === 'ma') {
+          processed = processed.map((r, i) => {
+            const start = Math.max(0, i - Math.floor(filterWindow / 2));
+            const end = Math.min(processed.length, i + Math.ceil(filterWindow / 2));
+            const window = processed.slice(start, end).filter(p => !p.isOutlier);
+            const avg = window.length > 0 ? window.reduce((s, x) => s + x.raw, 0) / window.length : r.raw;
+            return { ...r, filtered: parseFloat(avg.toFixed(3)) }; 
+          });
+        } else if (filterType === 'median') {
+          processed = processed.map((r, i) => {
+            const start = Math.max(0, i - Math.floor(medianWindow / 2));
+            const end = Math.min(processed.length, i + Math.ceil(medianWindow / 2));
+            const window = processed.slice(start, end).filter(p => !p.isOutlier).map(p => p.raw);
+            if (window.length === 0) return { ...r, filtered: r.raw };
+            window.sort((a, b) => a - b);
+            const median = window[Math.floor(window.length / 2)];
+            return { ...r, filtered: parseFloat(median.toFixed(3)) };
+          });
+        } else if (filterType === 'butterworth') {
+            // Simple 2nd Order Butterworth Low-pass
+            // Assumes relatively uniform sampling for this simplified implementation
+            const wc = Math.tan(Math.PI * butterCutoff);
+            const k1 = Math.SQRT2 * wc;
+            const k2 = wc * wc;
+            const a0 = 1 + k1 + k2;
+            const b0 = k2 / a0;
+            const b1 = 2 * b0;
+            const b2 = b0;
+            const a1 = 2 * (k2 - 1) / a0;
+            const a2 = (1 - k1 + k2) / a0;
+
+            const input = processed.map(r => r.raw);
+            const output = new Array(input.length).fill(0);
+            
+            for(let i = 0; i < input.length; i++) {
+                if (i < 2) {
+                    output[i] = input[i];
+                } else {
+                    output[i] = b0 * input[i] + b1 * input[i-1] + b2 * input[i-2] - a1 * output[i-1] - a2 * output[i-2];
+                }
+            }
+            
+            processed = processed.map((r, i) => ({
+                ...r,
+                filtered: parseFloat(output[i].toFixed(3))
+            }));
+        }
 
         // 4. Harmonic Analysis
         let compsToFit: string[] = [];
@@ -272,6 +319,41 @@ export default function App() {
 
         setZ0(parseFloat(fittedZ0.toFixed(3)));
         setHarmonicResults(results);
+
+        // Chart Datum Calculations
+        const am2 = results.find(r => r.comp === 'M2')?.amp || 0;
+        const as2 = results.find(r => r.comp === 'S2')?.amp || 0;
+        const sumAmp = results.reduce((acc, r) => acc + r.amp, 0);
+        
+        setDatums({
+            mhws: fittedZ0 + (am2 + as2),
+            mlws: fittedZ0 - (am2 + as2),
+            hat: fittedZ0 + sumAmp,
+            lat: fittedZ0 - sumAmp
+        });
+
+        // 5. Linear Trend Analysis
+        const validRecords = processed.filter(r => !r.isOutlier);
+        if (validRecords.length > 1) {
+            const t0 = processed[0].timestamp.getTime();
+            const x = validRecords.map(r => (r.timestamp.getTime() - t0) / 3600000);
+            const y = validRecords.map(r => r.filtered);
+            
+            const n = x.length;
+            let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+            for (let i = 0; i < n; i++) {
+                sumX += x[i];
+                sumY += y[i];
+                sumXY += x[i] * y[i];
+                sumX2 += x[i] * x[i];
+            }
+            const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+            const intercept = (sumY - slope * sumX) / n;
+            const rateYear = slope * 24 * 365.25;
+
+            setLinearTrend({ slope, intercept, rateYear });
+        }
+
         setRecords(processed);
       } catch (err) {
         console.error("Analysis error", err);
@@ -435,7 +517,7 @@ export default function App() {
         <div className="mt-auto space-y-4">
           {availableSensors.length > 0 && (
             <div className="space-y-1.5 animate-in fade-in slide-in-from-bottom-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 italic font-serif">Sensor Terdeteksi</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Sensor Terdeteksi</label>
               <select 
                 value={selectedSensor}
                 onChange={(e) => {
@@ -452,7 +534,7 @@ export default function App() {
           )}
 
           <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 italic font-serif">Constituent Set</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Constituent Set</label>
             <select 
               value={constituentSet}
               onChange={(e) => {
@@ -489,7 +571,7 @@ export default function App() {
       <main className="flex-1 flex flex-col p-8 gap-6 overflow-y-auto">
         <header className="flex justify-between items-start">
           <div>
-            <h1 className="text-2xl font-bold text-[#1e293b]">Marine Tide Analytics</h1>
+            <h1 className="text-3xl font-black text-[#1e293b] font-display tracking-tight">Marine Tide Analytics</h1>
             <p className="text-sm text-[#64748b] mt-1">
               {fileName ? `Processing: ${fileName}` : "Silakan import file CSV dengan kolom Timestamp & PRS1 (m)"}
             </p>
@@ -534,7 +616,7 @@ export default function App() {
           </div>
         ) : (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-            {activeTab === 'dashboard' && <DashboardView records={records} z0={z0} />}
+            {activeTab === 'dashboard' && <DashboardView records={records} z0={z0} trend={linearTrend} datums={datums} />}
             {activeTab === 'outlier' && (
                 <OutlierView 
                   records={records} 
@@ -545,9 +627,14 @@ export default function App() {
             )}
             {activeTab === 'filter' && (
                 <FilterView 
-                   records={records} 
+                   type={filterType}
+                   setType={setFilterType}
                    window={filterWindow} 
                    setWindow={setFilterWindow} 
+                   medianWindow={medianWindow}
+                   setMedianWindow={setMedianWindow}
+                   cutoff={butterCutoff}
+                   setCutoff={setButterCutoff}
                    onUpdate={() => runAnalysis(rawData)} 
                 />
             )}
@@ -584,40 +671,91 @@ export default function App() {
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0 }: { records: TideRecord[], z0: number }) {
+function DashboardView({ records, z0, trend, datums }: { records: TideRecord[], z0: number, trend: any, datums: any }) {
   const outliers = useMemo(() => records.filter(r => r.isOutlier).length, [records]);
+
+  const chartData = useMemo(() => {
+    if (!trend || !records.length) return records;
+    const t0 = records[0].timestamp.getTime();
+    return records.map(r => ({
+      ...r,
+      trendline: trend.slope * ((r.timestamp.getTime() - t0) / 3600000) + trend.intercept
+    }));
+  }, [records, trend]);
+
+  // Performance Optimization: Downsample to hourly for display (cuplikan data perjam)
+  const displayData = useMemo(() => {
+    if (!chartData.length) return [];
+    
+    // Sort by timestamp just in case
+    const sorted = [...chartData].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    
+    const sampled = [];
+    const seenHours = new Set();
+    
+    for (const r of sorted) {
+      const hKey = format(r.timestamp, 'yyyyMMddHH');
+      if (!seenHours.has(hKey)) {
+        seenHours.add(hKey);
+        sampled.push(r);
+      }
+    }
+    return sampled;
+  }, [chartData]);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard label="Z0 (MSL)" value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} trend="Least Squares Fit" />
-        <StatCard label="Outliers Cleaned" value={`${outliers}`} trend="Z-Score Processed" trendColor="text-amber-500" />
-        <StatCard label="Data Range" value={`${records.length}`} trend="Samples Analyzed" />
-        <StatCard label="Sampling Interval" value="Variable" trend="Auto-detected" />
+        <StatCard 
+          label="Sea Level Trend" 
+          value={`${trend ? (trend.rateYear * 1000).toFixed(2) : "0.00"} mm/thn`} 
+          trend="Linear Regression" 
+          trendColor={trend?.rateYear > 0 ? "text-red-500" : "text-emerald-500"} 
+        />
+        <StatCard label="HAT / LAT" value={`${datums ? datums.hat.toFixed(2) : '--'} / ${datums ? datums.lat.toFixed(2) : '--'}`} trend="Highest/Lowest" />
+        <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
       </div>
 
       <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="font-bold text-slate-800">Tide Level Comparison</h3>
+          <h3 className="text-lg font-black text-slate-800 px-2 font-display">Visualization & Trend Analysis</h3>
           <div className="flex gap-4 text-[10px] font-bold uppercase text-slate-400">
-              <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-[#0284c7] opacity-30"></div> Raw Input</span>
-              <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-[#f59e0b]"></div> Analyzed (Filtered)</span>
+              <span className="flex items-center gap-1.5 font-mono"><div className="w-2 h-2 rounded-full bg-[#0284c7] opacity-20"></div> Raw</span>
+              <span className="flex items-center gap-1.5 font-mono"><div className="w-2 h-2 rounded-full bg-[#f59e0b]"></div> Filtered</span>
+              <span className="flex items-center gap-1.5 font-mono"><div className="w-2 h-2 rounded-full bg-red-500"></div> Trendline</span>
           </div>
         </div>
-        <div className="h-[380px] w-full">
+        <div className="h-[420px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={records}>
+            <LineChart data={displayData} margin={{ bottom: 20 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="timeStr" tick={{fontSize: 9, fill:'#64748b'}} interval={Math.floor(records.length/10)} axisLine={false} />
+              <XAxis dataKey="timeStr" tick={{fontSize: 9, fill:'#64748b'}} interval={Math.floor(displayData.length/12)} axisLine={false} />
               <YAxis tick={{fontSize: 9, fill:'#64748b'}} axisLine={false} domain={['auto', 'auto']} />
               <Tooltip 
                 contentStyle={{fontSize: '11px', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
                 labelStyle={{fontWeight: 'bold', marginBottom: '4px'}}
               />
-              <Line type="monotone" dataKey="raw" stroke="#0284c7" strokeWidth={1} dot={false} opacity={0.2} name="Raw" />
-              <Line type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed" animationDuration={800} />
+              <Legend verticalAlign="top" height={36} wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold'}} />
+              
+              {datums && (
+                <>
+                  <ReferenceLine y={datums.hat} label={{ position: 'right', value: 'HAT', fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" strokeDasharray="3 3" />
+                  <ReferenceLine y={datums.lat} label={{ position: 'right', value: 'LAT', fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" strokeDasharray="3 3" />
+                  <ReferenceLine y={z0} label={{ position: 'right', value: 'MSL', fontSize: 9, fill: '#0284c7' }} stroke="#0284c7" strokeDasharray="5 5" opacity={0.5} />
+                </>
+              )}
+
+              <Line type="monotone" dataKey="raw" stroke="#0284c7" strokeWidth={1} dot={false} opacity={0.15} name="Raw Level" />
+              <Line type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
+              <Line type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
+              
+              <Brush dataKey="timeStr" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
             </LineChart>
           </ResponsiveContainer>
+        </div>
+        <div className="mt-4 flex items-center gap-2 justify-center">
+             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest">Visual Optimization: Hourly Sampling Active</div>
         </div>
       </div>
     </div>
@@ -640,7 +778,7 @@ function OutlierView({ records, threshold, setThreshold, onUpdate }: any) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
         <div className="space-y-6">
           <div className="flex justify-between items-end">
-            <label className="text-sm font-bold text-slate-700 italic font-serif">Threshold Sensitivitas</label>
+            <label className="text-xs font-black text-slate-700 font-display uppercase tracking-wider">Threshold Sensitivitas</label>
             <span className="text-2xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
           </div>
           <input 
@@ -676,40 +814,114 @@ function OutlierView({ records, threshold, setThreshold, onUpdate }: any) {
   );
 }
 
-function FilterView({ window, setWindow, onUpdate }: any) {
+function FilterView({ type, setType, window, setWindow, medianWindow, setMedianWindow, cutoff, setCutoff, onUpdate }: any) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 space-y-8 shadow-sm">
+    <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 space-y-10 shadow-sm animate-in fade-in duration-500">
       <div className="flex items-center gap-5">
         <div className="p-4 bg-sky-50 rounded-2xl text-[#0284c7] shadow-inner">
           <Radio size={28} />
         </div>
         <div>
-          <h2 className="text-xl font-black text-slate-800">Sinyal Smoothing (Low Pass)</h2>
-          <p className="text-sm text-slate-500">Menghilangkan gelombang pendek dan noise untuk mendapatkan profil pasut yang mulus.</p>
+          <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Signal Analysis & Filtering</h2>
+          <p className="text-sm text-slate-500">Pilih algoritma pembersihan sinyal untuk mengisolasi profil pasut utama.</p>
         </div>
       </div>
 
-      <div className="max-w-md space-y-8">
-        <div className="space-y-6">
-          <div className="flex justify-between items-end">
-            <label className="text-sm font-bold text-slate-700 italic font-serif">Moving Average Window</label>
-            <span className="text-2xl font-black text-[#0284c7] font-mono">{isNaN(window) ? 0 : window} pts</span>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Method Selection */}
+        <div className="space-y-4">
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Pilih Algoritma</label>
+          <div className="flex flex-col gap-2">
+            {[
+              { id: 'ma', name: 'Moving Average', icon: <Clock size={14} />, desc: 'Paling umum, merata-ratakan data dalam rentang waktu.' },
+              { id: 'median', name: 'Median Filter', icon: <Radio size={14} />, desc: 'Sangat efektif untuk menghilangkan spike tajam/error sensor.' },
+              { id: 'butterworth', name: 'Butterworth IIR', icon: <RefreshCw size={14} />, desc: 'Filter elektronik digital untuk memotong frekuensi tinggi.' }
+            ].map(m => (
+              <button
+                key={m.id}
+                onClick={() => setType(m.id)}
+                className={cn(
+                  "flex flex-col items-start gap-1 p-4 rounded-xl border-2 transition-all text-left group",
+                  type === m.id ? "border-[#0284c7] bg-[#eff6ff]" : "border-slate-100 hover:border-slate-200"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={cn(type === m.id ? "text-[#0284c7]" : "text-slate-400 group-hover:text-slate-600")}>
+                    {m.icon}
+                  </span>
+                  <span className={cn("text-sm font-black", type === m.id ? "text-[#0284c7]" : "text-slate-600 font-bold")}>{m.name}</span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">{m.desc}</p>
+              </button>
+            ))}
           </div>
-          <input 
-            type="range" min="1" max="100" step="1" 
-            value={isNaN(window) ? 10 : window} 
-            onChange={(e) => {
-              const val = parseInt(e.target.value);
-              setWindow(isNaN(val) ? 10 : val);
-            }}
-            className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
-          />
-          <button 
-            onClick={onUpdate}
-            className="w-full py-4 bg-[#0284c7] text-white rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-[#0ea5e9] transition-all shadow-lg"
-          >
-            <RefreshCw size={20} /> Terapkan Filter Low Pass
-          </button>
+        </div>
+
+        {/* Custom Parameters */}
+        <div className="lg:col-span-2 bg-slate-50 rounded-2xl p-8 border border-slate-100 space-y-8">
+          {type === 'ma' && (
+            <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+              <div className="flex justify-between items-end">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-black text-slate-800 uppercase font-display">Window Size (pts)</h4>
+                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai 12-24 untuk data per jam guna mereduksi noise sinyal diurnal.</p>
+                </div>
+                <span className="text-2xl font-black text-[#0284c7] font-mono">{window}</span>
+              </div>
+              <input 
+                type="range" min="1" max="100" step="1" 
+                value={window} 
+                onChange={(e) => setWindow(parseInt(e.target.value))}
+                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+              />
+            </div>
+          )}
+
+          {type === 'median' && (
+            <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+              <div className="flex justify-between items-end">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-black text-slate-800 uppercase font-display">Median Kernel (pts)</h4>
+                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai ganjil (3, 5, 7). Efektif menjaga tepian sinyal sambil membuang noise salt-and-pepper.</p>
+                </div>
+                <span className="text-2xl font-black text-[#0284c7] font-mono">{medianWindow}</span>
+              </div>
+              <input 
+                type="range" min="3" max="51" step="2" 
+                value={medianWindow} 
+                onChange={(e) => setMedianWindow(parseInt(e.target.value))}
+                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+              />
+            </div>
+          )}
+
+          {type === 'butterworth' && (
+            <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+               <div className="flex justify-between items-end">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-black text-slate-800 uppercase font-display">Cutoff Frequency (Norm)</h4>
+                  <p className="text-[10px] text-slate-500 max-w-xs">0.01 - 0.5. Nilai rendah (0.05) memotong frekuensi tinggi secara tajam. Nilai tinggi membiarkan lebih banyak detail.</p>
+                </div>
+                <span className="text-2xl font-black text-[#0284c7] font-mono">{cutoff.toFixed(3)}</span>
+              </div>
+              <input 
+                type="range" min="0.001" max="0.499" step="0.001" 
+                value={cutoff} 
+                onChange={(e) => setCutoff(parseFloat(e.target.value))}
+                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+              />
+            </div>
+          )}
+
+          <div className="pt-4">
+            <button 
+              onClick={onUpdate}
+              className="w-full py-4 bg-[#1e293b] text-white rounded-2xl font-extrabold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-xl shadow-slate-200 active:scale-95"
+            >
+              <RefreshCw size={20} /> Jalankan Filter Terpilih
+            </button>
+            <p className="text-[10px] text-center text-slate-400 mt-4 font-bold uppercase tracking-widest italic">Setiap perubahan parameter memerlukan kalkulasi ulang</p>
+          </div>
         </div>
       </div>
     </div>
@@ -721,10 +933,10 @@ function HarmonicView({ results }: { results: ConstituentResult[] }) {
   
   return (
     <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm overflow-hidden">
-      <h3 className="text-lg font-black text-slate-800 mb-6 px-2">Konstanta Harmonik (Least Squares Fit)</h3>
+      <h3 className="text-lg font-black text-slate-800 mb-6 px-2 font-display">Konstanta Harmonik (Least Squares Fit)</h3>
       <div className="overflow-x-auto rounded-xl border border-slate-100">
         <table className="w-full text-sm text-left">
-          <thead className="text-slate-500 bg-slate-50 uppercase text-[10px] font-black tracking-widest font-serif italic">
+          <thead className="text-slate-500 bg-slate-50 uppercase text-[10px] font-black tracking-widest font-display">
             <tr>
               <th className="py-4 px-6">Component</th>
               <th className="py-4 px-6">Definition</th>
@@ -739,8 +951,8 @@ function HarmonicView({ results }: { results: ConstituentResult[] }) {
                 <td className="py-4 px-6 font-black text-[#0284c7]">{r.comp}</td>
                 <td className="py-4 px-6 text-slate-500 text-xs">{r.desc}</td>
                 <td className="py-4 px-6 font-mono text-[11px] text-slate-400">{r.freq.toFixed(8)}</td>
-                <td className="py-4 px-6 font-bold text-slate-800 font-mono">{r.amp.toFixed(4)}</td>
-                <td className="py-4 px-6 font-bold text-slate-800 font-mono">{r.phase.toFixed(2)}°</td>
+                <td className="py-4 px-6 font-bold text-slate-800 font-mono">{r.amp.toFixed(3)}</td>
+                <td className="py-4 px-6 font-bold text-slate-800 font-mono">{r.phase.toFixed(3)}°</td>
               </tr>
             ))}
           </tbody>
@@ -766,7 +978,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
           <div className="space-y-3">
-            <label className="text-sm font-bold text-slate-700 italic font-serif">Tanggal Mulai</label>
+            <label className="text-xs font-black text-slate-700 font-display uppercase tracking-wider">Tanggal Mulai</label>
             <div className="relative group">
               <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0284c7] transition-colors" size={20} />
               <input 
@@ -778,7 +990,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
             </div>
           </div>
           <div className="space-y-3">
-            <label className="text-sm font-bold text-slate-700 italic font-serif">Tanggal Selesai</label>
+            <label className="text-xs font-black text-slate-700 font-display uppercase tracking-wider">Tanggal Selesai</label>
             <div className="relative group">
               <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0284c7] transition-colors" size={20} />
               <input 
@@ -833,21 +1045,22 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           </div>
           <div className="h-[400px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={predictions}>
-                <defs>
-                  <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0284c7" stopOpacity={0.2}/>
-                    <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(predictions.length/10)} axisLine={false} />
-                <YAxis tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} domain={['auto', 'auto']} />
-                <Tooltip 
-                  contentStyle={{fontSize: '11px', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
-                />
-                <Area type="monotone" dataKey="value" stroke="#0284c7" strokeWidth={3} fillOpacity={1} fill="url(#colorVal)" animationDuration={1000} />
-              </AreaChart>
+              <AreaChart data={predictions} margin={{ bottom: 20 }}>
+              <defs>
+                <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#0284c7" stopOpacity={0.2}/>
+                  <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(predictions.length/12)} axisLine={false} />
+              <YAxis tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} domain={['auto', 'auto']} />
+              <Tooltip 
+                contentStyle={{fontSize: '11px', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
+              />
+              <Area type="monotone" dataKey="value" stroke="#0284c7" strokeWidth={3} fillOpacity={1} fill="url(#colorVal)" animationDuration={1000} />
+              <Brush dataKey="time" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
+            </AreaChart>
             </ResponsiveContainer>
           </div>
           <div className="mt-6 border-t border-slate-100 pt-6">
@@ -868,8 +1081,8 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
 function StatCard({ label, value, trend, trendColor }: { label: string, value: string, trend: string, trendColor?: string }) {
   return (
     <div className="bg-white p-6 rounded-2xl border border-[#e2e8f0] shadow-sm hover:shadow-md transition-shadow flex flex-col gap-1">
-      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic font-serif">{label}</div>
-      <div className="text-2xl font-black text-slate-800 font-mono">{value}</div>
+      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-display">{label}</div>
+      <div className="text-2xl font-black text-slate-800 font-mono tracking-tighter">{value}</div>
       <div className={cn("text-[10px] mt-1 font-bold", trendColor || "text-slate-400")}>{trend}</div>
     </div>
   );
