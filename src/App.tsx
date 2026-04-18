@@ -85,6 +85,36 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   'Sa': { f: 0.000114079, d: 'Solar annual' }
 };
 
+const getMoonEvents = (data: any[]) => {
+  const events = [];
+  let lastPhaseType = -1;
+  for (let i = 0; i < data.length; i++) {
+      const p = data[i];
+      if (!p.timestamp) continue;
+      const lud = 29.53058867;
+      const knownNewMoon = new Date(Date.UTC(2000, 0, 6, 18, 14)).getTime();
+      const days = (p.timestamp.getTime() - knownNewMoon) / 86400000;
+      const phase = ((days % lud) + lud) % lud;
+      const ratio = phase / lud;
+      
+      let currentType = -1;
+      if (ratio > 0.985 || ratio < 0.015) currentType = 0; // New
+      else if (ratio > 0.235 && ratio < 0.265) currentType = 1; // 1st Quarter
+      else if (ratio > 0.485 && ratio < 0.515) currentType = 2; // Full
+      else if (ratio > 0.735 && ratio < 0.765) currentType = 3; // 3rd Quarter
+
+      if (currentType !== -1 && currentType !== lastPhaseType) {
+          const symbol = currentType === 0 ? '🌑' : currentType === 1 ? '🌓' : currentType === 2 ? '🌕' : '🌗';
+          const phaseName = currentType === 0 ? 'New Moon' : currentType === 1 ? 'First Quarter' : currentType === 2 ? 'Full Moon' : 'Last Quarter';
+          events.push({ time: p.timeStr || p.time, symbol, phaseName });
+          lastPhaseType = currentType;
+      } else if (currentType === -1) {
+          lastPhaseType = -1;
+      }
+  }
+  return events;
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [records, setRecords] = useState<TideRecord[]>([]);
@@ -419,6 +449,7 @@ export default function App() {
 
             const predData = [];
             const t0 = records[0].timestamp.getTime();
+            const dailyStats: Record<string, any> = {};
 
             const calcValue = (d: Date) => {
                 const t = (d.getTime() - t0) / 3600000;
@@ -431,55 +462,30 @@ export default function App() {
                 return val;
             };
 
-            if (diffDays > 365) {
-                // EXTREMES ONLY MODE (> 1 Year)
-                // Iterate day by day, sample every hour within that day to find extremes
-                for (let dIdx = 0; dIdx <= diffDays; dIdx++) {
-                    const dayStart = new Date(start.getTime() + dIdx * 24 * 3600000);
-                    let dayMax = -Infinity;
-                    let dayMin = Infinity;
-                    let maxDate = dayStart;
-                    let minDate = dayStart;
+            for (let h = 0; h <= diffHours; h++) {
+                const d = new Date(start.getTime() + h * 3600000);
+                const val = calcValue(d);
+                const dayKey = format(d, 'yyyyMMdd');
 
-                    for (let h = 0; h < 24; h++) {
-                        const checkTime = new Date(dayStart.getTime() + h * 3600000);
-                        if (checkTime > end) break;
-                        const val = calcValue(checkTime);
-                        if (val > dayMax) { dayMax = val; maxDate = checkTime; }
-                        if (val < dayMin) { dayMin = val; minDate = checkTime; }
-                    }
+                if (!dailyStats[dayKey]) dailyStats[dayKey] = { max: -Infinity, min: Infinity };
+                if (val > dailyStats[dayKey].max) dailyStats[dayKey].max = val;
+                if (val < dailyStats[dayKey].min) dailyStats[dayKey].min = val;
 
-                    // Push extremes in chronological order
-                    const extremes = [
-                        { date: minDate, val: dayMin },
-                        { date: maxDate, val: dayMax }
-                    ].sort((a,b) => a.date.getTime() - b.date.getTime());
-
-                    extremes.forEach(ex => {
-                         predData.push({
-                            time: format(ex.date, 'ddMMyy'),
-                            fullTime: format(ex.date, 'dd/MM/yy HH:mm'),
-                            value: parseFloat(ex.val.toFixed(3)),
-                            timestamp: ex.date,
-                            dayKey: format(ex.date, 'yyyyMMdd')
-                        });
-                    });
-                }
-            } else {
-                // HOURLY MODE (<= 1 Year)
-                for (let h = 0; h <= diffHours; h++) {
-                    const d = new Date(start.getTime() + h * 3600000);
-                    const val = calcValue(d);
-
-                    predData.push({
-                        time: format(d, 'ddMMyy'),
-                        fullTime: format(d, 'dd/MM/yy HH:mm'),
-                        value: parseFloat(val.toFixed(3)),
-                        timestamp: d,
-                        dayKey: format(d, 'yyyyMMdd')
-                    });
-                }
+                predData.push({
+                    time: format(d, 'ddMMyy'),
+                    fullTime: format(d, 'dd/MM/yy HH:mm'),
+                    value: parseFloat(val.toFixed(3)),
+                    timestamp: d,
+                    dayKey: dayKey
+                });
             }
+
+            // Assign daily extremes
+            for (const p of predData) {
+                p.dayMax = dailyStats[p.dayKey].max;
+                p.dayMin = dailyStats[p.dayKey].min;
+            }
+
             setPredictions(predData);
         } catch (err) {
             console.error("Prediction failed:", err);
@@ -774,6 +780,8 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
     return sampled;
   }, [chartData]);
 
+  const moonEvents = useMemo(() => getMoonEvents(displayData), [displayData]);
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -816,6 +824,10 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                   <ReferenceLine y={z0} label={{ position: 'right', value: 'MSL', fontSize: 9, fill: '#0284c7' }} stroke="#0284c7" strokeDasharray="5 5" opacity={0.5} />
                 </>
               )}
+
+              {moonEvents.map((me, i) => (
+                <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 16 }} />
+              ))}
 
               <Line type="monotone" dataKey="raw" stroke="#0284c7" strokeWidth={1} dot={false} opacity={0.15} name="Raw Level" />
               <Line type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
@@ -1040,16 +1052,18 @@ const PredictionTooltip = ({ active, payload }: any) => {
       <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-xl z-50">
         <p className="font-bold text-slate-800 text-[11px] mb-1">{data.fullTime}</p>
         <p className="text-[#0284c7] font-mono text-xs mb-2">Level: {data.value.toFixed(3)} m</p>
-        <div className="pt-2 border-t border-slate-100 flex gap-4 text-[10px]">
-            <div>
-                <span className="text-slate-400 block uppercase tracking-wider">Harian Max</span>
-                <span className="text-emerald-600 font-bold font-mono">{data.dayMax?.toFixed(3)} m</span>
+        {(data.dayMax !== undefined && data.dayMin !== undefined) && (
+            <div className="pt-2 border-t border-slate-100 flex gap-4 text-[10px]">
+                <div>
+                    <span className="text-slate-400 block uppercase tracking-wider">Harian Max</span>
+                    <span className="text-emerald-600 font-bold font-mono">{data.dayMax.toFixed(3)} m</span>
+                </div>
+                <div>
+                    <span className="text-slate-400 block uppercase tracking-wider">Harian Min</span>
+                    <span className="text-amber-600 font-bold font-mono">{data.dayMin.toFixed(3)} m</span>
+                </div>
             </div>
-            <div>
-                <span className="text-slate-400 block uppercase tracking-wider">Harian Min</span>
-                <span className="text-amber-600 font-bold font-mono">{data.dayMin?.toFixed(3)} m</span>
-            </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -1057,6 +1071,10 @@ const PredictionTooltip = ({ active, payload }: any) => {
 };
 
 function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title }: any) {
+  // Limit UI rendering to maximum 1 year (8760 hours)
+  const displayPreds = useMemo(() => predictions.slice(0, 365 * 24), [predictions]);
+  const moonEvents = useMemo(() => getMoonEvents(displayPreds), [displayPreds]);
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 shadow-sm">
@@ -1139,7 +1157,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           </div>
           <div className="h-[400px] w-full" style={{ willChange: 'transform, opacity', transform: 'translateZ(0)' }}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={predictions} margin={{ bottom: 20 }}>
+              <AreaChart data={displayPreds} margin={{ bottom: 20 }}>
               <defs>
                 <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#0284c7" stopOpacity={0.2}/>
@@ -1147,9 +1165,14 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(predictions.length/12)} axisLine={false} />
+              <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(displayPreds.length/12)} axisLine={false} />
               <YAxis tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} domain={['auto', 'auto']} />
               <Tooltip content={<PredictionTooltip />} />
+              
+              {moonEvents.map((me, i) => (
+                <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 16 }} />
+              ))}
+
               <Area 
                 type="monotone" 
                 dataKey="value" 
@@ -1165,6 +1188,11 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
             </AreaChart>
             </ResponsiveContainer>
           </div>
+          {predictions.length > (365 * 24) && (
+             <div className="mt-4 px-3 py-1.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded-lg uppercase tracking-widest text-center border border-amber-100 flex items-center justify-center gap-2">
+                 <AlertCircle size={14} /> Tampilan Grafik Dibatasi 1 Tahun Pertama untuk Performa ({predictions.length.toLocaleString()} Jam Data Terhitung BISA DI-EXPORT)
+             </div>
+          )}
           <div className="mt-6 border-t border-slate-100 pt-6">
              <div className="flex items-center gap-2 text-amber-500 mb-4 px-2">
                 <AlertCircle size={16} />
