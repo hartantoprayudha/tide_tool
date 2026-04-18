@@ -9,7 +9,25 @@ Aplikasi BIG Tidal Analysis adalah platform analisis deret waktu pasang surut ai
 
 ---
 
-## 1. Petunjuk Penggunaan (WebApp Dashboard)
+## Unduh Contoh Data Observasi 
+
+Untuk mulai menggunakan aplikasi ini, Anda dapat mengunduh format contoh data CSV pasut laut yang telah kami sediakan:
+[📥 Unduh Contoh Data Pasut (CSV)](/examples/tide_data.csv)
+
+---
+
+## 1. Quick Start Local Server (Untuk Pengguna Pemula)
+
+Bagi pengguna OS Windows yang ingin menjalankan seluruh aplikasi ini secara lokal di PC masing-masing (tanpa API, tanpa server luar):
+
+1. **Unduh (Clone) / Download ZIP** dari repository ini.
+2. Pastikan komputer Anda telah terinstal **Node.js** versi stabil.
+3. Klik ganda pada berkas **`Start-Tide-Tools.bat`**.
+4. Sistem otomatis akan mengunduh seluruh dependensi (*Node.js runtime*) dan seketika membuka antarmuka BIG Tidal Analytics langsung di browser Anda secara *offline* (`http://localhost:3000`).
+
+---
+
+## 2. Petunjuk Penggunaan (WebApp Dashboard)
 
 - **Akses Dashboard**: Cukup memuat file observasi Anda berformat `.csv` (memiliki kolom Timestamp & Sensor).
 - **Interactive Toggles**: Pada bagian grafik/chart, Anda dapat mengklik legenda (contoh: *Analyzed Level* atau *Prediction*) untuk menampilkan atau menyembunyikannya.
@@ -20,7 +38,7 @@ Aplikasi BIG Tidal Analysis adalah platform analisis deret waktu pasang surut ai
 
 ---
 
-## 2. Petunjuk Penggunaan (Local Script / Batching)
+## 3. Petunjuk Penggunaan (Local Script / Batching)
 
 Bagi Anda yang ingin menjalankan analisis masif (batching) secara sistematis tanpa antarmuka web, Anda dapat menggunakan modul Python yang disediakan.
 
@@ -46,7 +64,7 @@ print(values)
 
 ---
 
-## 3. Integrasi Sistem (Web API)
+## 4. Integrasi Sistem (Web API)
 
 Untuk kebutuhan automasi *pipeline* data geospasial, sistem *machine learning*, atau integrasi ke dasbor eksternal, BIG Tidal Analysis menyediakan jalur Web API (Representational State Transfer). 
 
