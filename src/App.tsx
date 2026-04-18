@@ -398,7 +398,8 @@ export default function App() {
                 if (gapDurationMins <= 15) {
                     for (let j = startGap; j < endGap; j++) {
                         const fraction = (j - startGap + 1) / (gapLength + 1);
-                        const interp = prevVal + fraction * (nextVal - prevVal);
+                        const mu2 = (1 - Math.cos(fraction * Math.PI)) / 2;
+                        const interp = prevVal * (1 - mu2) + nextVal * mu2;
                         
                         cleanedInput[j] = parseFloat(interp.toFixed(3));
                         processed[j].raw = cleanedInput[j];
@@ -408,6 +409,7 @@ export default function App() {
                     for (let j = startGap; j < endGap; j++) {
                         const fraction = (j - startGap + 1) / (gapLength + 1);
                         cleanedInput[j] = prevVal + fraction * (nextVal - prevVal);
+                        (processed[j] as any)._longGap = true;
                     }
                 }
                 i = endGap;
@@ -460,15 +462,24 @@ export default function App() {
             }));
         }
 
+        // D. Apply Long Gap NaNs to filtered output
+        processed = processed.map(r => {
+            if ((r as any)._longGap) {
+                return { ...r, filtered: NaN };
+            }
+            return r;
+        });
+
         // 4. Final Precise Harmonic Analysis (on the mathematically cleaned and filtered data)
-        const t_hours = processed.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
-        const y_vals = processed.map(r => r.filtered);
+        const validForFinal = processed.filter(r => !isNaN(r.filtered));
+        const t_hours = validForFinal.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
+        const y_vals = validForFinal.map(r => r.filtered);
         
         const solution = solveLeastSquares(t_hours, y_vals, compsToFit);
-        const fittedZ0 = solution[0];
+        const fittedZ0 = solution[0] || 0;
         const results: ConstituentResult[] = compsToFit.map((c, i) => {
-            const a = solution[1 + 2 * i];
-            const b = solution[1 + 2 * i + 1];
+            const a = solution[1 + 2 * i] || 0;
+            const b = solution[1 + 2 * i + 1] || 0;
             const amp = Math.sqrt(a * a + b * b);
             let phase = Math.atan2(b, a) * (180 / Math.PI);
             if (phase < 0) phase += 360;
@@ -497,7 +508,7 @@ export default function App() {
         });
 
         // 5. Linear Trend Analysis
-        const validRecords = processed.filter(r => !r.isOutlier);
+        const validRecords = processed.filter(r => !isNaN(r.filtered) && !r.isOutlier);
         if (validRecords.length > 1) {
             const t0 = processed[0].timestamp.getTime();
             const x = validRecords.map(r => (r.timestamp.getTime() - t0) / 3600000);
@@ -1080,16 +1091,16 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
         <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
       </div>
 
-      <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
+      <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-black text-slate-800 px-2 font-display">{title}</h3>
-          <div className="flex gap-2">
+          <div className="flex gap-2 export-exclude">
             <button onClick={() => handleDownload('png')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
             <button onClick={() => handleDownload('jpeg')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
             <button onClick={() => handleDownload('pdf')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
           </div>
         </div>
-        <div ref={chartRef} className="relative h-[540px] w-full group bg-white pt-2 pb-4">
+        <div className="relative h-[540px] w-full group bg-white pt-2 pb-4">
           <div className="export-exclude absolute right-2 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
             <button onClick={() => setVZoom(z => z * 1.25)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom In Vertical">
               <ZoomIn size={14} />
