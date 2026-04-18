@@ -1123,24 +1123,38 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                 cursor={{ stroke: '#94a3b8', strokeWidth: 1.5, strokeDasharray: '4 4' }}
                 content={({ active, payload, label }) => {
                   if (active && payload && payload.length) {
+                    const data = payload[0].payload;
                     return (
-                      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5 pointer-events-none">
+                      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5 pointer-events-none min-w-[200px]">
                         <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">Waktu Pengamatan: {label}</p>
                         <div className="space-y-2 w-full">
-                          {payload.map((entry: any, index: number) => {
-                            if (entry.dataKey !== 'raw' && entry.dataKey !== 'filtered') return null;
-                            return (
-                              <div key={index} className="flex items-center justify-between gap-6 text-[11px]">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: entry.color }} />
-                                  <span className="font-semibold text-slate-600">{entry.name}</span>
-                                </div>
-                                <span className="font-bold text-slate-800 font-mono">
-                                  {typeof entry.value === 'number' ? entry.value.toFixed(3) : entry.value} m
-                                </span>
-                              </div>
-                            );
-                          })}
+                          <div className="flex items-center justify-between gap-6 text-[11px]">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2.5 h-2.5 rounded-sm bg-[#f59e0b]" />
+                              <span className="font-semibold text-slate-600">Analyzed Level</span>
+                            </div>
+                            <span className="font-bold text-slate-800 font-mono">
+                              {typeof data.filtered === 'number' ? data.filtered.toFixed(3) : (data.filtered || 'NaN')} m
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-6 text-[11px]">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2.5 h-2.5 rounded-sm bg-[#94a3b8]" />
+                              <span className="font-semibold text-slate-600">Raw Level</span>
+                            </div>
+                            <span className="font-bold text-slate-800 font-mono">
+                              {typeof data.raw === 'number' && !isNaN(data.raw) ? data.raw.toFixed(3) : 'NaN'} m
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-6 text-[11px]">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2.5 h-2.5 rounded-sm bg-[#ef4444]" />
+                              <span className="font-semibold text-slate-600">Tren Linear</span>
+                            </div>
+                            <span className="font-bold text-slate-800 font-mono">
+                              {typeof data.trendline === 'number' ? data.trendline.toFixed(3) : (data.trendline || 'NaN')} m
+                            </span>
+                          </div>
                         </div>
                       </div>
                     );
