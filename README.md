@@ -1,61 +1,46 @@
 # TideScript - Marine Tide Analytics
 
-TideScript adalah aplikasi analisis deret waktu pasang surut air laut yang kuat, dirancang untuk memproses data dari berbagai sensor tekanan (PRS1, PRS2, PRS3) dan memberikan hasil analisis harmonik, tren linier, serta prediksi masa depan.
-
-## Fitur Utama
-- **Import CSV & Deteksi Otomatis**: Mendeteksi kolom sensor ketinggian (m) dan waktu secara otomatis.
-- **Pembersihan Data (Outlier)**: Menggunakan algoritma Z-Score untuk membuang data sasar.
-- **Digital Filtering**: Opsi Moving Average, Median Filter, dan Butterworth Low-pass Filter.
-- **Analisis Harmonik**: Mendukung 4, 9, hingga konstanta UKHO Total Tide Plus menggunakan metode Least Squares.
-- **Analisis Tren**: Menghitung laju kenaikan muka air laut (Sea Level Rise) dalam mm/tahun.
-- **Prediksi Pasut**: Simulasi ketinggian air laut di masa depan berdasarkan konstanta harmonik.
-- **Optimasi Grafik**: Visualisasi ringan dengan cuplikan data per jam untuk performa tinggi.
+TideScript adalah aplikasi analisis deret waktu pasang surut air laut yang dirancang untuk memproses data dari berbagai sensor tekanan dan memberikan hasil analisis harmonik serta prediksi masa depan.
 
 ---
 
-## Menjalankan Analisis via Python (Tanpa Dashboard)
+## 1. Petunjuk Penggunaan (Local Script)
+Bagi Anda yang ingin menjalankan analisis langsung di komputer tanpa antarmuka web.
 
-Bagi pengguna yang ingin menjalankan analisis secara lokal tanpa antarmuka web, kami menyediakan script Python pendukung.
-
-### Persiapan
-Pastikan Anda memiliki Python 3.x dan pustaka yang diperlukan:
+### Persiapan:
 ```bash
 pip install pandas numpy scipy matplotlib
 ```
 
-### Script Utama (`tide_analysis.py`)
-Gunakan script ini untuk memproses file CSV Anda. Script ini mengimplementasikan logika yang sama dengan aplikasi web (Least Squares Harmonic Analysis).
-
-#### Contoh Penggunaan:
+### Cara Jalan:
+Gunakan file `tide_analysis.py` sebagai modul utama.
 ```python
 import pandas as pd
-from tide_analysis import load_data, detect_outliers, harmonic_analysis, predict_tide, visualize
+from tide_analysis import load_data, harmonic_analysis, predict_tide
 
-# 1. Load Data
-df = load_data('tide_data.csv', date_col='Timestamp', value_col='PRS1 (m)')
+# Load & Analisis
+df = load_data('data.csv', value_col='PRS1 (m)')
+results, z0 = harmonic_analysis(df, num_components=9)
 
-# 2. Pre-processing (Remove Outliers)
-df['is_outlier'] = detect_outliers(df['PRS1 (m)'])
-df_clean = df[~df['is_outlier']].copy()
-
-# 3. Harmonic Analysis (Least Squares)
-results, z0 = harmonic_analysis(df_clean, num_components=9)
-print(f"Mean Sea Level (Z0): {z0:.3f} m")
-
-# 4. Tidal Prediction (Next 7 Days)
-start_pred = df[df.columns[0]].max()
-end_pred = start_pred + pd.Timedelta(days=7)
-times, values = predict_tide(start_pred, end_pred, 60, results, z0)
-
-# 5. Visualisasi
-visualize(df_clean, 'Timestamp', 'PRS1 (m)', 'PRS1 (m)', title="Analisis Pasut Lokal")
+# Prediksi 7 hari kedepan
+times, values = predict_tide(df['Timestamp'].max(), df['Timestamp'].max() + pd.Timedelta(days=7), 60, results, z0)
+print(values)
 ```
 
-### Catatan Teknis
-Perhitungan pada aplikasi ini didasarkan pada persamaan:
-$$h(t) = Z_0 + \sum_{i=1}^{n} A_i \cos(\omega_i t - \phi_i)$$
-dengan:
-- $Z_0$: Mean Sea Level.
-- $A_i$: Amplitudo komponen ke-$i$.
-- $\omega_i$: Frekuensi sudut komponen ke-$i$.
-- $\phi_i$: Fase komponen ke-$i$.
+---
+
+## 2. Petunjuk Penggunaan (API)
+Aplikasi ini berjalan sebagai Single Page Application (SPA). Jika Anda ingin mengintegrasikannya ke sistem lain via web:
+
+1. **Upload**: Kirim file CSV Anda melalui antarmuka web untuk diproses di sisi klien.
+2. **Export**: Klik tombol **Export CSV** atau **Generate Text Report** untuk mendapatkan hasil analisis dalam format terstruktur yang siap digunakan oleh API/Sistem lain.
+
+---
+
+## Fitur Unggulan:
+- **Auto-Sensor Detection**: Mendeteksi kolom `(m)` dan `Timestamp` secara otomatis.
+- **Smart Filtering**: Pilihan algoritma Moving Average, Median, dan Butterworth.
+- **Performance Optimized**: 
+  - Tampilan dashboard menggunakan cuplikan data per jam.
+  - Untuk prediksi > 1 tahun, grafik hanya menampilkan nilai harian (pasang tertinggi & surut terendah) agar tetap ringan.
+- **Customization**: Nama grafik dapat diubah sesuai kebutuhan pengguna.

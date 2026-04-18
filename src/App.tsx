@@ -112,6 +112,7 @@ export default function App() {
   const [predStartDate, setPredStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [predEndDate, setPredEndDate] = useState(format(addDays(new Date(), 7), 'yyyy-MM-dd'));
   const [predictions, setPredictions] = useState<any[]>([]);
+  const [chartTitle, setChartTitle] = useState("Tide Analysis Visualization");
 
   // --- CORE ANALYTICS ENGINE (Client-side) ---
 
@@ -419,9 +420,11 @@ export default function App() {
                 });
 
                 predData.push({
-                    time: format(d, 'dd/MM HH:mm'),
+                    time: format(d, 'ddMMyy'),
+                    fullTime: format(d, 'dd/MM/yy HH:mm'),
                     value: parseFloat(val.toFixed(3)),
-                    timestamp: d
+                    timestamp: d,
+                    dayKey: format(d, 'yyyyMMdd')
                 });
             }
             setPredictions(predData);
@@ -551,6 +554,17 @@ export default function App() {
             </select>
           </div>
 
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Custom Chart Title</label>
+            <input 
+              type="text"
+              value={chartTitle}
+              onChange={(e) => setChartTitle(e.target.value)}
+              placeholder="Enter chart name..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 placeholder:text-slate-400 mb-2"
+            />
+          </div>
+
           <button 
             onClick={() => fileInputRef.current?.click()}
             className="w-full flex items-center justify-center gap-2 py-3 bg-[#0284c7] text-white rounded-xl text-xs font-bold hover:bg-[#0ea5e9] transition-all shadow-lg shadow-sky-100"
@@ -616,7 +630,7 @@ export default function App() {
           </div>
         ) : (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-            {activeTab === 'dashboard' && <DashboardView records={records} z0={z0} trend={linearTrend} datums={datums} />}
+            {activeTab === 'dashboard' && <DashboardView records={records} z0={z0} trend={linearTrend} datums={datums} title={chartTitle} />}
             {activeTab === 'outlier' && (
                 <OutlierView 
                   records={records} 
@@ -649,6 +663,7 @@ export default function App() {
                     onGenerate={generatePredictions}
                     onExport={exportPredictions}
                     isLoading={isLoading}
+                    title={chartTitle}
                 />
             )}
             
@@ -671,7 +686,7 @@ export default function App() {
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums }: { records: TideRecord[], z0: number, trend: any, datums: any }) {
+function DashboardView({ records, z0, trend, datums, title }: { records: TideRecord[], z0: number, trend: any, datums: any, title: string }) {
   const outliers = useMemo(() => records.filter(r => r.isOutlier).length, [records]);
 
   const chartData = useMemo(() => {
@@ -719,7 +734,7 @@ function DashboardView({ records, z0, trend, datums }: { records: TideRecord[], 
 
       <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-black text-slate-800 px-2 font-display">Visualization & Trend Analysis</h3>
+          <h3 className="text-lg font-black text-slate-800 px-2 font-display">{title}</h3>
           <div className="flex gap-4 text-[10px] font-bold uppercase text-slate-400">
               <span className="flex items-center gap-1.5 font-mono"><div className="w-2 h-2 rounded-full bg-[#0284c7] opacity-20"></div> Raw</span>
               <span className="flex items-center gap-1.5 font-mono"><div className="w-2 h-2 rounded-full bg-[#f59e0b]"></div> Filtered</span>
@@ -962,7 +977,38 @@ function HarmonicView({ results }: { results: ConstituentResult[] }) {
   );
 }
 
-function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading }: any) {
+function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title }: any) {
+  const optimizedData = useMemo(() => {
+    if (!predictions.length) return [];
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+
+    // If duration > 1 year (365 days), display ONLY daily extremes
+    if (diffDays > 365) {
+        const dailyGroups: Record<string, any[]> = {};
+        predictions.forEach((p: any) => {
+            if (!dailyGroups[p.dayKey]) dailyGroups[p.dayKey] = [];
+            dailyGroups[p.dayKey].push(p);
+        });
+
+        const extremes: any[] = [];
+        Object.keys(dailyGroups).sort().forEach(day => {
+            const group = dailyGroups[day];
+            const max = group.reduce((prev, curr) => (prev.value > curr.value) ? prev : curr);
+            const min = group.reduce((prev, curr) => (prev.value < curr.value) ? prev : curr);
+            
+            // To maintain chart order and structure, we push both
+            extremes.push(min);
+            extremes.push(max);
+        });
+        return extremes;
+    }
+
+    return predictions;
+  }, [predictions, startDate, endDate]);
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 shadow-sm">
@@ -971,7 +1017,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
             <TrendingUp size={28} />
           </div>
           <div>
-            <h2 className="text-xl font-black text-slate-800">Forecast Pasang Surut</h2>
+            <h2 className="text-xl font-black text-slate-800">{title}</h2>
             <p className="text-sm text-slate-500">Estimasi ketinggian air laut berdasarkan parameter harmonik yang ditemukan.</p>
           </div>
         </div>
@@ -1045,7 +1091,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           </div>
           <div className="h-[400px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={predictions} margin={{ bottom: 20 }}>
+              <AreaChart data={optimizedData} margin={{ bottom: 20 }}>
               <defs>
                 <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#0284c7" stopOpacity={0.2}/>
@@ -1053,12 +1099,13 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(predictions.length/12)} axisLine={false} />
+              <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(optimizedData.length/12)} axisLine={false} />
               <YAxis tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} domain={['auto', 'auto']} />
               <Tooltip 
                 contentStyle={{fontSize: '11px', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
+                labelFormatter={(value, payload) => payload[0]?.payload?.fullTime || value}
               />
-              <Area type="monotone" dataKey="value" stroke="#0284c7" strokeWidth={3} fillOpacity={1} fill="url(#colorVal)" animationDuration={1000} />
+              <Area type="monotone" dataKey="value" stroke="#0284c7" strokeWidth={2} fillOpacity={1} fill="url(#colorVal)" animationDuration={1000} connectNulls />
               <Brush dataKey="time" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
             </AreaChart>
             </ResponsiveContainer>
