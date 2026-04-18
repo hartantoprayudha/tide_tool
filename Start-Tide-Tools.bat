@@ -35,11 +35,16 @@ echo.
 echo [V] Instalasi selesai!
 echo ===================================================
 echo Memulai Local Server BIG Tidal Analysis...
+echo Bersiap membuka browser secara otomatis...
 echo.
 echo JANGAN TUTUP JENDELA INI SELAMA APLIKASI SEDANG DIGUNAKAN.
-echo Silakan buka browser Anda dan akses: http://localhost:3000
+echo Jika browser tidak terbuka, silakan akses manual di: http://localhost:3000
 echo ===================================================
 echo.
+
+:: Buka browser secara otomatis dengan jeda 3 detik agar server sempat berjalan (background process)
+start /b cmd /c "timeout /t 3 /nobreak >nul & start http://localhost:3000"
+
 call npm run dev
 
 pause
