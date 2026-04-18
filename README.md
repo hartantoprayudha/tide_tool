@@ -5,7 +5,7 @@ Direktorat Sistem Referensi Geospasial
 
 Aplikasi BIG Tidal Analysis adalah platform analisis deret waktu pasang surut air laut yang dirancang untuk memproses data dari berbagai sensor tekanan (CSV data) dan memberikan hasil analisis harmonik presisi, ekspor datum, serta prediksi masa depan.
 
-<img width="2878" height="1624" alt="Screenshot 2026-04-18 115643" src="https://github.com/user-attachments/assets/6ff47a4f-5a0b-4632-82a2-8a8753a3f570" />
+<img width="2878" height="1080" alt="Screenshot 2026-04-18 115643" src="https://github.com/user-attachments/assets/6ff47a4f-5a0b-4632-82a2-8a8753a3f570" />
 
 ---
 
