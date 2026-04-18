@@ -693,10 +693,44 @@ export default function App() {
         content += `${format(r.timestamp, 'yyyy-MM-dd HH:mm:ss')},${r.raw},${r.filtered},${r.isOutlier}\n`;
       });
     } else {
+      // Calculate Stats
+      const t0 = records[0].timestamp.getTime();
+      let sumE = 0, sumAbsE = 0, sumSqE = 0, count = 0;
+      records.forEach(r => {
+        if (!r.isOutlier && !isNaN(r.filtered)) {
+            const t = (r.timestamp.getTime() - t0) / 3600000;
+            let p = z0;
+            harmonicResults.forEach(res => {
+                const w = 2 * Math.PI * res.freq;
+                const ph = res.phase * (Math.PI / 180);
+                p += res.amp * Math.cos(w * t - ph);
+            });
+            const e = r.filtered - p;
+            sumE += e;
+            sumAbsE += Math.abs(e);
+            sumSqE += e * e;
+            count++;
+        }
+      });
+      const me = count > 0 ? (sumE / count) : 0;
+      const mae = count > 0 ? (sumAbsE / count) : 0;
+      const rmse = count > 0 ? Math.sqrt(sumSqE / count) : 0;
+
       content = `Tide Analysis Report - ${fileName}\n`;
       content += `Generated: ${new Date().toLocaleString()}\n`;
       content += `------------------------------------------\n`;
-      content += `Mean Sea Level (Z0): ${z0.toFixed(3)} m\n\n`;
+      content += `Chart Datums:\n`;
+      content += `MSL  (Mean Sea Level)          : ${z0.toFixed(3)} m\n`;
+      if (datums) {
+          content += `HAT  (Highest Astronomical Tide): ${datums.hat.toFixed(3)} m\n`;
+          content += `MHWS (Mean High Water Springs)  : ${datums.mhws.toFixed(3)} m\n`;
+          content += `MLWS (Mean Low Water Springs)   : ${datums.mlws.toFixed(3)} m\n`;
+          content += `LAT  (Lowest Astronomical Tide) : ${datums.lat.toFixed(3)} m\n`;
+      }
+      content += `\nModel Accuracies (Harmonic vs Analyzed):\n`;
+      content += `RMSE (Root Mean Square Error)  : ${rmse.toFixed(4)} m\n`;
+      content += `MAE  (Mean Absolute Error)     : ${mae.toFixed(4)} m\n`;
+      content += `ME   (Mean Error)              : ${me.toFixed(4)} m\n\n`;
       content += `Harmonic Constituents:\n`;
       content += `Comp | Amp (m) | Phase (deg) | Desc\n`;
       harmonicResults.forEach(r => {
@@ -1092,15 +1126,15 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
       </div>
 
       <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-black text-slate-800 px-2 font-display">{title}</h3>
-          <div className="flex gap-2 export-exclude">
+        <div className="relative mb-6 flex justify-center items-center min-h-[32px]">
+          <h3 className="text-2xl font-black text-slate-800 px-2 font-display text-center">{title}</h3>
+          <div className="absolute right-0 top-0 flex gap-2 export-exclude">
             <button onClick={() => handleDownload('png')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
             <button onClick={() => handleDownload('jpeg')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
             <button onClick={() => handleDownload('pdf')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
           </div>
         </div>
-        <div className="relative h-[540px] w-full group bg-white pt-2 pb-4">
+        <div className="relative h-[580px] w-full group bg-white pt-2 pb-4">
           <div className="export-exclude absolute right-2 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
             <button onClick={() => setVZoom(z => z * 1.25)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom In Vertical">
               <ZoomIn size={14} />
@@ -1113,18 +1147,20 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
             </button>
           </div>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={displayData} margin={{ bottom: 30, left: 30, right: 20, top: 40 }} style={{ cursor: 'crosshair' }}>
+            <ComposedChart data={displayData} margin={{ bottom: 40, left: 30, right: 20, top: 40 }} style={{ cursor: 'crosshair' }}>
               <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
               <XAxis 
                 dataKey="timeStr" 
                 tick={{fontSize: 9, fill:'#64748b'}} 
                 interval={Math.floor(displayData.length/12)} 
                 axisLine={false} 
-                label={{ value: 'Waktu ddmmyy hh:mm', position: 'insideBottom', offset: -20, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
+                tickMargin={10}
+                height={65}
+                label={{ value: 'Waktu (ddmmyy hh:mm)', position: 'insideBottom', offset: -15, style: { fontSize: '14px', fontWeight: 'bold', fill: '#475569' } }}
               />
               <YAxis 
                 tickFormatter={(val: number) => val.toFixed(3)}
-                label={{ value: 'Tinggi Muka Laut (m)', angle: -90, position: 'insideLeft', offset: -15, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
+                label={{ value: 'Tinggi Muka Laut (m)', angle: -90, position: 'insideLeft', offset: -5, style: { fontSize: '14px', fontWeight: 'bold', fill: '#475569' } }}
                 tick={{fontSize: 9, fill:'#64748b'}} 
                 axisLine={false} 
                 domain={yDomain} 
@@ -1377,9 +1413,23 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
 function HarmonicView({ results }: { results: ConstituentResult[] }) {
   if (!results.length) return null;
   
+  const handleDownloadCSV = () => {
+    let csv = "Component,Definition,Frequency (cph),Amplitude (m),Phase (deg)\n";
+    results.forEach(r => {
+      csv += `${r.comp},${r.desc},${r.freq.toFixed(8)},${r.amp.toFixed(3)},${r.phase.toFixed(3)}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    download(blob, 'Harmonic_Constants.csv');
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm overflow-hidden">
-      <h3 className="text-lg font-black text-slate-800 mb-6 px-2 font-display">Konstanta Harmonik (Least Squares Fit)</h3>
+      <div className="flex justify-between items-start mb-6">
+        <h3 className="text-lg font-black text-slate-800 px-2 font-display">Konstanta Harmonik (Least Squares Fit)</h3>
+        <button onClick={handleDownloadCSV} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors">
+          <Download size={14} /> CSV
+        </button>
+      </div>
       <div className="overflow-x-auto rounded-xl border border-slate-100">
         <table className="w-full text-sm text-left">
           <thead className="text-slate-500 bg-slate-50 uppercase text-[10px] font-black tracking-widest font-display">
