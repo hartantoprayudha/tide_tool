@@ -109,6 +109,16 @@ curl -X POST https://ais-dev-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.
 
 ---
 
+## 5. Referensi Ilmiah (Low-Pass Filter)
+
+Bagi peneliti, surveyor, dan akademia yang membutuhkan landasan teori (*scientific background*) terkait metode pemulusan kurva muka laut yang diaplikasikan pada modul dasbor `Filter Data`, kami telah merangkum literatur jurnal akademisnya. Silakan unduh referensi PDF berikut:
+
+- [📄 Jurnal: Moving Average untuk Tide Filtering (PDF)](/References/Moving_Average_Method.pdf)
+- [📄 Jurnal: Median Filtering untuk Outlier Removal (PDF)](/References/Median_Filter_Method.pdf)
+- [📄 Jurnal: Low-Pass Butterworth Filter di Oseanografi (PDF)](/References/Butterworth_Filter_Method.pdf)
+
+---
+
 ## Fitur Unggulan:
 - **IHO Compliant Constituents**: Pilihan algoritma Harmonic Set (9 konstanta, 37 komponen, hingga UKHO).
 - **Moon Phase Indicator**: Menampilkan overlay fase-fase bulan pada puncak data (Purnama / Bulan Baru) sesuai standar IHO.

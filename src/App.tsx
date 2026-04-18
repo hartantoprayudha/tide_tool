@@ -42,6 +42,9 @@ import { cn } from '@/src/lib/utils';
 import { format, addDays, parse, isValid } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import * as htmlToImage from 'html-to-image';
+import download from 'downloadjs';
+import { jsPDF } from 'jspdf';
 
 // --- TYPES ---
 interface TideRecord {
@@ -868,9 +871,41 @@ export default function App() {
 // --- SUB-VIEWS ---
 
 function DashboardView({ records, z0, trend, datums, title }: { records: TideRecord[], z0: number, trend: any, datums: any, title: string }) {
+  const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
   const outliers = useMemo(() => records.filter(r => r.isOutlier).length, [records]);
+
+  const handleDownload = async (format: 'png' | 'jpeg' | 'pdf') => {
+    if (!chartRef.current) return;
+    const node = chartRef.current;
+    
+    // Create a filter to exclude the action buttons so they don't appear in the downloaded image
+    const filter = (el: HTMLElement) => {
+      return !el.classList?.contains('export-exclude');
+    };
+
+    try {
+      if (format === 'png') {
+        const dataUrl = await htmlToImage.toPng(node, { backgroundColor: '#ffffff', filter });
+        download(dataUrl, 'BIG-Tidal-Analysis.png');
+      } else if (format === 'jpeg') {
+        const dataUrl = await htmlToImage.toJpeg(node, { backgroundColor: '#ffffff', filter, quality: 0.95 });
+        download(dataUrl, 'BIG-Tidal-Analysis.jpg');
+      } else if (format === 'pdf') {
+        const dataUrl = await htmlToImage.toPng(node, { backgroundColor: '#ffffff', filter });
+        const pdf = new jsPDF({
+          orientation: 'landscape',
+          unit: 'px',
+          format: [node.offsetWidth, node.offsetHeight]
+        });
+        pdf.addImage(dataUrl, 'PNG', 0, 0, node.offsetWidth, node.offsetHeight);
+        pdf.save('BIG-Tidal-Analysis.pdf');
+      }
+    } catch (error) {
+      console.error('oops, something went wrong!', error);
+    }
+  };
 
   const handleLegendClick = (e: any) => {
     const { dataKey } = e;
@@ -954,9 +989,14 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
       <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-black text-slate-800 px-2 font-display">{title}</h3>
+          <div className="flex gap-2">
+            <button onClick={() => handleDownload('png')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
+            <button onClick={() => handleDownload('jpeg')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
+            <button onClick={() => handleDownload('pdf')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
+          </div>
         </div>
-        <div className="relative h-[420px] w-full group">
-          <div className="absolute right-2 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div ref={chartRef} className="relative h-[420px] w-full group bg-white pt-2 pb-4">
+          <div className="export-exclude absolute right-2 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
             <button onClick={() => setVZoom(z => z * 1.25)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom In Vertical">
               <ZoomIn size={14} />
             </button>
@@ -968,17 +1008,41 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
             </button>
           </div>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={displayData} margin={{ bottom: 20 }}>
+            <ComposedChart data={displayData} margin={{ bottom: 20, left: 10, right: 20 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
               <XAxis dataKey="timeStr" tick={{fontSize: 9, fill:'#64748b'}} interval={Math.floor(displayData.length/12)} axisLine={false} />
-              <YAxis tick={{fontSize: 9, fill:'#64748b'}} axisLine={false} domain={yDomain} />
+              <YAxis 
+                tickFormatter={(val: number) => val.toFixed(3)}
+                label={{ value: 'Tinggi Muka Laut (m)', angle: -90, position: 'insideLeft', offset: -10, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
+                tick={{fontSize: 9, fill:'#64748b'}} 
+                axisLine={false} 
+                domain={yDomain} 
+                width={80}
+              />
               <Tooltip 
-                formatter={(value: any, name: string) => {
-                  if (typeof value === 'number') return [value.toFixed(3), name];
-                  return [value, name];
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5">
+                        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">{label}</p>
+                        <div className="space-y-2 w-full">
+                          {payload.map((entry: any, index: number) => (
+                            <div key={index} className="flex items-center justify-between gap-6 text-[11px]">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: entry.color }} />
+                                <span className="font-semibold text-slate-600">{entry.name}</span>
+                              </div>
+                              <span className="font-bold text-slate-800 font-mono">
+                                {typeof entry.value === 'number' ? entry.value.toFixed(3) : entry.value} m
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
                 }}
-                contentStyle={{fontSize: '11px', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
-                labelStyle={{fontWeight: 'bold', marginBottom: '4px'}}
               />
               <Legend 
                 verticalAlign="top" 
@@ -989,9 +1053,9 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
               
               {datums && (
                 <>
-                  <ReferenceLine y={datums.hat} label={{ position: 'right', value: 'HAT', fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" strokeDasharray="3 3" />
-                  <ReferenceLine y={datums.lat} label={{ position: 'right', value: 'LAT', fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" strokeDasharray="3 3" />
-                  <ReferenceLine y={z0} label={{ position: 'right', value: 'MSL', fontSize: 9, fill: '#0284c7' }} stroke="#0284c7" strokeDasharray="5 5" opacity={0.5} />
+                  <ReferenceLine y={datums.hat} label={{ position: 'right', value: `HAT (${datums.hat.toFixed(3)})`, fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" strokeDasharray="3 3" />
+                  <ReferenceLine y={datums.lat} label={{ position: 'right', value: `LAT (${datums.lat.toFixed(3)})`, fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" strokeDasharray="3 3" />
+                  <ReferenceLine y={z0} label={{ position: 'right', value: `MSL (${z0.toFixed(3)})`, fontSize: 9, fill: '#0284c7' }} stroke="#0284c7" strokeDasharray="5 5" opacity={0.5} />
                 </>
               )}
 
@@ -999,7 +1063,7 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                 <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 16 }} />
               ))}
 
-              <Line hide={hiddenLines.raw} type="monotone" dataKey="raw" stroke="none" dot={{r: 1.5, fill: "#0284c7", strokeWidth: 0, opacity: 0.5}} isAnimationActive={false} name="Raw Level" />
+              <Scatter hide={hiddenLines.raw} dataKey="raw" fill="#1e3a8a" fillOpacity={0.5} name="Raw Level" isAnimationActive={false} />
               <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
               
@@ -1219,18 +1283,26 @@ const PredictionTooltip = ({ active, payload }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-xl z-50">
-        <p className="font-bold text-slate-800 text-[11px] mb-1">{data.fullTime}</p>
-        <p className="text-[#0284c7] font-mono text-xs mb-2">Level: {data.value.toFixed(3)} m</p>
+      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5 z-50">
+        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">{data.fullTime}</p>
+        <div className="flex items-center justify-between gap-6 text-[11px] mb-2">
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: "#0284c7" }} />
+            <span className="font-semibold text-slate-600">Prediksi Level</span>
+          </div>
+          <span className="font-bold text-slate-800 font-mono">
+            {typeof data.value === 'number' ? data.value.toFixed(3) : data.value} m
+          </span>
+        </div>
         {(data.dayMax !== undefined && data.dayMin !== undefined) && (
-            <div className="pt-2 border-t border-slate-100 flex gap-4 text-[10px]">
-                <div>
-                    <span className="text-slate-400 block uppercase tracking-wider">Harian Max</span>
-                    <span className="text-emerald-600 font-bold font-mono">{data.dayMax.toFixed(3)} m</span>
+            <div className="pt-2 border-t border-slate-100 flex justify-between gap-4 text-[10px]">
+                <div className="flex flex-col">
+                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-0.5">Harian Max</span>
+                    <span className="text-emerald-600 font-bold font-mono">{typeof data.dayMax === 'number' ? data.dayMax.toFixed(3) : data.dayMax} m</span>
                 </div>
-                <div>
-                    <span className="text-slate-400 block uppercase tracking-wider">Harian Min</span>
-                    <span className="text-amber-600 font-bold font-mono">{data.dayMin.toFixed(3)} m</span>
+                <div className="flex flex-col text-right">
+                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-0.5">Harian Min</span>
+                    <span className="text-amber-600 font-bold font-mono">{typeof data.dayMin === 'number' ? data.dayMin.toFixed(3) : data.dayMin} m</span>
                 </div>
             </div>
         )}
@@ -1336,7 +1408,14 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(displayPreds.length/12)} axisLine={false} />
-              <YAxis tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} domain={['auto', 'auto']} />
+              <YAxis 
+                tickFormatter={(val: number) => val.toFixed(3)}
+                label={{ value: 'Elevasi (m)', angle: -90, position: 'insideLeft', offset: -10, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
+                tick={{fontSize: 9, fill: '#64748b'}} 
+                axisLine={false} 
+                domain={['auto', 'auto']} 
+                width={80}
+              />
               <Tooltip content={<PredictionTooltip />} />
               
               {moonEvents.map((me, i) => (
