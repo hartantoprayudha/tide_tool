@@ -77,6 +77,7 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   'S4': { f: 0.166666667, d: 'Solar semidiurnal overtide' },
   'M6': { f: 0.241534202, d: 'Lunar semidiurnal overtide' },
   'S6': { f: 0.250000000, d: 'Solar semidiurnal overtide' },
+  'MN4': { f: 0.159510646, d: 'Shallow water quarter diurnal' },
   'MSf': { f: 0.002821933, d: 'Lunisolar synodic fortnightly' },
   'Mf': { f: 0.003050013, d: 'Lunar fortnightly' },
   'Mm': { f: 0.001512151, d: 'Lunar monthly' },
@@ -95,7 +96,7 @@ export default function App() {
   // Configuration State
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
-  const [constituentSet, setConstituentSet] = useState<'4' | '9' | 'UKHO'>('9');
+  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('15');
   const [isLoading, setIsLoading] = useState(false);
 
   // Analysis State
@@ -143,6 +144,13 @@ export default function App() {
             }
             b[r] += rowVals[r] * y[i];
         }
+    }
+
+    // Apply Tikhonov Regularization (Ridge Regression)
+    // Limits the coefficients to prevent extreme magnitude blowouts (rank deficiency)
+    // especially critical for highly correlated sets like UKHO Total Tide Plus
+    for (let r = 1; r < numParams; r++) {
+        A[r][r] += 0.0001 * numRows;
     }
 
     // Solve Ax = b using Gaussian Elimination with partial pivoting
@@ -296,6 +304,7 @@ export default function App() {
         let compsToFit: string[] = [];
         if (constituentSet === '4') compsToFit = ['M2', 'S2', 'K1', 'O1'];
         else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
+        else if (constituentSet === '15') compsToFit = ['M2', 'S2', 'N2', 'K2', 'K1', 'O1', 'P1', 'Q1', 'Mf', 'Mm', 'M4', 'MS4', 'MN4', 'S4', 'M6'];
         else compsToFit = Object.keys(HARMONIC_FREQS); // UKHO
 
         const t_hours = processed.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
@@ -516,11 +525,11 @@ export default function App() {
       content = `Tide Analysis Report - ${fileName}\n`;
       content += `Generated: ${new Date().toLocaleString()}\n`;
       content += `------------------------------------------\n`;
-      content += `Mean Sea Level (Z0): ${z0.toFixed(4)} m\n\n`;
+      content += `Mean Sea Level (Z0): ${z0.toFixed(3)} m\n\n`;
       content += `Harmonic Constituents:\n`;
       content += `Comp | Amp (m) | Phase (deg) | Desc\n`;
       harmonicResults.forEach(r => {
-        content += `${r.comp.padEnd(4)} | ${r.amp.toFixed(4).padEnd(7)} | ${r.phase.toFixed(2).padEnd(11)} | ${r.desc}\n`;
+        content += `${r.comp.padEnd(4)} | ${r.amp.toFixed(3).padEnd(7)} | ${r.phase.toFixed(3).padEnd(11)} | ${r.desc}\n`;
       });
     }
 
@@ -594,8 +603,9 @@ export default function App() {
               }}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
             >
-              <option value="4">4 Constants (Fast)</option>
+              <option value="4">4 Constants (Basic)</option>
               <option value="9">9 Constants (Standard)</option>
+              <option value="15">15 Constants (IHO/TWCWG)</option>
               <option value="UKHO">UKHO Total Tide Plus</option>
             </select>
           </div>
@@ -1023,6 +1033,29 @@ function HarmonicView({ results }: { results: ConstituentResult[] }) {
   );
 }
 
+const PredictionTooltip = ({ active, payload }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-xl z-50">
+        <p className="font-bold text-slate-800 text-[11px] mb-1">{data.fullTime}</p>
+        <p className="text-[#0284c7] font-mono text-xs mb-2">Level: {data.value.toFixed(3)} m</p>
+        <div className="pt-2 border-t border-slate-100 flex gap-4 text-[10px]">
+            <div>
+                <span className="text-slate-400 block uppercase tracking-wider">Harian Max</span>
+                <span className="text-emerald-600 font-bold font-mono">{data.dayMax?.toFixed(3)} m</span>
+            </div>
+            <div>
+                <span className="text-slate-400 block uppercase tracking-wider">Harian Min</span>
+                <span className="text-amber-600 font-bold font-mono">{data.dayMin?.toFixed(3)} m</span>
+            </div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
 function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title }: any) {
   return (
     <div className="space-y-6">
@@ -1104,7 +1137,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
               <span className="px-3 py-2 bg-sky-50 text-[#0284c7] text-[10px] font-black rounded-lg uppercase tracking-wider">Interval: 1 Hour</span>
             </div>
           </div>
-          <div className="h-[400px] w-full">
+          <div className="h-[400px] w-full" style={{ willChange: 'transform, opacity', transform: 'translateZ(0)' }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={predictions} margin={{ bottom: 20 }}>
               <defs>
@@ -1116,10 +1149,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(predictions.length/12)} axisLine={false} />
               <YAxis tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} domain={['auto', 'auto']} />
-              <Tooltip 
-                contentStyle={{fontSize: '11px', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
-                labelFormatter={(value, payload) => payload[0]?.payload?.fullTime || value}
-              />
+              <Tooltip content={<PredictionTooltip />} />
               <Area 
                 type="monotone" 
                 dataKey="value" 
@@ -1127,9 +1157,9 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 strokeWidth={2} 
                 fillOpacity={1} 
                 fill="url(#colorVal)" 
-                animationDuration={1000} 
+                animationDuration={0} 
+                isAnimationActive={false}
                 connectNulls 
-                isAnimationActive={predictions.length < 5000}
               />
               <Brush dataKey="time" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
             </AreaChart>
