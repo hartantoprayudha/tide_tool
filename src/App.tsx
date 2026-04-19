@@ -887,8 +887,8 @@ export default function App() {
               <img src="https://upload.wikimedia.org/wikipedia/commons/b/b8/Badan_Informasi_Geospasial_logo.png" alt="Logo Badan Informasi Geospasial" className="h-20 w-auto object-contain" referrerPolicy="no-referrer" />
             </a>
             <div>
-              <h1 className="text-3xl font-black text-[#1e293b] font-display tracking-tight">BIG Tidal Analysis</h1>
-              <p className="text-[12px] font-bold text-sky-600 tracking-wide uppercase mt-1">
+              <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">BIG Tidal Analysis</h1>
+              <p className="text-sm font-semibold text-sky-700 tracking-wide mt-1">
                  Created by Direktorat Sistem Referensi Geospasial BIG
               </p>
               <p className="text-sm text-[#64748b] mt-1.5">
