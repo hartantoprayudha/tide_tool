@@ -92,7 +92,16 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   'Mf': { f: 0.003050013, d: 'Lunar fortnightly' },
   'Mm': { f: 0.001512151, d: 'Lunar monthly' },
   'Ssa': { f: 0.000228159, d: 'Solar semi-annual' },
-  'Sa': { f: 0.000114079, d: 'Solar annual' }
+  'Sa': { f: 0.000114079, d: 'Solar annual' },
+  // Adding 8 more to complete 34 UKHO Constants
+  'RHO1': { f: 0.034661706, d: 'Larger lunar elliptic diurnal' },
+  'M1': { f: 0.040268595, d: 'Smaller lunar elliptic diurnal' },
+  'PI1': { f: 0.041438515, d: 'Solar diurnal' },
+  '2Q1': { f: 0.035706434, d: 'Elliptic diurnal' },
+  '2SM2': { f: 0.086155266, d: 'Shallow water semidiurnal' },
+  'M3': { f: 0.120767102, d: 'Lunar terdiurnal' },
+  'M8': { f: 0.322045602, d: 'Shallow water eighth diurnal' },
+  '2MK3': { f: 0.122292147, d: 'Shallow water terdiurnal' }
 };
 
 const getMoonEvents = (data: any[]) => {
@@ -1461,13 +1470,14 @@ function HarmonicView({ results }: { results: ConstituentResult[] }) {
 const PredictionTooltip = ({ active, payload }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
+    const isMonthly = data.isMonthlyMean;
     return (
       <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-4 rounded-xl shadow-xl ring-1 ring-black/5 z-50 min-w-[220px]">
         <p className="font-bold text-slate-800 text-[13px] mb-3 pb-2 border-b border-slate-100">{data.fullTime}</p>
         <div className="flex items-center justify-between gap-6 text-xs mb-3">
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-sm bg-[#0284c7]" />
-            <span className="font-bold text-slate-500 uppercase tracking-widest text-[10px]">Prediksi Level</span>
+            <span className="font-bold text-slate-500 uppercase tracking-widest text-[10px]">{isMonthly ? 'Prediksi Mean' : 'Prediksi Level'}</span>
           </div>
           <span className="font-black text-[#0284c7] font-mono text-[13px]">
             {typeof data.value === 'number' ? data.value.toFixed(3) : data.value} m
@@ -1476,11 +1486,11 @@ const PredictionTooltip = ({ active, payload }: any) => {
         {(data.dayMax !== undefined && data.dayMin !== undefined) && (
             <div className="pt-3 border-t border-slate-100 flex justify-between gap-4">
                 <div className="flex flex-col">
-                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-1">Harian Max</span>
+                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-1">{isMonthly ? 'Bulanan Max' : 'Harian Max'}</span>
                     <span className="text-emerald-600 font-bold font-mono text-[11px]">{typeof data.dayMax === 'number' ? data.dayMax.toFixed(3) : data.dayMax} m</span>
                 </div>
                 <div className="flex flex-col text-right">
-                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-1">Harian Min</span>
+                    <span className="text-slate-400 uppercase tracking-widest font-black text-[9px] mb-1">{isMonthly ? 'Bulanan Min' : 'Harian Min'}</span>
                     <span className="text-amber-600 font-bold font-mono text-[11px]">{typeof data.dayMin === 'number' ? data.dayMin.toFixed(3) : data.dayMin} m</span>
                 </div>
             </div>
@@ -1492,8 +1502,33 @@ const PredictionTooltip = ({ active, payload }: any) => {
 };
 
 function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title }: any) {
-  // Limit UI rendering to maximum 1 year (8760 hours)
-  const displayPreds = useMemo(() => predictions.slice(0, 365 * 24), [predictions]);
+  const displayPreds = useMemo(() => {
+    if (predictions.length <= 365 * 24) {
+      return predictions;
+    } else {
+      // Calculate Monthly Means for > 1 year
+      const monthlyData: Record<string, { sum: number, count: number, date: Date, max: number, min: number }> = {};
+      predictions.forEach((p: any) => {
+          const monthKey = format(p.timestamp, 'yyyy-MM');
+          if (!monthlyData[monthKey]) {
+              monthlyData[monthKey] = { sum: 0, count: 0, date: p.timestamp, max: -Infinity, min: Infinity };
+          }
+          monthlyData[monthKey].sum += p.value;
+          monthlyData[monthKey].count += 1;
+          if (p.value > monthlyData[monthKey].max) monthlyData[monthKey].max = p.value;
+          if (p.value < monthlyData[monthKey].min) monthlyData[monthKey].min = p.value;
+      });
+      return Object.values(monthlyData).map((m: any) => ({
+          time: format(m.date, 'MMM yy'),
+          fullTime: format(m.date, 'MMMM yyyy'),
+          value: parseFloat((m.sum / m.count).toFixed(3)),
+          timestamp: m.date,
+          dayMax: m.max,
+          dayMin: m.min,
+          isMonthlyMean: true
+      }));
+    }
+  }, [predictions]);
   const moonEvents = useMemo(() => getMoonEvents(displayPreds), [displayPreds]);
 
   return (
@@ -1573,7 +1608,9 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
               >
                 <Download size={14} /> TXT
               </button>
-              <span className="px-3 py-2 bg-sky-50 text-[#0284c7] text-[10px] font-black rounded-lg uppercase tracking-wider">Interval: 1 Hour</span>
+              <span className="px-3 py-2 bg-sky-50 text-[#0284c7] text-[10px] font-black rounded-lg uppercase tracking-wider">
+                  Interval: {predictions.length > 365 * 24 ? 'Monthly Mean' : '1 Hour'}
+              </span>
             </div>
           </div>
           <div className="h-[400px] w-full" style={{ willChange: 'transform, opacity', transform: 'translateZ(0)' }}>
@@ -1618,7 +1655,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           </div>
           {predictions.length > (365 * 24) && (
              <div className="mt-4 px-3 py-1.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded-lg uppercase tracking-widest text-center border border-amber-100 flex items-center justify-center gap-2">
-                 <AlertCircle size={14} /> Tampilan Grafik Dibatasi 1 Tahun Pertama untuk Performa ({predictions.length.toLocaleString()} Jam Data Terhitung BISA DI-EXPORT)
+                 <AlertCircle size={14} /> Tampilan Grafik Diagregasi ke Monthly-Mean untuk Performa ({predictions.length.toLocaleString()} Jam Data Prediksi BISA DI-EXPORT)
              </div>
           )}
           <div className="mt-6 border-t border-slate-100 pt-6">
