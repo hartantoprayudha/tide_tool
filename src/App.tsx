@@ -53,6 +53,7 @@ interface TideRecord {
   filtered: number;
   isOutlier: boolean;
   timeStr: string;
+  allSamples?: Record<string, number>;
 }
 
 interface ConstituentResult {
@@ -145,11 +146,12 @@ export default function App() {
   // Configuration State
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
+  const [visibleSensors, setVisibleSensors] = useState<string[]>([]);
   const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('9');
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
-
+  
   // Analysis State
   const [zThreshold, setZThreshold] = useState(3.0);
   const [filterType, setFilterType] = useState<'ma' | 'median' | 'butterworth'>('ma');
@@ -265,6 +267,8 @@ export default function App() {
     // Simulate async for loading state
     setTimeout(() => {
       try {
+        const isCurrentCm = currentSensor.toLowerCase().includes('(cm)');
+
         // 1. Data Parsing with flexible Date format
         let processed: TideRecord[] = rawRows.map(row => {
           let tsStr = (row['Timestamp'] || row[0] || "").trim();
@@ -273,7 +277,7 @@ export default function App() {
           
           tsStr = tsStr.replace(/\s+/g, ' ');
 
-          const formats = ['dd/MM/yyyy HH:mm', 'ddMMyyyy HH:mm', 'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'ddMMyyyy HHmm', 'dd/MM/yyyy HH.mm'];
+          const formats = ['dd/MM/yyyy HH:mm:ss', 'dd/MM/yyyy HH:mm', 'ddMMyyyy HH:mm', 'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'ddMMyyyy HHmm', 'dd/MM/yyyy HH.mm'];
           let dateObj: Date = new Date(NaN);
           
           for (const fmt of formats) {
@@ -290,12 +294,28 @@ export default function App() {
               dateObj = new Date(dateObj.getTime() + tOffset * 3600000);
           }
 
-          const valRaw = parseFloat(valStr.replace(',', '.')) + vOffset;
+          // Extract all sensors for multi-view
+          const allSamples: Record<string, number> = {};
+          availableSensors.forEach(s => {
+              const sValStr = (row[s] || "").trim();
+              const isCm = s.toLowerCase().includes('(cm)');
+              let sValRaw = parseFloat(sValStr.replace(',', '.'));
+              if (isCm && !isNaN(sValRaw)) sValRaw = sValRaw / 100;
+              if (!isNaN(sValRaw)) {
+                allSamples[s] = parseFloat((sValRaw).toFixed(3));
+              }
+          });
+
+          let valRaw = parseFloat(valStr.replace(',', '.'));
+          if (isCurrentCm && !isNaN(valRaw)) valRaw = valRaw / 100;
+          valRaw += vOffset;
+          
           const val = isNaN(valRaw) ? NaN : parseFloat(valRaw.toFixed(3)); 
 
           return {
             timestamp: dateObj,
             raw: val,
+            allSamples,
             filtered: 0,
             isOutlier: false,
             timeStr: isValid(dateObj) ? format(dateObj, 'dd/MM/yy HH:mm') : "Invalid"
@@ -556,12 +576,47 @@ export default function App() {
       try {
         const filePromises = Array.from(files).map((file) => {
           return new Promise<Papa.ParseResult<any>>((resolve, reject) => {
-            Papa.parse(file, {
-              header: true,
-              skipEmptyLines: true,
-              complete: resolve,
-              error: reject
-            });
+            // First read as text to detect special formats
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const text = event.target?.result as string;
+                const lines = text.trim().split('\n');
+                if (lines.length > 0) {
+                    const firstLine = lines[0];
+                    // Check for headerless tab/whitespace format: Date followed by 2+ numbers
+                    // Match pattern: 09/01/2025 13:00:00	999	172	172
+                    const tabParts = firstLine.split('\t');
+                    const spaceParts = firstLine.split(/\s{2,}/);
+                    const parts = tabParts.length > spaceParts.length ? tabParts : spaceParts;
+                    
+                    if (parts.length >= 2) {
+                        const d = parse(parts[0].trim(), 'dd/MM/yyyy HH:mm:ss', new Date());
+                        if (isValid(d)) {
+                            // High confidence headerless format
+                            const data = lines.map(line => {
+                                const p = line.split(/\t|\s{2,}/);
+                                const obj: any = { 'Timestamp': p[0].trim() };
+                                for (let i = 1; i < p.length; i++) {
+                                    // User said these are in cm, we'll mark them as (cm) to trigger auto-scaling later
+                                    obj[`Sensor ${i} (cm)`] = p[i]?.trim();
+                                }
+                                return obj;
+                            });
+                            resolve({ data, meta: { fields: Object.keys(data[0]) }, errors: [] } as any);
+                            return;
+                        }
+                    }
+                }
+                
+                // Fallback to PapaParse for standard CSVs
+                Papa.parse(file, {
+                  header: true,
+                  skipEmptyLines: true,
+                  complete: resolve,
+                  error: reject
+                });
+            };
+            reader.readAsText(file);
           });
         });
 
@@ -586,8 +641,12 @@ export default function App() {
         });
 
         const fields = results[0].meta.fields || [];
-        const detectedSensors = fields.filter((f:string) => f.toLowerCase().includes('(m)'));
+        const detectedSensors = fields.filter((f:string) => {
+           const lowerF = f.toLowerCase();
+           return lowerF.includes('(m)') || lowerF.includes('(cm)') || lowerF.startsWith('sensor');
+        });
         setAvailableSensors(detectedSensors);
+        setVisibleSensors(detectedSensors.length > 3 ? detectedSensors.slice(0, 3) : detectedSensors);
         const initialSensor = detectedSensors.length > 0 ? detectedSensors[0] : '';
         setSelectedSensor(initialSensor);
         setRawData(mergedData);
@@ -809,7 +868,7 @@ export default function App() {
             </div>
           )}
 
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 pt-4 border-t border-slate-100">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Constituent Set</label>
             <select 
               value={constituentSet}
@@ -828,7 +887,7 @@ export default function App() {
             </select>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 pt-4 border-t border-slate-100">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Custom Chart Title</label>
             <input 
               type="text"
@@ -874,12 +933,15 @@ export default function App() {
 
           <button 
             onClick={() => fileInputRef.current?.click()}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-[#0284c7] text-white rounded-xl text-xs font-bold hover:bg-[#0ea5e9] transition-all shadow-lg shadow-sky-100"
+            className="group w-full flex flex-col items-center justify-center gap-1 py-4 bg-[#0284c7] text-white rounded-xl hover:bg-[#0ea5e9] transition-all shadow-lg shadow-sky-100"
           >
-            <Upload size={14} />
-            Import CSV Data
+            <div className="flex items-center gap-2 font-bold text-sm">
+                <Upload size={14} />
+                Import Data
+            </div>
+            <span className="text-[8px] font-bold opacity-60 uppercase tracking-tighter">format file csv, txt</span>
           </button>
-          <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".csv" />
+          <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".csv,.txt" />
           
           <div className="flex items-center gap-3 px-3 py-2 text-[#64748b] text-[10px] font-bold uppercase tracking-wider">
             <div className={cn("w-2 h-2 rounded-full", records.length ? "bg-[#10b981]" : "bg-slate-300")}></div>
@@ -931,17 +993,20 @@ export default function App() {
               <Waves size={40} />
             </div>
             <div>
-              <h2 className="text-xl font-black text-slate-800">Siap Menganalisis Pasang Surut?</h2>
-              <p className="text-slate-500 max-w-sm mx-auto mt-2 text-sm leading-relaxed">
-                Import file CSV Anda (format deteksi otomatis: <b>dd/mm/yyyy hh:mm</b>). Kami akan menangani outlier, filter, dan prediksi secara otomatis.
+              <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Siap Menganalisis Pasang Surut?</h2>
+              <p className="text-slate-500 max-w-sm mx-auto mt-2 text-[13px] leading-relaxed">
+                Import file CSV atau TXT Anda. Kami akan menangani outlier, filter, dan prediksi secara otomatis.
               </p>
             </div>
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="px-8 py-3 bg-[#0284c7] text-white rounded-xl font-bold hover:scale-105 transition-all shadow-xl shadow-sky-100"
-            >
-              Mulai Project Baru
-            </button>
+            <div className="flex flex-col items-center gap-3">
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-10 py-4 bg-[#0284c7] text-white rounded-2xl font-black hover:scale-105 active:scale-95 transition-all shadow-2xl shadow-sky-200 uppercase tracking-widest text-sm"
+                >
+                  Import Data
+                </button>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">format file: csv, txt</span>
+            </div>
           </div>
         ) : (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -962,7 +1027,22 @@ export default function App() {
                     </div>
                 </div>
             )}
-            {activeTab === 'dashboard' && records.length > 0 && <DashboardView records={records} z0={z0} trend={linearTrend} datums={datums} title={chartTitle} />}
+            {activeTab === 'dashboard' && records.length > 0 && (
+                <DashboardView 
+                    records={records} 
+                    z0={z0} 
+                    trend={linearTrend} 
+                    datums={datums} 
+                    title={chartTitle} 
+                    availableSensors={availableSensors}
+                    selectedSensor={selectedSensor}
+                    rawData={rawData}
+                    runAnalysis={runAnalysis}
+                    setRecords={setRecords}
+                    visibleSensors={visibleSensors}
+                    setVisibleSensors={setVisibleSensors}
+                />
+            )}
             {activeTab === 'outlier' && records.length > 0 && (
                 <OutlierView 
                   records={records} 
@@ -1018,42 +1098,19 @@ export default function App() {
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title }: { records: TideRecord[], z0: number, trend: any, datums: any, title: string }) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
-  const outliers = useMemo(() => records.filter(r => r.isOutlier).length, [records]);
+  
+  // Correction States
+  const [scaleFactor, setScaleFactor] = useState<number>(1.0);
+  const [scaleReference, setScaleReference] = useState<string>('');
+  const [scaleTarget, setScaleTarget] = useState<string>('');
+  const [localOffset, setLocalOffset] = useState<number>(0);
+  const [brushIndices, setBrushIndices] = useState<{ start: number, end: number } | null>(null);
 
-  const handleDownload = async (format: 'png' | 'jpeg' | 'pdf') => {
-    if (!chartRef.current) return;
-    const node = chartRef.current;
-    
-    // Create a filter to exclude the action buttons so they don't appear in the downloaded image
-    const filter = (el: HTMLElement) => {
-      return !el.classList?.contains('export-exclude');
-    };
-
-    try {
-      if (format === 'png') {
-        const dataUrl = await htmlToImage.toPng(node, { backgroundColor: '#ffffff', filter });
-        download(dataUrl, 'BIG-Tidal-Analysis.png');
-      } else if (format === 'jpeg') {
-        const dataUrl = await htmlToImage.toJpeg(node, { backgroundColor: '#ffffff', filter, quality: 0.95 });
-        download(dataUrl, 'BIG-Tidal-Analysis.jpg');
-      } else if (format === 'pdf') {
-        const dataUrl = await htmlToImage.toPng(node, { backgroundColor: '#ffffff', filter });
-        const pdf = new jsPDF({
-          orientation: 'landscape',
-          unit: 'px',
-          format: [node.offsetWidth, node.offsetHeight]
-        });
-        pdf.addImage(dataUrl, 'PNG', 0, 0, node.offsetWidth, node.offsetHeight);
-        pdf.save('BIG-Tidal-Analysis.pdf');
-      }
-    } catch (error) {
-      console.error('oops, something went wrong!', error);
-    }
-  };
+  const outliers = useMemo(() => records.filter((r:any) => r.isOutlier).length, [records]);
 
   const handleLegendClick = (e: any) => {
     const { dataKey } = e;
@@ -1063,22 +1120,17 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
   const chartData = useMemo(() => {
     if (!trend || !records.length) return records;
     const t0 = records[0].timestamp.getTime();
-    return records.map(r => ({
+    return records.map((r: any) => ({
       ...r,
       trendline: trend.slope * ((r.timestamp.getTime() - t0) / 3600000) + trend.intercept
     }));
   }, [records, trend]);
 
-  // Performance Optimization: Downsample to hourly for display (cuplikan data perjam)
   const displayData = useMemo(() => {
     if (!chartData.length) return [];
-    
-    // Sort by timestamp just in case
     const sorted = [...chartData].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    
     const sampled = [];
     const seenHours = new Set();
-    
     for (const r of sorted) {
       const hKey = format(r.timestamp, 'yyyyMMddHH');
       if (!seenHours.has(hKey)) {
@@ -1088,6 +1140,81 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
     }
     return sampled;
   }, [chartData]);
+
+  const applyLocalOffset = () => {
+    if (!brushIndices || localOffset === 0) {
+        alert("Pilih rentang data pada slider (brush) terlebih dahulu.");
+        return;
+    }
+    const startTime = displayData[brushIndices.start].timestamp;
+    const endTime = displayData[brushIndices.end].timestamp;
+
+    const updated = records.map((r: any) => {
+        if (r.timestamp >= startTime && r.timestamp <= endTime) {
+            const newRaw = r.raw + localOffset;
+            const updatedSamples = r.allSamples ? {
+                ...r.allSamples,
+                [selectedSensor]: parseFloat(((r.allSamples[selectedSensor] || 0) + localOffset).toFixed(3))
+            } : r.allSamples;
+            return { ...r, raw: newRaw, allSamples: updatedSamples };
+        }
+        return r;
+    });
+    setRecords(updated);
+    runAnalysis(updated, selectedSensor);
+    setLocalOffset(0);
+    alert("Offset lokal berhasil diterapkan.");
+  };
+
+  const applyScaling = () => {
+    if (!scaleReference || !scaleTarget || scaleFactor === 1) return;
+    const updated = records.map((r: any) => {
+        if (r.allSamples && r.allSamples[scaleTarget] !== undefined) {
+             const newVal = r.allSamples[scaleTarget] * scaleFactor;
+             const updatedSamples = { ...r.allSamples, [scaleTarget]: parseFloat(newVal.toFixed(3)) };
+             return {
+                 ...r,
+                 allSamples: updatedSamples,
+                 raw: scaleTarget === selectedSensor ? newVal : r.raw
+             };
+        }
+        return r;
+    });
+    setRecords(updated);
+    runAnalysis(updated, selectedSensor);
+    alert(`Faktor skala ${scaleFactor} diterapkan pada ${scaleTarget}`);
+  };
+
+  const computeScalingFactor = () => {
+    if (!scaleReference || !scaleTarget) return;
+    const refVals = records.map((r: any) => r.allSamples?.[scaleReference]).filter((v: any) => typeof v === 'number' && !isNaN(v));
+    const targetVals = records.map((r: any) => r.allSamples?.[scaleTarget]).filter((v: any) => typeof v === 'number' && !isNaN(v));
+    if (refVals.length > 0 && targetVals.length > 0) {
+        const meanRef = refVals.reduce((a: any, b: any) => a + b, 0) / refVals.length;
+        const meanTarget = targetVals.reduce((a: any, b: any) => a + b, 0) / targetVals.length;
+        if (meanTarget !== 0) setScaleFactor(parseFloat((meanRef / meanTarget).toFixed(4)));
+    }
+  };
+
+  const handleDownload = async (format: 'png' | 'jpeg' | 'pdf') => {
+    if (!chartRef.current) return;
+    const node = chartRef.current;
+    const filter = (el: HTMLElement) => !el.classList?.contains('export-exclude');
+    try {
+      if (format === 'png') {
+        const dataUrl = await htmlToImage.toPng(node, { backgroundColor: '#ffffff', filter });
+        download(dataUrl, 'BIG-Tidal-Analysis.png');
+      } else if (format === 'jpeg') {
+        const dataUrl = await htmlToImage.toJpeg(node, { backgroundColor: '#ffffff', filter, quality: 0.95 });
+        download(dataUrl, 'BIG-Tidal-Analysis.jpg');
+      } else if (format === 'pdf') {
+        const dataUrl = await htmlToImage.toPng(node, { backgroundColor: '#ffffff', filter });
+        const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [node.offsetWidth, node.offsetHeight] });
+        pdf.addImage(dataUrl, 'PNG', 0, 0, node.offsetWidth, node.offsetHeight);
+        pdf.save('BIG-Tidal-Analysis.pdf');
+      }
+    } catch (error) { console.error(error); }
+  };
 
   const moonEvents = useMemo(() => getMoonEvents(displayData), [displayData]);
 
@@ -1122,16 +1249,102 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        <StatCard label="Z0 (MSL)" value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} trend="Least Squares Fit" />
-        <StatCard 
-          label="Sea Level Trend" 
-          value={`${trend ? (trend.rateYear * 1000).toFixed(2) : "0.00"} mm/thn`} 
-          trend="Linear Regression" 
-          trendColor={trend?.rateYear > 0 ? "text-red-500" : "text-emerald-500"} 
-        />
-        <StatCard label="HAT / LAT" value={`${datums ? datums.hat.toFixed(2) : '--'} / ${datums ? datums.lat.toFixed(2) : '--'}`} trend="Highest/Lowest" />
-        <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
+      <div className="flex flex-col xl:flex-row gap-6">
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-5">
+            <StatCard label="Z0 (MSL)" value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} trend="Least Squares Fit" />
+            <StatCard 
+              label="Sea Level Trend" 
+              value={`${trend ? (trend.rateYear * 1000).toFixed(2) : "0.00"} mm/thn`} 
+              trend="Linear Regression" 
+              trendColor={trend?.rateYear > 0 ? "text-red-500" : "text-emerald-500"} 
+            />
+            <StatCard label="HAT / LAT" value={`${datums ? datums.hat.toFixed(2) : '--'} / ${datums ? datums.lat.toFixed(2) : '--'}`} trend="Highest/Lowest" />
+            <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
+          </div>
+
+          <div className="w-full xl:w-80 space-y-4 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+             <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100">
+                <Settings size={16} className="text-slate-400" />
+                <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest">Dashboard Controls</h4>
+             </div>
+             
+             {/* Local Offset */}
+             <div className="space-y-2 p-3 bg-amber-50/50 border border-amber-100 rounded-xl">
+                <label className="text-[10px] font-bold text-amber-700 flex items-center justify-between">
+                    <span>Regional Offset (m)</span>
+                    <Clock size={12}/>
+                </label>
+                <div className="flex gap-2">
+                    <input 
+                        type="number" step="0.001"
+                        value={localOffset}
+                        onChange={(e) => setLocalOffset(parseFloat(e.target.value))}
+                        className="flex-1 bg-white border border-amber-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-200"
+                    />
+                    <button onClick={applyLocalOffset} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 transition-colors shadow-sm">Apply</button>
+                </div>
+                <p className="text-[9px] text-amber-600/70 italic leading-tight">Apply to current brushed region.</p>
+             </div>
+
+             {/* Scaling */}
+             <div className="space-y-2 p-3 bg-sky-50/50 border border-sky-100 rounded-xl">
+                <label className="text-[10px] font-bold text-sky-700">Scaling Correction</label>
+                <div className="grid grid-cols-2 gap-2">
+                    <select 
+                        value={scaleReference} 
+                        onChange={(e) => setScaleReference(e.target.value)}
+                        className="bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-600 outline-none"
+                    >
+                        <option value="">Reference...</option>
+                        {availableSensors.map((s: string) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <select 
+                        value={scaleTarget} 
+                        onChange={(e) => setScaleTarget(e.target.value)}
+                        className="bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-600 outline-none"
+                    >
+                        <option value="">Target...</option>
+                        {availableSensors.map((s: string) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                </div>
+                <div className="flex gap-1.5">
+                    <input 
+                        type="number" step="0.0001"
+                        value={scaleFactor}
+                        onChange={(e) => setScaleFactor(parseFloat(e.target.value))}
+                        className="min-w-0 flex-1 bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none"
+                        placeholder="Factor"
+                    />
+                    <button onClick={computeScalingFactor} className="flex-none p-1 px-2 border border-sky-200 text-sky-600 rounded-lg text-[9px] font-extrabold bg-white hover:bg-sky-100 transition-colors" title="Auto Compute Factor">AUTO</button>
+                    <button onClick={applyScaling} className="flex-none p-1 px-3 bg-sky-600 text-white rounded-lg text-[9px] font-extrabold hover:bg-sky-700 transition-colors shadow-sm">FIX</button>
+                </div>
+             </div>
+
+             {/* Multi-sensor toggles */}
+             <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Multi-Sensor Overlay</label>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                    {availableSensors.map((s: string) => {
+                        const palette = ['#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#f97316'];
+                        const color = palette[availableSensors.indexOf(s) % palette.length];
+                        const isActive = visibleSensors.includes(s);
+                        return (
+                            <button 
+                                key={s}
+                                onClick={() => setVisibleSensors(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}
+                                className={cn(
+                                    "px-2 py-1 rounded-full text-[9px] font-bold border transition-all shadow-sm",
+                                    isActive ? "text-white border-transparent" : "bg-white text-slate-400 border-slate-200"
+                                )}
+                                style={isActive ? { backgroundColor: color } : {}}
+                            >
+                                {s}
+                            </button>
+                        );
+                    })}
+                </div>
+             </div>
+          </div>
       </div>
 
       <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
@@ -1165,7 +1378,7 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                 axisLine={false} 
                 tickMargin={10}
                 height={65}
-                label={{ value: 'Waktu (ddmmyy hh:mm)', position: 'insideBottom', offset: -15, style: { fontSize: '14px', fontWeight: 'bold', fill: '#475569' } }}
+                label={{ value: 'Waktu (UTC)', position: 'insideBottom', offset: -15, style: { fontSize: '14px', fontWeight: 'bold', fill: '#475569' } }}
               />
               <YAxis 
                 tickFormatter={(val: number) => val.toFixed(3)}
@@ -1182,7 +1395,7 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                     const data = payload[0].payload;
                     return (
                       <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5 pointer-events-none min-w-[200px]">
-                        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">Waktu Pengamatan: {label}</p>
+                        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">Waktu: {label}</p>
                         <div className="space-y-2 w-full">
                           <div className="flex items-center justify-between gap-6 text-[11px]">
                             <div className="flex items-center gap-2">
@@ -1190,25 +1403,33 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                               <span className="font-semibold text-slate-600">Analyzed Level</span>
                             </div>
                             <span className="font-bold text-slate-800 font-mono">
-                              {typeof data.filtered === 'number' ? data.filtered.toFixed(3) : (data.filtered || 'NaN')} m
+                              {typeof data.filtered === 'number' ? data.filtered.toFixed(3) : 'NaN'} m
                             </span>
                           </div>
-                          <div className="flex items-center justify-between gap-6 text-[11px]">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2.5 h-2.5 rounded-sm bg-[#94a3b8]" />
-                              <span className="font-semibold text-slate-600">Raw Level</span>
-                            </div>
-                            <span className="font-bold text-slate-800 font-mono">
-                              {typeof data.raw === 'number' && !isNaN(data.raw) ? data.raw.toFixed(3) : 'NaN'} m
-                            </span>
-                          </div>
+                          
+                          {visibleSensors.map((s, idx) => {
+                             const palette = ['#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#f97316'];
+                             const color = palette[availableSensors.indexOf(s) % palette.length];
+                             return (
+                               <div key={s} className="flex items-center justify-between gap-6 text-[11px]">
+                                 <div className="flex items-center gap-2">
+                                   <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: color }} />
+                                   <span className="font-semibold text-slate-600">{s} (Raw)</span>
+                                 </div>
+                                 <span className="font-bold text-slate-800 font-mono">
+                                   {typeof data.allSamples?.[s] === 'number' ? data.allSamples[s].toFixed(3) : 'NaN'} m
+                                 </span>
+                               </div>
+                             );
+                          })}
+
                           <div className="flex items-center justify-between gap-6 text-[11px]">
                             <div className="flex items-center gap-2">
                               <div className="w-2.5 h-2.5 rounded-sm bg-[#ef4444]" />
-                              <span className="font-semibold text-slate-600">Tren Linear</span>
+                              <span className="font-semibold text-slate-600">Sea Level Trend</span>
                             </div>
                             <span className="font-bold text-slate-800 font-mono">
-                              {typeof data.trendline === 'number' ? data.trendline.toFixed(3) : (data.trendline || 'NaN')} m
+                              {typeof data.trendline === 'number' ? data.trendline.toFixed(3) : 'NaN'} m
                             </span>
                           </div>
                         </div>
@@ -1237,11 +1458,37 @@ function DashboardView({ records, z0, trend, datums, title }: { records: TideRec
                 <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 18 }} />
               ))}
 
-              <Scatter hide={hiddenLines.raw} dataKey="raw" fill="#94a3b8" fillOpacity={0.4} name="Raw Level" isAnimationActive={false} />
+              {availableSensors.map((sensor, idx) => {
+                  const palette = ['#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#f97316'];
+                  const color = palette[idx % palette.length];
+                  if (!visibleSensors.includes(sensor)) return null;
+                  return (
+                    <Scatter 
+                      key={sensor}
+                      hide={hiddenLines[sensor]} 
+                      dataKey={(d) => d.allSamples?.[sensor]} 
+                      fill={color} 
+                      fillOpacity={0.6} 
+                      name={sensor} 
+                      isAnimationActive={false} 
+                    />
+                  );
+              })}
               <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
               
-              <Brush dataKey="timeStr" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
+              <Brush 
+                dataKey="timeStr" 
+                height={30} 
+                stroke="#cbd5e1" 
+                travellerWidth={10} 
+                fill="#f8fafc" 
+                onChange={(range: any) => {
+                    if (range && typeof range.startIndex === 'number') {
+                        setBrushIndices({ start: range.startIndex, end: range.endIndex });
+                    }
+                }}
+              />
             </ComposedChart>
           </ResponsiveContainer>
         </div>

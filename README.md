@@ -11,8 +11,13 @@ Aplikasi BIG Tidal Analysis adalah platform analisis deret waktu pasang surut ai
 
 ## Unduh Contoh Data Observasi 
 
-Untuk mulai menggunakan aplikasi ini, Anda dapat mengunduh format contoh data CSV pasut laut yang telah kami sediakan:
-[📥 Unduh Contoh Data Pasut 1 (CSV)](/examples/smrg.csv)
+Untuk mulai menggunakan aplikasi ini, Anda dapat mengunduh format contoh data CSV pasut laut yang telah kami sediakan dalam berbagai format (Meter dan Centimeter):
+
+* [📥 Unduh Contoh Data Pasut 1 - SMRG (m)](/examples/smrg.csv)
+* [📥 Unduh Contoh Data Pasut 2 - Sample CM (cm)](/examples/sample_cm.csv)
+* [📥 Unduh Contoh Data Pasut 3 - Combined (m)](/examples/combined.csv)
+* [📥 Unduh Contoh Data Pasut 4 - Outlier Sample (m)](/examples/sample_data.csv)
+
 ---
 
 ## 1. Quick Start Local Server (Untuk Pengguna Pemula)
