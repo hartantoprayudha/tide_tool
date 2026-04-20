@@ -136,11 +136,20 @@ const getMoonEvents = (data: any[]) => {
   return events;
 };
 
+interface PartialModifier {
+  startMs: number;
+  endMs: number;
+  sensor: string;
+  offset: number;
+  scale: number;
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [records, setRecords] = useState<TideRecord[]>([]);
   const [datums, setDatums] = useState<{ mhws: number, mlws: number, hat: number, lat: number } | null>(null);
   const [rawData, setRawData] = useState<any[]>([]);
+  const [modifiers, setModifiers] = useState<PartialModifier[]>([]);
   const [fileName, setFileName] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -258,7 +267,7 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers) => {
     if (!rawRows.length) return;
     const currentSensor = sensorToUse || selectedSensor;
     if (!currentSensor) return;
@@ -291,6 +300,8 @@ export default function App() {
 
           if (!isValid(dateObj)) dateObj = new Date(tsStr);
           
+          const unmodifiedDateMs = isValid(dateObj) ? dateObj.getTime() : null;
+
           if (isValid(dateObj) && tOffset !== 0) {
               dateObj = new Date(dateObj.getTime() + tOffset * 3600000);
           }
@@ -303,6 +314,17 @@ export default function App() {
               let sValRaw = parseFloat(sValStr.replace(',', '.'));
               if (sValRaw === 999 || sValRaw === -999 || sValRaw < -900 || sValRaw > 900) sValRaw = NaN;
               if (isCm && !isNaN(sValRaw)) sValRaw = sValRaw / 100;
+              
+              if (unmodifiedDateMs !== null && !isNaN(sValRaw)) {
+                  let appliedVal = sValRaw;
+                  for (const mod of activeMods) {
+                      if (mod.sensor === s && unmodifiedDateMs >= mod.startMs && unmodifiedDateMs <= mod.endMs) {
+                          appliedVal = (appliedVal * mod.scale) + mod.offset;
+                      }
+                  }
+                  sValRaw = appliedVal;
+              }
+
               if (!isNaN(sValRaw)) {
                 allSamples[s] = parseFloat((sValRaw).toFixed(3));
               }
@@ -313,6 +335,16 @@ export default function App() {
           if (isCurrentCm && !isNaN(valRaw)) valRaw = valRaw / 100;
           valRaw += vOffset;
           
+          if (unmodifiedDateMs !== null && !isNaN(valRaw)) {
+              let appliedVal = valRaw;
+              for (const mod of activeMods) {
+                  if (mod.sensor === currentSensor && unmodifiedDateMs >= mod.startMs && unmodifiedDateMs <= mod.endMs) {
+                      appliedVal = (appliedVal * mod.scale) + mod.offset;
+                  }
+              }
+              valRaw = appliedVal;
+          }
+
           const val = isNaN(valRaw) ? NaN : parseFloat(valRaw.toFixed(3)); 
 
           return {
@@ -656,7 +688,8 @@ export default function App() {
         const initialSensor = detectedSensors.length > 0 ? detectedSensors[0] : '';
         setSelectedSensor(initialSensor);
         setRawData(mergedData);
-        runAnalysis(mergedData, initialSensor);
+        setModifiers([]); // Reset modifiers on new file load
+        runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, []);
         setActiveTab('dashboard');
       } catch (err) {
         alert("Terjadi kesalahan saat membaca file CSV.");
@@ -1047,6 +1080,10 @@ export default function App() {
                     setRecords={setRecords}
                     visibleSensors={visibleSensors}
                     setVisibleSensors={setVisibleSensors}
+                    modifiers={modifiers}
+                    setModifiers={setModifiers}
+                    verticalOffset={verticalOffset}
+                    timeOffset={timeOffset}
                 />
             )}
             {activeTab === 'outlier' && records.length > 0 && (
@@ -1104,7 +1141,7 @@ export default function App() {
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -1179,48 +1216,58 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const zoomOut = () => setZoomDomain(null);
 
-  const applyLocalOffset = () => {
-    if (!brushIndices || localOffset === 0) {
-        alert("Pilih rentang data pada slider (brush) terlebih dahulu.");
+  const applyPartialOffset = () => {
+    if (!zoomDomain || localOffset === 0) {
+        alert("Pilih area pada grafik dengan melakukan zoom (klik dan tarik) terlebih dahulu.");
         return;
     }
-    const startTime = displayData[brushIndices.start].timestamp;
-    const endTime = displayData[brushIndices.end].timestamp;
+    const startIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.start);
+    const endIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.end);
+    if (startIndex === -1 || endIndex === -1) return;
+    let s = startIndex, e = endIndex;
+    if (s > e) { s = endIndex; e = startIndex; }
 
-    const updated = records.map((r: any) => {
-        if (r.timestamp >= startTime && r.timestamp <= endTime) {
-            const newRaw = r.raw + localOffset;
-            const updatedSamples = r.allSamples ? {
-                ...r.allSamples,
-                [selectedSensor]: parseFloat(((r.allSamples[selectedSensor] || 0) + localOffset).toFixed(3))
-            } : r.allSamples;
-            return { ...r, raw: newRaw, allSamples: updatedSamples };
-        }
-        return r;
-    });
-    setRecords(updated);
-    runAnalysis(updated, selectedSensor);
+    const startMs = displayDataRaw[s].timestamp.getTime();
+    const endMs = displayDataRaw[e].timestamp.getTime();
+
+    const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: localOffset, scale: 1 }];
+    setModifiers(newMods);
+    runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
     setLocalOffset(0);
-    alert("Offset lokal berhasil diterapkan.");
+    alert("Partial offset diterapkan pada area zoom.");
   };
 
   const applyScaling = () => {
     if (!scaleReference || !scaleTarget || scaleFactor === 1) return;
-    const updated = records.map((r: any) => {
-        if (r.allSamples && r.allSamples[scaleTarget] !== undefined) {
-             const newVal = r.allSamples[scaleTarget] * scaleFactor;
-             const updatedSamples = { ...r.allSamples, [scaleTarget]: parseFloat(newVal.toFixed(3)) };
-             return {
-                 ...r,
-                 allSamples: updatedSamples,
-                 raw: scaleTarget === selectedSensor ? newVal : r.raw
-             };
-        }
-        return r;
-    });
-    setRecords(updated);
-    runAnalysis(updated, selectedSensor);
-    alert(`Faktor skala ${scaleFactor} diterapkan pada ${scaleTarget}`);
+    if (!zoomDomain) {
+        alert("Pilih area pada grafik dengan melakukan zoom (klik dan tarik) terlebih dahulu.");
+        return;
+    }
+    const startIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.start);
+    const endIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.end);
+    if (startIndex === -1 || endIndex === -1) return;
+    let s = startIndex, e = endIndex;
+    if (s > e) { s = endIndex; e = startIndex; }
+
+    const startMs = displayDataRaw[s].timestamp.getTime();
+    const endMs = displayDataRaw[e].timestamp.getTime();
+
+    const newMods = [...modifiers, { startMs, endMs, sensor: scaleTarget, offset: 0, scale: scaleFactor }];
+    setModifiers(newMods);
+    runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
+    alert(`Faktor skala ${scaleFactor} diterapkan pada area zoom untuk sensor ${scaleTarget}`);
+  };
+
+  const undoModifier = () => {
+      if (modifiers.length === 0) return;
+      const newMods = modifiers.slice(0, -1);
+      setModifiers(newMods);
+      runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
+  };
+
+  const resetModifiers = () => {
+      setModifiers([]);
+      runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, []);
   };
 
   const computeScalingFactor = () => {
@@ -1306,10 +1353,10 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest">Dashboard Controls</h4>
              </div>
              
-             {/* Local Offset */}
-             <div className="space-y-2 p-3 bg-amber-50/50 border border-amber-100 rounded-xl">
+             {/* Partial Offset */}
+             <div className="space-y-2 p-3 bg-amber-50/50 border border-amber-100 rounded-xl relative">
                 <label className="text-[10px] font-bold text-amber-700 flex items-center justify-between">
-                    <span>Regional Offset (m)</span>
+                    <span>Partial Offset (m)</span>
                     <Clock size={12}/>
                 </label>
                 <div className="flex gap-2">
@@ -1319,9 +1366,17 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                         onChange={(e) => setLocalOffset(parseFloat(e.target.value))}
                         className="flex-1 bg-white border border-amber-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-200"
                     />
-                    <button onClick={applyLocalOffset} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 transition-colors shadow-sm">Apply</button>
+                    <button onClick={applyPartialOffset} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 transition-colors shadow-sm">Koreksi</button>
                 </div>
-                <p className="text-[9px] text-amber-600/70 italic leading-tight">Apply to current brushed region.</p>
+                <div className="flex items-center justify-between mt-1">
+                    <p className="text-[9px] text-amber-600/70 italic leading-tight">Apply to zoomed area.</p>
+                    {modifiers.length > 0 && (
+                        <div className="flex items-center gap-1">
+                            <button onClick={undoModifier} className="text-[9px] font-bold px-1.5 py-0.5 bg-amber-200/50 text-amber-700 rounded hover:bg-amber-200 transition-colors">Undo</button>
+                            <button onClick={resetModifiers} className="text-[9px] font-bold px-1.5 py-0.5 bg-rose-100 text-rose-600 rounded hover:bg-rose-200 transition-colors">Reset</button>
+                        </div>
+                    )}
+                </div>
              </div>
 
              {/* Scaling */}
@@ -1519,10 +1574,10 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                       key={sensor}
                       hide={hiddenLines[sensor]} 
                       dataKey={`allSamples.${sensor}`}
-                      stroke={color} 
-                      strokeWidth={1.5}
-                      strokeOpacity={0.6}
-                      dot={false}
+                      stroke="none"
+                      strokeWidth={0}
+                      dot={{ r: 1.5, fill: color, fillOpacity: 0.6, strokeWidth: 0 }}
+                      activeDot={{ r: 3, fill: color }}
                       type="monotone"
                       name={sensor} 
                       isAnimationActive={false} 
@@ -2021,10 +2076,11 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
 
 function StatCard({ label, value, trend, trendColor }: { label: string, value: string, trend: string, trendColor?: string }) {
   return (
-    <div className="bg-white p-6 rounded-2xl border border-[#e2e8f0] shadow-sm hover:shadow-md transition-shadow flex flex-col gap-1">
-      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-display">{label}</div>
-      <div className="text-3xl font-black text-[#0284c7] font-display tracking-tight">{value}</div>
-      <div className={cn("text-[10px] mt-1 font-bold", trendColor || "text-slate-400")}>{trend}</div>
+    <div className="relative overflow-hidden bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-lg transition-all flex flex-col gap-1.5 group">
+      <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-sky-100/50 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
+      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-display z-10">{label}</div>
+      <div className="text-[2.5rem] leading-none font-black text-transparent bg-clip-text bg-gradient-to-br from-sky-600 to-indigo-600 font-display tracking-tighter drop-shadow-sm z-10">{value}</div>
+      <div className={cn("text-[10px] mt-1 font-bold z-10", trendColor || "text-slate-400")}>{trend}</div>
     </div>
   );
 }
