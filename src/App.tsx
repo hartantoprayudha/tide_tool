@@ -19,7 +19,8 @@ import {
   FileSpreadsheet,
   ZoomIn,
   ZoomOut,
-  Maximize
+  Maximize,
+  X
 } from 'lucide-react';
 import { 
   ComposedChart,
@@ -312,7 +313,7 @@ export default function App() {
               const sValStr = (row[s] || "").trim();
               const isCm = s.toLowerCase().includes('(cm)');
               let sValRaw = parseFloat(sValStr.replace(',', '.'));
-              if (sValRaw === 999 || sValRaw === -999 || sValRaw < -900 || sValRaw > 900) sValRaw = NaN;
+              if (sValRaw === 999 || sValRaw === -999 || sValRaw < -200 || sValRaw > 900) sValRaw = NaN;
               if (isCm && !isNaN(sValRaw)) sValRaw = sValRaw / 100;
               
               if (unmodifiedDateMs !== null && !isNaN(sValRaw)) {
@@ -331,7 +332,7 @@ export default function App() {
           });
 
           let valRaw = parseFloat(valStr.replace(',', '.'));
-          if (valRaw === 999 || valRaw === -999 || valRaw < -900 || valRaw > 900) valRaw = NaN;
+          if (valRaw === 999 || valRaw === -999 || valRaw < -200 || valRaw > 900) valRaw = NaN;
           if (isCurrentCm && !isNaN(valRaw)) valRaw = valRaw / 100;
           valRaw += vOffset;
           
@@ -790,6 +791,58 @@ export default function App() {
     link.click();
   };
 
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportSelections, setExportSelections] = useState<Record<string, boolean>>({});
+
+  const toggleExportSelection = (key: string) => {
+      setExportSelections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const exportHYDRAS = () => {
+    if (!records.length) return;
+    
+    const selectedKeys = Object.keys(exportSelections).filter(k => exportSelections[k]);
+    if (selectedKeys.length === 0) {
+        alert("Pilih setidaknya satu kolom data untuk diekspor.");
+        return;
+    }
+
+    let header = "Timestamp\t";
+    selectedKeys.forEach(k => { header += `${k}\t`; });
+    header = header.trim() + "\n";
+
+    let content = header;
+    records.forEach(r => {
+        content += `${format(r.timestamp, 'dd/MM/yyyy HH:mm:ss')}\t`;
+        selectedKeys.forEach(k => {
+            if (k.endsWith('(Analyzed)')) {
+                const sensorName = k.replace(' (Analyzed)', '');
+                // The main sensor is pre-filtered. If another sensor is requested, 
+                // in this simple HYDRAS export we either recalculate or just output NaN if not main.
+                // For simplicity, we output the current filtered if it's the selected sensor
+                if (sensorName === selectedSensor) {
+                    content += `${typeof r.filtered === 'number' ? r.filtered.toFixed(3) : NaN}\t`;
+                } else {
+                    // For multiple filtered sensors, you'd need to run the filter on all. 
+                    // To keep it performant, we export 'raw' offset logic or warn user.
+                    content += `${typeof r.allSamples?.[sensorName] === 'number' ? r.allSamples[sensorName].toFixed(3) : NaN}\t`;
+                }
+            } else {
+                content += `${typeof r.allSamples?.[k] === 'number' ? r.allSamples[k].toFixed(3) : NaN}\t`;
+            }
+        });
+        content = content.trim() + "\n";
+    });
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Export_HYDRAS_${fileName.replace('.csv', '').replace('.txt', '')}.txt`; // Maintain uploaded format
+    link.click();
+    setShowExportModal(false);
+  };
+
   const exportReport = (formatType: 'csv' | 'txt') => {
     if (!records.length) return;
 
@@ -1009,6 +1062,13 @@ export default function App() {
           {records.length > 0 && (
             <div className="flex gap-2">
               <button 
+                onClick={() => setShowExportModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-rose-50 border border-rose-200 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-100 shadow-sm"
+              >
+                <Download size={16} />
+                Export HYDRAS
+              </button>
+              <button 
                 onClick={() => exportReport('csv')}
                 className="flex items-center gap-2 px-4 py-2 bg-white border border-[#e2e8f0] rounded-lg text-sm font-semibold text-[#1e293b] hover:bg-slate-50 shadow-sm"
               >
@@ -1120,6 +1180,75 @@ export default function App() {
                     isLoading={isLoading}
                     title={chartTitle}
                 />
+            )}
+            
+            {/* Export Modal */}
+            {showExportModal && (
+              <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                  <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                      <div className="p-6 pb-4 border-b border-slate-100 flex items-center justify-between">
+                          <div>
+                              <h3 className="text-lg font-black text-slate-800 font-display">Export HYDRAS Format</h3>
+                              <p className="text-xs text-slate-500 font-medium mt-1">Pilih data yang ingin diekspor sejajar dengan Timestamp.</p>
+                          </div>
+                          <button onClick={() => setShowExportModal(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"><X size={20} /></button>
+                      </div>
+                      <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+                          <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                              <input 
+                                  type="checkbox" 
+                                  checked={exportSelections['Timestamp'] ?? true} 
+                                  readOnly
+                                  disabled
+                                  className="w-4 h-4 rounded text-sky-500 bg-slate-100 border-slate-300"
+                              />
+                              <div className="flex flex-col">
+                                  <span className="text-sm font-bold text-slate-700">Timestamp</span>
+                                  <span className="text-[10px] text-slate-500 font-medium">Data waktu selalu disertakan (Wajib)</span>
+                              </div>
+                          </label>
+                          
+                          <div className="space-y-2">
+                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Raw Sensor Data</div>
+                             {availableSensors.map(s => (
+                                 <label key={s} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                                     <input 
+                                         type="checkbox" 
+                                         checked={exportSelections[s] || false} 
+                                         onChange={() => toggleExportSelection(s)}
+                                         className="w-4 h-4 rounded text-sky-500 border-slate-300 focus:ring-sky-500"
+                                     />
+                                     <span className="text-sm font-bold text-slate-700">{s}</span>
+                                 </label>
+                             ))}
+                          </div>
+                          
+                          <div className="space-y-2">
+                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Analyzed Sensor Data</div>
+                             {availableSensors.map(s => (
+                                 <label key={`${s} (Analyzed)`} className="flex items-center gap-3 p-3 rounded-xl border border-sky-200 bg-sky-50/30 cursor-pointer hover:bg-sky-50 transition-colors">
+                                     <input 
+                                         type="checkbox" 
+                                         checked={exportSelections[`${s} (Analyzed)`] || false} 
+                                         onChange={() => toggleExportSelection(`${s} (Analyzed)`)}
+                                         className="w-4 h-4 rounded text-sky-600 border-sky-300 focus:ring-sky-600"
+                                     />
+                                     <div className="flex flex-col">
+                                         <span className="text-sm font-bold text-sky-900">{s}</span>
+                                         <span className="text-[10px] text-sky-600 font-medium">Dataset terfilter & offset</span>
+                                     </div>
+                                 </label>
+                             ))}
+                          </div>
+                      </div>
+                      <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+                          <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">Batal</button>
+                          <button onClick={exportHYDRAS} className="px-6 py-2 bg-[#0284c7] hover:bg-sky-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors flex items-center gap-2">
+                              <Download size={16} /> Download .txt
+                          </button>
+                      </div>
+                  </div>
+              </div>
             )}
             
             {/* Loading Overlay */}
@@ -1272,12 +1401,40 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const computeScalingFactor = () => {
     if (!scaleReference || !scaleTarget) return;
-    const refVals = records.map((r: any) => r.allSamples?.[scaleReference]).filter((v: any) => typeof v === 'number' && !isNaN(v));
-    const targetVals = records.map((r: any) => r.allSamples?.[scaleTarget]).filter((v: any) => typeof v === 'number' && !isNaN(v));
-    if (refVals.length > 0 && targetVals.length > 0) {
-        const meanRef = refVals.reduce((a: any, b: any) => a + b, 0) / refVals.length;
-        const meanTarget = targetVals.reduce((a: any, b: any) => a + b, 0) / targetVals.length;
-        if (meanTarget !== 0) setScaleFactor(parseFloat((meanRef / meanTarget).toFixed(4)));
+
+    let refSum = 0, targetSum = 0, count = 0;
+    records.forEach(r => {
+        const rv = r.allSamples?.[scaleReference];
+        const tv = r.allSamples?.[scaleTarget];
+        if (typeof rv === 'number' && !isNaN(rv) && typeof tv === 'number' && !isNaN(tv)) {
+            refSum += rv;
+            targetSum += tv;
+            count++;
+        }
+    });
+
+    if (count > 1) {
+        const refMean = refSum / count;
+        const targetMean = targetSum / count;
+        let refVar = 0, targetVar = 0;
+
+        records.forEach(r => {
+            const rv = r.allSamples?.[scaleReference];
+            const tv = r.allSamples?.[scaleTarget];
+            if (typeof rv === 'number' && !isNaN(rv) && typeof tv === 'number' && !isNaN(tv)) {
+                refVar += Math.pow(rv - refMean, 2);
+                targetVar += Math.pow(tv - targetMean, 2);
+            }
+        });
+
+        if (targetVar > 0) {
+            const scale = Math.sqrt(refVar / count) / Math.sqrt(targetVar / count);
+            setScaleFactor(parseFloat(scale.toFixed(4)));
+        } else {
+            alert("Varian target adalah nol, tidak bisa menghitung rasio.");
+        }
+    } else {
+        alert("Tidak ada cukup titik data valid dari kedua sensor yang bertumpukan.");
     }
   };
 
@@ -1418,7 +1575,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Multi-Sensor Overlay</label>
                 <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
                     {availableSensors.map((s: string) => {
-                        const palette = ['#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#f97316'];
+                        const palette = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
                         const color = palette[availableSensors.indexOf(s) % palette.length];
                         const isActive = visibleSensors.includes(s);
                         return (
@@ -1511,7 +1668,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                           </div>
                           
                           {visibleSensors.map((s, idx) => {
-                             const palette = ['#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#f97316'];
+                             const palette = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
                              const color = palette[availableSensors.indexOf(s) % palette.length];
                              return (
                                <div key={s} className="flex items-center justify-between gap-6 text-[11px]">
@@ -1566,7 +1723,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               ) : null}
 
               {availableSensors.map((sensor, idx) => {
-                  const palette = ['#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#f97316'];
+                  const palette = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
                   const color = palette[idx % palette.length];
                   if (!visibleSensors.includes(sensor)) return null;
                   return (
