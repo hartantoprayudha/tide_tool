@@ -166,9 +166,9 @@ export default function App() {
   // Analysis State
   const [zThreshold, setZThreshold] = useState(3.0);
   const [filterType, setFilterType] = useState<'ma' | 'median' | 'butterworth'>('ma');
-  const [filterWindow, setFilterWindow] = useState(10);
-  const [medianWindow, setMedianWindow] = useState(11);
-  const [butterCutoff, setButterCutoff] = useState(0.1);
+  const [filterWindow, setFilterWindow] = useState(15);
+  const [medianWindow, setMedianWindow] = useState(3);
+  const [butterCutoff, setButterCutoff] = useState(0.5);
   const [harmonicResults, setHarmonicResults] = useState<ConstituentResult[]>([]);
   const [z0, setZ0] = useState(0);
   const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number } | null>(null);
@@ -485,9 +485,10 @@ export default function App() {
 
         // 3. Low-Pass Filter Logic (Using interpolatable 'cleanedInput')
         if (filterType === 'ma') {
+          const maSamples = Math.max(1, Math.round((filterWindow * 60000) / dt));
           processed = processed.map((r, i) => {
-            const start = Math.max(0, i - Math.floor(filterWindow / 2));
-            const end = Math.min(cleanedInput.length, i + Math.ceil(filterWindow / 2));
+            const start = Math.max(0, i - Math.floor(maSamples / 2));
+            const end = Math.min(cleanedInput.length, i + Math.ceil(maSamples / 2));
             const windowVals = cleanedInput.slice(start, end);
             const avg = windowVals.reduce((s, x) => s + x, 0) / windowVals.length;
             return { ...r, filtered: parseFloat(avg.toFixed(3)) }; 
@@ -808,7 +809,7 @@ export default function App() {
     }
 
     let header = "Timestamp\t";
-    selectedKeys.forEach(k => { header += `${k}\t`; });
+    selectedKeys.forEach(k => { header += `${k.replace('(cm)', '').trim()}\t`; });
     header = header.trim() + "\n";
 
     let content = header;
@@ -1868,14 +1869,17 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
               <div className="flex justify-between items-end">
                 <div className="space-y-1">
-                  <h4 className="text-sm font-black text-slate-800 uppercase font-display">Window Size (pts)</h4>
-                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai 12-24 untuk data per jam guna mereduksi noise sinyal diurnal.</p>
+                  <h4 className="text-sm font-black text-slate-800 uppercase font-display">Window Size (menit)</h4>
+                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai 15-60 menit untuk data frekuensi tinggi, atau 720 (12 jam) guna mereduksi noise pasut.</p>
                 </div>
-                <span className="text-2xl font-black text-[#0284c7] font-mono">{window}</span>
+                <div className="flex items-baseline gap-1">
+                    <span className="text-2xl font-black text-[#0284c7] font-mono">{window}</span>
+                    <span className="text-[10px] font-black text-slate-400">m</span>
+                </div>
               </div>
               <input 
-                type="range" min="1" max="100" step="1" 
-                value={Number.isNaN(window) ? 24 : window} 
+                type="range" min="1" max="1440" step="1" 
+                value={Number.isNaN(window) ? 15 : window} 
                 onChange={(e) => setWindow(parseInt(e.target.value))}
                 className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
               />
@@ -1887,13 +1891,13 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
               <div className="flex justify-between items-end">
                 <div className="space-y-1">
                   <h4 className="text-sm font-black text-slate-800 uppercase font-display">Median Kernel (pts)</h4>
-                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai ganjil (3, 5, 7). Efektif menjaga tepian sinyal sambil membuang noise salt-and-pepper.</p>
+                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai ganjil (3, 5, 7). Efektif menjaga tepian sinyal sambil membuang residu spike ekstrim.</p>
                 </div>
                 <span className="text-2xl font-black text-[#0284c7] font-mono">{medianWindow}</span>
               </div>
               <input 
                 type="range" min="3" max="51" step="2" 
-                value={Number.isNaN(medianWindow) ? 5 : medianWindow} 
+                value={Number.isNaN(medianWindow) ? 3 : medianWindow} 
                 onChange={(e) => setMedianWindow(parseInt(e.target.value))}
                 className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
               />
@@ -1905,13 +1909,13 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
                <div className="flex justify-between items-end">
                 <div className="space-y-1">
                   <h4 className="text-sm font-black text-slate-800 uppercase font-display">Cutoff Frequency (Norm)</h4>
-                  <p className="text-[10px] text-slate-500 max-w-xs">0.01 - 0.5. Nilai rendah (0.05) memotong frekuensi tinggi secara tajam. Nilai tinggi membiarkan lebih banyak detail.</p>
+                  <p className="text-[10px] text-slate-500 max-w-xs">0.01 - 0.5. Nilai default (0.5) meminimalkan redaman. Nilai rendah memotong frekuensi tinggi lebih agresif.</p>
                 </div>
                 <span className="text-2xl font-black text-[#0284c7] font-mono">{cutoff.toFixed(3)}</span>
               </div>
               <input 
-                type="range" min="0.001" max="0.499" step="0.001" 
-                value={Number.isNaN(cutoff) ? 0.05 : cutoff} 
+                type="range" min="0.001" max="0.5" step="0.001" 
+                value={Number.isNaN(cutoff) ? 0.5 : cutoff} 
                 onChange={(e) => setCutoff(parseFloat(e.target.value))}
                 className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
               />
