@@ -301,6 +301,7 @@ export default function App() {
               const sValStr = (row[s] || "").trim();
               const isCm = s.toLowerCase().includes('(cm)');
               let sValRaw = parseFloat(sValStr.replace(',', '.'));
+              if (sValRaw === 999 || sValRaw === -999 || sValRaw < -900 || sValRaw > 900) sValRaw = NaN;
               if (isCm && !isNaN(sValRaw)) sValRaw = sValRaw / 100;
               if (!isNaN(sValRaw)) {
                 allSamples[s] = parseFloat((sValRaw).toFixed(3));
@@ -308,6 +309,7 @@ export default function App() {
           });
 
           let valRaw = parseFloat(valStr.replace(',', '.'));
+          if (valRaw === 999 || valRaw === -999 || valRaw < -900 || valRaw > 900) valRaw = NaN;
           if (isCurrentCm && !isNaN(valRaw)) valRaw = valRaw / 100;
           valRaw += vOffset;
           
@@ -908,7 +910,7 @@ export default function App() {
                 <input 
                   type="number"
                   step="0.01"
-                  value={verticalOffset === 0 ? '' : verticalOffset}
+                  value={Number.isNaN(verticalOffset) || verticalOffset === 0 ? '' : verticalOffset}
                   placeholder="0.00"
                   onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
@@ -923,7 +925,7 @@ export default function App() {
                 <input 
                   type="number"
                   step="0.5"
-                  value={timeOffset === 0 ? '' : timeOffset}
+                  value={Number.isNaN(timeOffset) || timeOffset === 0 ? '' : timeOffset}
                   placeholder="0.0"
                   onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
@@ -1122,8 +1124,12 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const outliers = useMemo(() => records.filter((r:any) => r.isOutlier).length, [records]);
 
   const handleLegendClick = (e: any) => {
-    const { dataKey } = e;
-    setHiddenLines(prev => ({ ...prev, [dataKey]: !prev[dataKey] }));
+    let key = e.dataKey;
+    if (e.value === "Analyzed Level") key = "filtered";
+    else if (e.value === "Sea Level Trend") key = "trendline";
+    else if (availableSensors.includes(e.value)) key = e.value;
+    
+    setHiddenLines(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const chartData = useMemo(() => {
@@ -1309,7 +1315,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 <div className="flex gap-2">
                     <input 
                         type="number" step="0.001"
-                        value={localOffset}
+                        value={Number.isNaN(localOffset) ? '' : localOffset}
                         onChange={(e) => setLocalOffset(parseFloat(e.target.value))}
                         className="flex-1 bg-white border border-amber-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-200"
                     />
@@ -1342,7 +1348,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 <div className="flex gap-1.5">
                     <input 
                         type="number" step="0.0001"
-                        value={scaleFactor}
+                        value={Number.isNaN(scaleFactor) ? '' : scaleFactor}
                         onChange={(e) => setScaleFactor(parseFloat(e.target.value))}
                         className="min-w-0 flex-1 bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none"
                         placeholder="Factor"
@@ -1509,12 +1515,15 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                   const color = palette[idx % palette.length];
                   if (!visibleSensors.includes(sensor)) return null;
                   return (
-                    <Scatter 
+                    <Line 
                       key={sensor}
                       hide={hiddenLines[sensor]} 
-                      dataKey={(d) => d.allSamples?.[sensor]} 
-                      fill={color} 
-                      fillOpacity={0.6} 
+                      dataKey={`allSamples.${sensor}`}
+                      stroke={color} 
+                      strokeWidth={1.5}
+                      strokeOpacity={0.6}
+                      dot={false}
+                      type="monotone"
                       name={sensor} 
                       isAnimationActive={false} 
                     />
@@ -1654,7 +1663,7 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
               </div>
               <input 
                 type="range" min="1" max="100" step="1" 
-                value={window} 
+                value={Number.isNaN(window) ? 24 : window} 
                 onChange={(e) => setWindow(parseInt(e.target.value))}
                 className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
               />
@@ -1672,7 +1681,7 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
               </div>
               <input 
                 type="range" min="3" max="51" step="2" 
-                value={medianWindow} 
+                value={Number.isNaN(medianWindow) ? 5 : medianWindow} 
                 onChange={(e) => setMedianWindow(parseInt(e.target.value))}
                 className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
               />
@@ -1690,7 +1699,7 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
               </div>
               <input 
                 type="range" min="0.001" max="0.499" step="0.001" 
-                value={cutoff} 
+                value={Number.isNaN(cutoff) ? 0.05 : cutoff} 
                 onChange={(e) => setCutoff(parseFloat(e.target.value))}
                 className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
               />
