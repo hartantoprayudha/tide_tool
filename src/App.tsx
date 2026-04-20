@@ -35,7 +35,8 @@ import {
   Area,
   Legend,
   Brush,
-  ReferenceLine
+  ReferenceLine,
+  ReferenceArea
 } from 'recharts';
 import Papa from 'papaparse';
 import { cn } from '@/src/lib/utils';
@@ -593,16 +594,18 @@ export default function App() {
                         const d = parse(parts[0].trim(), 'dd/MM/yyyy HH:mm:ss', new Date());
                         if (isValid(d)) {
                             // High confidence headerless format
-                            const data = lines.map(line => {
-                                const p = line.split(/\t|\s{2,}/);
-                                const obj: any = { 'Timestamp': p[0].trim() };
-                                for (let i = 1; i < p.length; i++) {
-                                    // User said these are in cm, we'll mark them as (cm) to trigger auto-scaling later
-                                    obj[`Sensor ${i} (cm)`] = p[i]?.trim();
-                                }
-                                return obj;
-                            });
-                            resolve({ data, meta: { fields: Object.keys(data[0]) }, errors: [] } as any);
+                            setTimeout(() => {
+                                const data = lines.map(line => {
+                                    const p = line.split(/\t|\s{2,}/);
+                                    const obj: any = { 'Timestamp': p[0].trim() };
+                                    for (let i = 1; i < p.length; i++) {
+                                        // User said these are in cm, we'll mark them as (cm) to trigger auto-scaling later
+                                        obj[`Sensor ${i} (cm)`] = p[i]?.trim();
+                                    }
+                                    return obj;
+                                });
+                                resolve({ data, meta: { fields: Object.keys(data[0]) }, errors: [] } as any);
+                            }, 50);
                             return;
                         }
                     }
@@ -612,6 +615,7 @@ export default function App() {
                 Papa.parse(file, {
                   header: true,
                   skipEmptyLines: true,
+                  worker: true,
                   complete: resolve,
                   error: reject
                 });
@@ -756,7 +760,7 @@ export default function App() {
 
     let content = "";
     if (formatType === 'csv') {
-      content = "Timestamp,Raw (m),Filtered (m),Is Outlier\n";
+      content = `Timestamp,${selectedSensor || 'Sensor Data'} (m),${selectedSensor || 'Sensor'} Filtered (m),Is Outlier\n`;
       records.forEach(r => {
         content += `${format(r.timestamp, 'yyyy-MM-dd HH:mm:ss')},${r.raw},${r.filtered},${r.isOutlier}\n`;
       });
@@ -1109,6 +1113,11 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const [scaleTarget, setScaleTarget] = useState<string>('');
   const [localOffset, setLocalOffset] = useState<number>(0);
   const [brushIndices, setBrushIndices] = useState<{ start: number, end: number } | null>(null);
+  
+  // Zoom States
+  const [refAreaLeft, setRefAreaLeft] = useState<string>('');
+  const [refAreaRight, setRefAreaRight] = useState<string>('');
+  const [zoomDomain, setZoomDomain] = useState<{start: string, end: string} | null>(null);
 
   const outliers = useMemo(() => records.filter((r:any) => r.isOutlier).length, [records]);
 
@@ -1126,7 +1135,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     }));
   }, [records, trend]);
 
-  const displayData = useMemo(() => {
+  const displayDataRaw = useMemo(() => {
     if (!chartData.length) return [];
     const sorted = [...chartData].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     const sampled = [];
@@ -1140,6 +1149,29 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     }
     return sampled;
   }, [chartData]);
+  
+  const displayData = useMemo(() => {
+    if (!zoomDomain) return displayDataRaw;
+    const startIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.start);
+    const endIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.end);
+    if (startIndex === -1 || endIndex === -1) return displayDataRaw;
+    let s = startIndex, e = endIndex;
+    if (s > e) { s = endIndex; e = startIndex; }
+    return displayDataRaw.slice(s, e + 1);
+  }, [displayDataRaw, zoomDomain]);
+
+  const zoom = () => {
+    if (refAreaLeft === refAreaRight || refAreaRight === '') {
+      setRefAreaLeft('');
+      setRefAreaRight('');
+      return;
+    }
+    setZoomDomain({ start: refAreaLeft, end: refAreaRight });
+    setRefAreaLeft('');
+    setRefAreaRight('');
+  };
+
+  const zoomOut = () => setZoomDomain(null);
 
   const applyLocalOffset = () => {
     if (!brushIndices || localOffset === 0) {
@@ -1351,6 +1383,9 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         <div className="relative mb-6 flex justify-center items-center min-h-[32px]">
           <h3 className="text-2xl font-black text-slate-800 px-2 font-display text-center">{title}</h3>
           <div className="absolute right-0 top-0 flex gap-2 export-exclude">
+            {zoomDomain && (
+              <button onClick={zoomOut} className="px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors mr-4 shadow-sm border border-sky-200"><ZoomOut size={14} /> Reset Zoom X</button>
+            )}
             <button onClick={() => handleDownload('png')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
             <button onClick={() => handleDownload('jpeg')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
             <button onClick={() => handleDownload('pdf')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
@@ -1369,7 +1404,14 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             </button>
           </div>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={displayData} margin={{ bottom: 40, left: 30, right: 20, top: 40 }} style={{ cursor: 'crosshair' }}>
+            <ComposedChart 
+                data={displayData} 
+                margin={{ bottom: 40, left: 30, right: 20, top: 40 }} 
+                style={{ cursor: 'crosshair', userSelect: 'none' }}
+                onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
+                onMouseMove={(e: any) => refAreaLeft && e && e.activeLabel && setRefAreaRight(e.activeLabel)}
+                onMouseUp={zoom}
+            >
               <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
               <XAxis 
                 dataKey="timeStr" 
@@ -1457,6 +1499,10 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               {moonEvents.map((me, i) => (
                 <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 18 }} />
               ))}
+              
+              {refAreaLeft && refAreaRight ? (
+                <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#0ea5e9" fillOpacity={0.15} />
+              ) : null}
 
               {availableSensors.map((sensor, idx) => {
                   const palette = ['#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#f97316'];
@@ -1749,7 +1795,11 @@ const PredictionTooltip = ({ active, payload }: any) => {
 };
 
 function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title }: any) {
-  const displayPreds = useMemo(() => {
+  const [refAreaLeft, setRefAreaLeft] = useState<string>('');
+  const [refAreaRight, setRefAreaRight] = useState<string>('');
+  const [zoomDomain, setZoomDomain] = useState<{start: string, end: string} | null>(null);
+
+  const displayPredsRaw = useMemo(() => {
     if (predictions.length <= 365 * 24) {
       return predictions;
     } else {
@@ -1776,7 +1826,31 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
       }));
     }
   }, [predictions]);
+
+  const displayPreds = useMemo(() => {
+    if (!zoomDomain) return displayPredsRaw;
+    const startIndex = displayPredsRaw.findIndex((d: any) => (d.timeStr || d.time) === zoomDomain.start);
+    const endIndex = displayPredsRaw.findIndex((d: any) => (d.timeStr || d.time) === zoomDomain.end);
+    if (startIndex === -1 || endIndex === -1) return displayPredsRaw;
+    let s = startIndex, e = endIndex;
+    if (s > e) { s = endIndex; e = startIndex; }
+    return displayPredsRaw.slice(s, e + 1);
+  }, [displayPredsRaw, zoomDomain]);
+
   const moonEvents = useMemo(() => getMoonEvents(displayPreds), [displayPreds]);
+
+  const zoom = () => {
+    if (refAreaLeft === refAreaRight || refAreaRight === '') {
+      setRefAreaLeft('');
+      setRefAreaRight('');
+      return;
+    }
+    setZoomDomain({ start: refAreaLeft, end: refAreaRight });
+    setRefAreaLeft('');
+    setRefAreaRight('');
+  };
+
+  const zoomOut = () => setZoomDomain(null);
 
   return (
     <div className="space-y-6">
@@ -1843,6 +1917,9 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           <div className="flex justify-between items-center mb-8 px-2">
             <h3 className="font-black text-slate-800 text-lg font-display">Predicted Mean Sea Level (m)</h3>
             <div className="flex gap-2">
+              {zoomDomain && (
+                <button onClick={zoomOut} className="flex items-center gap-2 px-4 py-2 bg-sky-100 hover:bg-sky-200 border border-sky-200 rounded-xl text-xs font-bold text-sky-700 transition-colors"><ZoomOut size={14} /> Reset Zoom X</button>
+              )}
               <button 
                 onClick={() => onExport('csv')}
                 className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors"
@@ -1850,6 +1927,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <Download size={14} /> CSV
               </button>
               <button 
+
                 onClick={() => onExport('txt')}
                 className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors"
               >
@@ -1862,7 +1940,14 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           </div>
           <div className="h-[400px] w-full" style={{ willChange: 'transform, opacity', transform: 'translateZ(0)' }}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={displayPreds} margin={{ bottom: 20 }}>
+              <AreaChart 
+                data={displayPreds} 
+                margin={{ bottom: 20 }}
+                style={{ cursor: 'crosshair', userSelect: 'none' }}
+                onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
+                onMouseMove={(e: any) => refAreaLeft && e && e.activeLabel && setRefAreaRight(e.activeLabel)}
+                onMouseUp={zoom}
+              >
               <defs>
                 <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#0284c7" stopOpacity={0.2}/>
@@ -1896,6 +1981,11 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 isAnimationActive={false}
                 connectNulls 
               />
+              
+              {refAreaLeft && refAreaRight ? (
+                <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#0ea5e9" fillOpacity={0.15} />
+              ) : null}
+
               <Brush dataKey="time" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
             </AreaChart>
             </ResponsiveContainer>
@@ -1924,7 +2014,7 @@ function StatCard({ label, value, trend, trendColor }: { label: string, value: s
   return (
     <div className="bg-white p-6 rounded-2xl border border-[#e2e8f0] shadow-sm hover:shadow-md transition-shadow flex flex-col gap-1">
       <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-display">{label}</div>
-      <div className="text-2xl font-black text-slate-800 font-mono tracking-tighter">{value}</div>
+      <div className="text-3xl font-black text-[#0284c7] font-display tracking-tight">{value}</div>
       <div className={cn("text-[10px] mt-1 font-bold", trendColor || "text-slate-400")}>{trend}</div>
     </div>
   );
