@@ -296,7 +296,7 @@ export default function App() {
 
         // 1. Data Parsing with flexible Date format
         // Optimization: Pre-calculate formats and avoid object creation in inner sensors loop where possible
-        const fmts = ['dd/MM/yyyy HH:mm:ss', 'dd/MM/yyyy HH:mm', 'ddMMyyyy HH:mm', 'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'ddMMyyyy HHmm', 'dd/MM/yyyy HH.mm'];
+        const fmts = ['dd/MM/yyyy HH:mm:ss', 'dd/MM/yyyy HH:mm', 'dd-MM-yyyy HH:mm:ss', 'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd HH:mm', 'ddMMyyyy HH:mm', 'ddMMyyyy HHmm', 'dd/MM/yyyy HH.mm'];
         
         let processed: TideRecord[] = [];
         for (let i = 0; i < rawRows.length; i++) {
@@ -659,14 +659,29 @@ export default function App() {
                     }
 
                     if (p.length >= 2) {
+                        const testFormats = ['dd/MM/yyyy HH:mm:ss', 'dd/MM/yyyy HH:mm', 'ddMMyyyy HH:mm', 'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'dd-MM-yyyy HH:mm:ss', 'yyyy-MM-dd HH:mm'];
+                        
                         // Strategy 1: Column 1 is full timestamp
-                        const dRaw = parse(p[0].trim(), 'dd/MM/yyyy HH:mm:ss', new Date());
+                        const raw1 = p[0].trim();
+                        let isStrategy1 = false;
+                        for (const fmt of testFormats) {
+                            if (isValid(parse(raw1, fmt, new Date()))) {
+                                isStrategy1 = true;
+                                break;
+                            }
+                        }
                         
                         // Strategy 2: Column 1 + Column 2 is timestamp
                         const tsCombined = (p[0].trim() + " " + p[1].trim()).trim();
-                        const dCombined = parse(tsCombined, 'dd/MM/yyyy HH:mm:ss', new Date());
+                        let isStrategy2 = false;
+                        for (const fmt of testFormats) {
+                            if (isValid(parse(tsCombined, fmt, new Date()))) {
+                                isStrategy2 = true;
+                                break;
+                            }
+                        }
 
-                        if (isValid(dCombined) && p.length >= 3) {
+                        if (isStrategy2 && p.length >= 3) {
                             // Format: Date | Time | Val...
                             setTimeout(() => {
                                 const data = lines.map(line => {
@@ -680,7 +695,7 @@ export default function App() {
                                 resolve({ data, meta: { fields: Object.keys(data[0]) }, errors: [] } as any);
                             }, 50);
                             return;
-                        } else if (isValid(dRaw)) {
+                        } else if (isStrategy1) {
                             // Format: FullTimestamp | Val...
                             setTimeout(() => {
                                 const data = lines.map(line => {
@@ -1406,45 +1421,57 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const zoomOut = () => setZoomDomain(null);
 
   const applyPartialOffset = () => {
-    if (!zoomDomain || localOffset === 0) {
-        alert("Pilih area pada grafik dengan melakukan zoom (klik dan tarik) terlebih dahulu.");
-        return;
-    }
-    const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-    const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-    if (startIndex === -1 || endIndex === -1) return;
-    let s = startIndex, e = endIndex;
-    if (s > e) { s = endIndex; e = startIndex; }
+    if (localOffset === 0) return;
+    if (displayDataRaw.length === 0) return;
 
-    const startMs = displayDataRaw[s].timestamp.getTime();
-    const endMs = displayDataRaw[e].timestamp.getTime();
+    let startMs, endMs;
+
+    if (zoomDomain) {
+        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
+        if (startIndex === -1 || endIndex === -1) return;
+        let s = startIndex, e = endIndex;
+        if (s > e) { s = endIndex; e = startIndex; }
+
+        startMs = displayDataRaw[s].timestamp.getTime();
+        endMs = displayDataRaw[e].timestamp.getTime();
+    } else {
+        startMs = displayDataRaw[0].timestamp.getTime();
+        endMs = displayDataRaw[displayDataRaw.length - 1].timestamp.getTime();
+    }
 
     const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: localOffset, scale: 1 }];
     setModifiers(newMods);
     runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
     setLocalOffset(0);
-    alert("Partial offset diterapkan pada area zoom.");
+    alert(`Partial offset diterapkan pada ${zoomDomain ? 'area zoom' : 'seluruh data'}.`);
   };
 
   const applyScaling = () => {
-    if (!scaleReference || !scaleTarget || scaleFactor === 1) return;
-    if (!zoomDomain) {
-        alert("Pilih area pada grafik dengan melakukan zoom (klik dan tarik) terlebih dahulu.");
-        return;
+    if (!scaleReference || !scaleTarget || !scaleFactor) return;
+    if (displayDataRaw.length === 0) return;
+    
+    let startMs, endMs;
+    
+    if (zoomDomain) {
+        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
+        if (startIndex === -1 || endIndex === -1) return;
+        let s = startIndex, e = endIndex;
+        if (s > e) { s = endIndex; e = startIndex; }
+        
+        startMs = displayDataRaw[s].timestamp.getTime();
+        endMs = displayDataRaw[e].timestamp.getTime();
+    } else {
+        // Apply globally if no zoom domain is selected
+        startMs = displayDataRaw[0].timestamp.getTime();
+        endMs = displayDataRaw[displayDataRaw.length - 1].timestamp.getTime();
     }
-    const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-    const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-    if (startIndex === -1 || endIndex === -1) return;
-    let s = startIndex, e = endIndex;
-    if (s > e) { s = endIndex; e = startIndex; }
-
-    const startMs = displayDataRaw[s].timestamp.getTime();
-    const endMs = displayDataRaw[e].timestamp.getTime();
 
     const newMods = [...modifiers, { startMs, endMs, sensor: scaleTarget, offset: 0, scale: scaleFactor }];
     setModifiers(newMods);
     runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
-    alert(`Faktor skala ${scaleFactor} diterapkan pada area zoom untuk sensor ${scaleTarget}`);
+    alert(`Faktor skala ${scaleFactor} diterapkan pada ${zoomDomain ? 'area zoom' : 'seluruh data'} untuk sensor ${scaleTarget}`);
   };
 
   const undoModifier = () => {
@@ -1462,8 +1489,13 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const computeScalingFactor = () => {
     if (!scaleReference || !scaleTarget) return;
 
+    let dataToUse = records;
+    if (zoomDomain) {
+        dataToUse = records.filter(r => r.timestamp.getTime() >= zoomDomain.start && r.timestamp.getTime() <= zoomDomain.end);
+    }
+
     let refSum = 0, targetSum = 0, count = 0;
-    records.forEach(r => {
+    dataToUse.forEach(r => {
         const rv = r.allSamples?.[scaleReference];
         const tv = r.allSamples?.[scaleTarget];
         if (typeof rv === 'number' && !isNaN(rv) && typeof tv === 'number' && !isNaN(tv)) {
@@ -1476,25 +1508,25 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     if (count > 1) {
         const refMean = refSum / count;
         const targetMean = targetSum / count;
-        let refVar = 0, targetVar = 0;
+        let sumXY = 0, sumX2 = 0;
 
-        records.forEach(r => {
-            const rv = r.allSamples?.[scaleReference];
-            const tv = r.allSamples?.[scaleTarget];
+        dataToUse.forEach(r => {
+            const rv = r.allSamples?.[scaleReference]; // Y
+            const tv = r.allSamples?.[scaleTarget]; // X
             if (typeof rv === 'number' && !isNaN(rv) && typeof tv === 'number' && !isNaN(tv)) {
-                refVar += Math.pow(rv - refMean, 2);
-                targetVar += Math.pow(tv - targetMean, 2);
+                sumXY += (tv - targetMean) * (rv - refMean);
+                sumX2 += Math.pow(tv - targetMean, 2);
             }
         });
 
-        if (targetVar > 0) {
-            const scale = Math.sqrt(refVar / count) / Math.sqrt(targetVar / count);
+        if (sumX2 > 0) {
+            const scale = sumXY / sumX2; // Linear Regression Slope
             setScaleFactor(parseFloat(scale.toFixed(4)));
         } else {
             alert("Varian target adalah nol, tidak bisa menghitung rasio.");
         }
     } else {
-        alert("Tidak ada cukup titik data valid dari kedua sensor yang bertumpukan.");
+        alert("Tidak ada cukup titik data valid dari kedua sensor yang bertumpukan di area ini.");
     }
   };
 
