@@ -1562,19 +1562,21 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     if (count > 1) {
         const refMean = refSum / count;
         const targetMean = targetSum / count;
-        let sumXY = 0, sumX2 = 0;
+        let refVar = 0, targetVar = 0;
 
         dataToUse.forEach(r => {
-            const rv = r.allSamples?.[scaleReference]; // Y
-            const tv = r.allSamples?.[scaleTarget]; // X
+            const rv = r.allSamples?.[scaleReference];
+            const tv = r.allSamples?.[scaleTarget];
             if (typeof rv === 'number' && !isNaN(rv) && typeof tv === 'number' && !isNaN(tv)) {
-                sumXY += (tv - targetMean) * (rv - refMean);
-                sumX2 += Math.pow(tv - targetMean, 2);
+                refVar += Math.pow(rv - refMean, 2);
+                targetVar += Math.pow(tv - targetMean, 2);
             }
         });
 
-        if (sumX2 > 0) {
-            const scale = sumXY / sumX2; // Linear Regression Slope
+        if (targetVar > 0) {
+            // Using Standard Deviation Ratio (RMS Ratio of centered signal)
+            // This is more robust for purely multiplicative scaling issues in tide measurement
+            const scale = Math.sqrt(refVar / targetVar);
             setScaleFactor(parseFloat(scale.toFixed(4)));
         } else {
             alert("Varian target adalah nol, tidak bisa menghitung rasio.");
@@ -2171,15 +2173,19 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
 
   const displayPredsRaw = useMemo(() => {
-    if (predictions.length <= 365 * 24) {
+    const oneYearHours = 365 * 24;
+    
+    if (predictions.length <= oneYearHours) {
       return predictions.map((p: any) => ({
           ...p,
           timeMs: p.timestamp.getTime()
       }));
     } else {
-      // Calculate Monthly Means for > 1 year
+      // If > 1 year: Show only the first year as monthly means
+      const firstYearData = predictions.slice(0, oneYearHours);
       const monthlyData: Record<string, { sum: number, count: number, date: Date, max: number, min: number }> = {};
-      predictions.forEach((p: any) => {
+      
+      firstYearData.forEach((p: any) => {
           const monthKey = format(p.timestamp, 'yyyy-MM');
           if (!monthlyData[monthKey]) {
               monthlyData[monthKey] = { sum: 0, count: 0, date: p.timestamp, max: -Infinity, min: Infinity };
@@ -2189,6 +2195,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           if (p.value > monthlyData[monthKey].max) monthlyData[monthKey].max = p.value;
           if (p.value < monthlyData[monthKey].min) monthlyData[monthKey].min = p.value;
       });
+
       return Object.values(monthlyData).map((m: any) => ({
           time: format(m.date, 'MMM yy'),
           fullTime: format(m.date, 'MMMM yyyy'),
