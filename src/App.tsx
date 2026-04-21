@@ -161,6 +161,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
+  const [inputIsUTC, setInputIsUTC] = useState<boolean>(true);
   
   // Analysis State
   const [zThreshold, setZThreshold] = useState(3.0);
@@ -316,6 +317,17 @@ export default function App() {
 
           if (!isValid(dateObj)) dateObj = new Date(tsStr);
           if (!isValid(dateObj)) continue;
+          
+          if (inputIsUTC) {
+              dateObj = new Date(Date.UTC(
+                  dateObj.getFullYear(),
+                  dateObj.getMonth(),
+                  dateObj.getDate(),
+                  dateObj.getHours(),
+                  dateObj.getMinutes(),
+                  dateObj.getSeconds()
+              ));
+          }
 
           const unmodifiedDateMs = dateObj.getTime();
           if (tOffset !== 0) {
@@ -772,8 +784,12 @@ export default function App() {
 
     setTimeout(() => {
         try {
-            const start = new Date(predStartDate);
-            const end = new Date(predEndDate);
+            const [sYear, sMonth, sDay] = predStartDate.split('-');
+            const start = new Date(Number(sYear), Number(sMonth) - 1, Number(sDay), 0, 0, 0);
+            
+            const [eYear, eMonth, eDay] = predEndDate.split('-');
+            const end = new Date(Number(eYear), Number(eMonth) - 1, Number(eDay), 23, 59, 59);
+
             if (!isValid(start) || !isValid(end)) {
                 alert("Tanggal prediksi tidak valid");
                 return;
@@ -845,9 +861,10 @@ export default function App() {
       });
     } else {
       content = `Tide Prediction Report\nRange: ${predStartDate} to ${predEndDate}\n`;
+      content += `Note: Timestamps are formatted as dd/mm/yyyy hh:mm:ss\n`;
       content += `------------------------------------------\n`;
       predictions.forEach(p => {
-          content += `${format(p.timestamp, 'ddMMyyyy HH:mm')}\t${typeof p.value === 'number' ? p.value.toFixed(3) : p.value}\n`;
+          content += `${format(p.timestamp, 'dd/MM/yyyy HH:mm:ss')}\t${typeof p.value === 'number' ? p.value.toFixed(3) : p.value}\n`;
       });
     }
     const blob = new Blob([content], { type: 'text/plain' });
@@ -953,6 +970,7 @@ export default function App() {
           content += `MHWS (Mean High Water Springs)  : ${datums.mhws.toFixed(3)} m\n`;
           content += `MLWS (Mean Low Water Springs)   : ${datums.mlws.toFixed(3)} m\n`;
           content += `LAT  (Lowest Astronomical Tide) : ${datums.lat.toFixed(3)} m\n`;
+          content += `\nTunggang Pasut (Tide Range)    : ${(datums.hat - datums.lat).toFixed(3)} m\n`;
       }
       content += `\nModel Accuracies (Harmonic vs Analyzed):\n`;
       content += `RMSE (Root Mean Square Error)  : ${rmse.toFixed(4)} m\n`;
@@ -1089,17 +1107,53 @@ export default function App() {
                 />
             </div>
           </div>
+          
+          <div className="flex items-center justify-between px-1 py-1">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-display flex items-center gap-1 cursor-pointer" title="Centang jika waktu di file data Anda merupakan waktu UTC. Menghindari shift akibat timezone lokal komputer.">
+                <input 
+                    type="checkbox" 
+                    checked={inputIsUTC} 
+                    onChange={(e) => {
+                        setInputIsUTC(e.target.checked);
+                        if (rawData.length) {
+                             // re-run analysis to re-parse time
+                             runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers);
+                        }
+                    }} 
+                    className="rounded text-[#0284c7] focus:ring-[#0284c7]"
+                />
+                Input Time is UTC
+             </label>
+          </div>
 
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="group w-full flex flex-col items-center justify-center gap-1 py-4 bg-[#0284c7] text-white rounded-xl hover:bg-[#0ea5e9] transition-all shadow-lg shadow-sky-100"
-          >
-            <div className="flex items-center gap-2 font-bold text-sm">
-                <Upload size={14} />
-                Import Data
-            </div>
-            <span className="text-[8px] font-bold opacity-60 uppercase tracking-tighter">format file csv, txt</span>
-          </button>
+          <div className="flex gap-2">
+            <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 group flex flex-col items-center justify-center gap-1 py-4 bg-[#0284c7] text-white rounded-xl hover:bg-[#0ea5e9] transition-all shadow-lg shadow-sky-100"
+            >
+                <div className="flex items-center gap-2 font-bold text-sm">
+                    <Upload size={14} />
+                    Import Data
+                </div>
+                <span className="text-[8px] font-bold opacity-60 uppercase tracking-tighter">format file csv, txt</span>
+            </button>
+            
+            {records.length > 0 && (
+                <button 
+                    onClick={() => {
+                        setVerticalOffset(0);
+                        setTimeOffset(0);
+                        setModifiers([]);
+                        runAnalysis(rawData, selectedSensor, 0, 0, []);
+                    }}
+                    title="Reset semua offset dan skala"
+                    className="w-16 flex flex-col items-center justify-center gap-1 py-4 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 hover:text-rose-600 transition-all border border-rose-100"
+                >
+                    <RefreshCw size={14} />
+                    <span className="text-[8px] font-bold uppercase tracking-tighter px-1 text-center leading-tight">Reset</span>
+                </button>
+            )}
+          </div>
           <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".csv,.txt" />
           
           <div className="flex items-center gap-3 px-3 py-2 text-[#64748b] text-[10px] font-bold uppercase tracking-wider">
