@@ -142,6 +142,7 @@ interface PartialModifier {
   sensor: string;
   offset: number;
   scale: number;
+  isDeleted?: boolean;
 }
 
 export default function App() {
@@ -165,13 +166,22 @@ export default function App() {
   
   // Analysis State
   const [zThreshold, setZThreshold] = useState(3.0);
+  const [manualMin, setManualMin] = useState<number | "">("");
+  const [manualMax, setManualMax] = useState<number | "">("");
   const [filterType, setFilterType] = useState<'ma' | 'median' | 'butterworth'>('ma');
   const [filterWindow, setFilterWindow] = useState(15);
   const [medianWindow, setMedianWindow] = useState(3);
   const [butterCutoff, setButterCutoff] = useState(0.5);
   const [harmonicResults, setHarmonicResults] = useState<ConstituentResult[]>([]);
   const [z0, setZ0] = useState(0);
-  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number } | null>(null);
+  const [linearTrend, setLinearTrend] = useState<{ 
+    slope: number, 
+    intercept: number, 
+    rateYear: number, 
+    lsqTrend: { slope: number, intercept: number, rateYear: number },
+    mannKendall?: { s: number, pValue: number, trend: string, z: number }
+  } | null>(null);
+  const [isDeTiding, setIsDeTiding] = useState(true);
   
   // Prediction State
   const [predStartDate, setPredStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -363,6 +373,10 @@ export default function App() {
               for (let mIdx = 0; mIdx < activeMods.length; mIdx++) {
                   const mod = activeMods[mIdx];
                   if (mod.sensor === currentSensor && unmodifiedDateMs >= mod.startMs && unmodifiedDateMs <= mod.endMs) {
+                      if (mod.isDeleted) {
+                          valRaw = NaN;
+                          break;
+                      }
                       valRaw = (valRaw * mod.scale) + mod.offset;
                   }
               }
@@ -447,11 +461,18 @@ export default function App() {
             if (isNaN(r.raw)) {
                 return { ...r, isOutlier: true };
             }
+            // B. Apply Outlier Detection
             const isStatOutlier = Math.abs(r.raw - meanRaw) > (zThreshold * stdRaw);
             const isHarmonicOutlier = r.raw > roughHAT || r.raw < roughLAT;
+            
+            // Manual Range Check
+            let isManualOutlier = false;
+            if (manualMin !== "" && r.raw < (manualMin as number)) isManualOutlier = true;
+            if (manualMax !== "" && r.raw > (manualMax as number)) isManualOutlier = true;
+
             return {
                 ...r,
-                isOutlier: isStatOutlier || isHarmonicOutlier
+                isOutlier: isStatOutlier || isHarmonicOutlier || isManualOutlier
             };
         });
 
@@ -615,26 +636,103 @@ export default function App() {
             lat: fittedZ0 - sumAmp
         });
 
-        // 5. Linear Trend Analysis
-        const validRecords = processed.filter(r => !isNaN(r.filtered) && !r.isOutlier);
+        // 5. Linear Trend & Least Squares Analysis with optional De-Tiding
+        let validRecords = processed.filter(r => !isNaN(r.filtered) && !r.isOutlier);
         if (validRecords.length > 1) {
             const t0 = processed[0].timestamp.getTime();
             const x = validRecords.map(r => (r.timestamp.getTime() - t0) / 3600000);
-            const y = validRecords.map(r => r.filtered);
             
-            const n = x.length;
-            let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-            for (let i = 0; i < n; i++) {
-                sumX += x[i];
-                sumY += y[i];
-                sumXY += x[i] * y[i];
-                sumX2 += x[i] * x[i];
+            // De-tiding calculation
+            let y: number[];
+            if (isDeTiding && results.length > 0) {
+               const f_list = results.map(r => 2 * Math.PI * r.freq);
+               y = validRecords.map(r => {
+                  const ti = (r.timestamp.getTime() - t0) / 3600000;
+                  let tideSum = 0;
+                  results.forEach((res, idx) => {
+                     const angle = f_list[idx] * ti;
+                     tideSum += res.amp * Math.cos(angle - res.phase * (Math.PI / 180));
+                  });
+                  return r.filtered - tideSum;
+               });
+            } else {
+               y = validRecords.map(r => r.filtered);
             }
-            const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-            const intercept = (sumY - slope * sumX) / n;
-            const rateYear = slope * 24 * 365.25;
+            
+            const calculateTrend = (dataX: number[], dataY: number[]) => {
+                const n = dataX.length;
+                let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+                for (let i = 0; i < n; i++) {
+                    sumX += dataX[i];
+                    sumY += dataY[i];
+                    sumXY += dataX[i] * dataY[i];
+                    sumX2 += dataX[i] * dataX[i];
+                }
+                const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+                const intercept = (sumY - slope * sumX) / n;
+                const rateYear = slope * 24 * 365.25;
+                return { slope, intercept, rateYear };
+            };
 
-            setLinearTrend({ slope, intercept, rateYear });
+            const regTrend = calculateTrend(x, y);
+            const lsqTrend = calculateTrend(x, y);
+
+            // Mann-Kendall Test
+            const calculateMannKendall = (dataY: number[]) => {
+                const n = dataY.length;
+                if (n < 2) return undefined;
+                
+                // Downsample for performance if needed, but tide data is usually not that huge (max 4k points here)
+                // For Mann-Kendall, O(n^2) can be slow for large N.
+                // If N > 1000, we'll downsample to 1000 points to keep UI responsive.
+                let mkData = dataY;
+                if (n > 1000) {
+                    const step = Math.floor(n / 1000);
+                    mkData = [];
+                    for(let i=0; i<n; i+=step) mkData.push(dataY[i]);
+                }
+                const nk = mkData.length;
+
+                let s = 0;
+                for (let k = 0; k < nk - 1; k++) {
+                    for (let j = k + 1; j < nk; j++) {
+                        const diff = mkData[j] - mkData[k];
+                        if (diff > 0) s += 1;
+                        else if (diff < 0) s -= 1;
+                    }
+                }
+
+                // Variance calculation (assuming no ties for simplicity, or we can handle them)
+                // Ties check
+                const ties: Record<number, number> = {};
+                mkData.forEach(v => { ties[v] = (ties[v] || 0) + 1; });
+                let tieSum = 0;
+                Object.values(ties).forEach(t => {
+                    if (t > 1) tieSum += t * (t - 1) * (2 * t + 5);
+                });
+
+                const varS = (nk * (nk - 1) * (2 * nk + 5) - tieSum) / 18;
+                let z = 0;
+                if (s > 0) z = (s - 1) / Math.sqrt(varS);
+                else if (s < 0) z = (s + 1) / Math.sqrt(varS);
+                
+                // P-value approximation from Z-score (standard normal distribution)
+                const pValue = 2 * (1 - normalCDF(Math.abs(z)));
+                const trendDesc = pValue < 0.05 ? (z > 0 ? "Increasing" : "Decreasing") : "No Trend";
+
+                return { s, z, pValue, trend: trendDesc };
+            };
+
+            const normalCDF = (x: number) => {
+                const t = 1 / (1 + 0.2316419 * Math.abs(x));
+                const d = 0.3989422804 * Math.exp(-x * x / 2);
+                const p = d * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+                return x >= 0 ? 1 - p : p;
+            };
+
+            const mannKendall = calculateMannKendall(y);
+
+            setLinearTrend({ ...regTrend, lsqTrend, mannKendall });
         }
 
         setRecords(processed);
@@ -1263,6 +1361,8 @@ export default function App() {
                     setModifiers={setModifiers}
                     verticalOffset={verticalOffset}
                     timeOffset={timeOffset}
+                    isDeTiding={isDeTiding}
+                    setIsDeTiding={setIsDeTiding}
                     onReset={() => {
                         setVerticalOffset(0);
                         setTimeOffset(0);
@@ -1275,7 +1375,11 @@ export default function App() {
                 <OutlierView 
                   records={records} 
                   threshold={zThreshold} 
-                  setThreshold={setZThreshold} 
+                  setThreshold={setZThreshold}
+                  manualMin={manualMin}
+                  setManualMin={setManualMin}
+                  manualMax={manualMax}
+                  setManualMax={setManualMax}
                   onUpdate={() => runAnalysis(rawData)} 
                 />
             )}
@@ -1292,7 +1396,35 @@ export default function App() {
                    onUpdate={() => runAnalysis(rawData)} 
                 />
             )}
-            {activeTab === 'harmonic' && records.length > 0 && <HarmonicView results={harmonicResults} />}
+            {activeTab === 'harmonic' && records.length > 0 && (
+              <div className="space-y-6">
+                 <div className="bg-white rounded-2xl border border-slate-200 p-6 flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-3">
+                       <Waves className="text-sky-500" size={24} />
+                       <div>
+                          <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">Tren Analysis Options</h4>
+                          <p className="text-[10px] text-slate-500 font-medium">Pengaturan sebelum kalkulasi tren kenaikan muka laut.</p>
+                       </div>
+                    </div>
+                    <label className="flex items-center gap-3 px-4 py-2 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+                       <input 
+                          type="checkbox" 
+                          checked={isDeTiding} 
+                          onChange={(e) => {
+                             setIsDeTiding(e.target.checked);
+                             runAnalysis(rawData);
+                          }}
+                          className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
+                       />
+                       <div className="flex flex-col">
+                          <span className="text-xs font-bold text-slate-700 uppercase">Aktifkan De-Tiding</span>
+                          <span className="text-[9px] text-slate-500">Kurangi komponen pasut sebelum menghitung tren.</span>
+                       </div>
+                    </label>
+                 </div>
+                 <HarmonicView results={harmonicResults} />
+              </div>
+            )}
             {activeTab === 'predictions' && records.length > 0 && (
                 <PredictionView 
                     predictions={predictions} 
@@ -1395,7 +1527,7 @@ export default function App() {
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -1646,12 +1778,49 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
       <div className="flex flex-col xl:flex-row gap-6">
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-5">
             <StatCard label="Z0 (MSL)" value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} trend="Least Squares Fit" />
-            <StatCard 
-              label="Sea Level Trend" 
-              value={`${trend ? (trend.rateYear * 1000).toFixed(2) : "0.00"} mm/thn`} 
-              trend="Linear Regression" 
-              trendColor={trend?.rateYear > 0 ? "text-red-500" : "text-emerald-500"} 
-            />
+            <div className="relative group">
+                <StatCard 
+                  label="Linear Trend" 
+                  value={`${trend ? (trend.rateYear * 1000).toFixed(2) : "0.00"} mm/y`} 
+                  trend={isDeTiding ? "De-tided Regr" : "Linear Regr"} 
+                  trendColor={trend?.rateYear > 0 ? "text-red-500" : "text-emerald-500"} 
+                />
+                <div className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="bg-white shadow-xl border border-slate-200 p-2 rounded-lg text-[9px] font-bold text-slate-500 min-w-[120px]">
+                        <div className="border-b border-slate-100 pb-1 mb-1 text-slate-400 uppercase">Trend Methods</div>
+                        <div className="flex justify-between items-center gap-2">
+                           <span>Least Square:</span>
+                           <span className="text-slate-800">{( (trend?.lsqTrend?.rateYear || 0) * 1000).toFixed(2)} mm/y</span>
+                        </div>
+                        <div className="flex justify-between items-center gap-2">
+                           <span>Regression:</span>
+                           <span className="text-slate-800">{( (trend?.rateYear || 0) * 1000).toFixed(2)} mm/y</span>
+                        </div>
+                        {trend?.mannKendall && (
+                            <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
+                                <div className="text-[8px] text-slate-400 uppercase">Mann-Kendall Test</div>
+                                <div className="flex justify-between items-center gap-2">
+                                    <span>S-Stat:</span>
+                                    <span className="text-slate-800">{trend.mannKendall.s}</span>
+                                </div>
+                                <div className="flex justify-between items-center gap-2">
+                                    <span>P-Value:</span>
+                                    <span className="text-slate-800">{trend.mannKendall.pValue.toFixed(4)}</span>
+                                </div>
+                                <div className="flex justify-between items-center gap-2">
+                                    <span>Trend:</span>
+                                    <span className={cn("px-1 rounded text-[7px] uppercase font-black", 
+                                        trend.mannKendall.trend === 'Increasing' ? 'bg-emerald-100 text-emerald-700' : 
+                                        trend.mannKendall.trend === 'Decreasing' ? 'bg-rose-100 text-rose-700' : 
+                                        'bg-slate-100 text-slate-500')}>
+                                        {trend.mannKendall.trend}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
             <StatCard label="HAT / LAT" value={`${datums ? datums.hat.toFixed(2) : '--'} / ${datums ? datums.lat.toFixed(2) : '--'}`} trend="Highest/Lowest" />
             <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
           </div>
@@ -1928,7 +2097,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   );
 }
 
-function OutlierView({ records, threshold, setThreshold, onUpdate }: any) {
+function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin, manualMax, setManualMax, onUpdate }: any) {
   return (
     <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 space-y-8 shadow-sm">
        <div className="flex items-center gap-5">
@@ -1937,42 +2106,85 @@ function OutlierView({ records, threshold, setThreshold, onUpdate }: any) {
         </div>
         <div>
           <h2 className="text-xl font-black text-slate-800">Spike & Outlier Control</h2>
-          <p className="text-sm text-slate-500">Gunakan Z-Score untuk mengidentifikasi data error yang ekstrem.</p>
+          <p className="text-sm text-slate-500">Gunakan Z-Score otomatis atau masukkan rentang manual untuk membuang anomali data.</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
-        <div className="space-y-6">
-          <div className="flex justify-between items-end">
-            <label className="text-xs font-black text-slate-700 font-display uppercase tracking-wider">Threshold Sensitivitas</label>
-            <span className="text-2xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+        <div className="space-y-10">
+          <div className="space-y-6">
+            <div className="flex justify-between items-end">
+              <label className="text-xs font-black text-slate-700 font-display uppercase tracking-wider">Threshold Z-Score (Otomatis)</label>
+              <span className="text-2xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
+            </div>
+            <input 
+              type="range" min="0.5" max="5" step="0.1" 
+              value={isNaN(threshold) ? 3.0 : threshold} 
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setThreshold(isNaN(val) ? 3.0 : val);
+              }}
+              className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+            />
+            <p className="text-[10px] text-slate-400 font-medium italic">Catatan: Nilai lebih kecil (misal 1.0) akan menghapus lebih banyak data "spike".</p>
           </div>
-          <input 
-            type="range" min="0.5" max="5" step="0.1" 
-            value={isNaN(threshold) ? 3.0 : threshold} 
-            onChange={(e) => {
-              const val = parseFloat(e.target.value);
-              setThreshold(isNaN(val) ? 3.0 : val);
-            }}
-            className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
-          />
-          <p className="text-[10px] text-slate-400 font-medium italic">Catatan: Nilai lebih kecil (misal 1.0) akan menghapus lebih banyak data "spike".</p>
+
+          <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
+             <label className="text-xs font-black text-slate-800 uppercase tracking-widest block font-display">Pembersihan Manual (Min / Max Data)</label>
+             <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Batas Minimal (m)</div>
+                   <input 
+                      type="number" 
+                      step="0.001"
+                      value={manualMin}
+                      placeholder="Input min (m)..."
+                      onChange={(e) => setManualMin(e.target.value === "" ? "" : parseFloat(e.target.value))}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-black text-slate-800 outline-none focus:ring-2 focus:ring-sky-100"
+                   />
+                </div>
+                <div className="space-y-2">
+                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Batas Maksimal (m)</div>
+                   <input 
+                      type="number" 
+                      step="0.001"
+                      value={manualMax}
+                      placeholder="Input max (m)..."
+                      onChange={(e) => setManualMax(e.target.value === "" ? "" : parseFloat(e.target.value))}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-black text-slate-800 outline-none focus:ring-2 focus:ring-sky-100"
+                   />
+                </div>
+             </div>
+             <p className="text-[9px] text-slate-500 leading-relaxed">Data yang berada di luar rentang ini akan dianggap sebagai outlier dan akan di-interpolasi.</p>
+          </div>
+
           <button 
             onClick={onUpdate}
-            className="w-full py-4 bg-[#1e293b] text-white rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-lg"
+            className="w-full py-4 bg-[#1e293b] text-white rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-lg active:scale-95"
           >
             <RefreshCw size={20} /> Jalankan Algoritma Pembersihan
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 text-center">
-                <div className="text-4xl font-black text-slate-800">{records.filter((r:any) => r.isOutlier).length}</div>
-                <div className="text-[10px] font-bold text-amber-600 uppercase mt-2">Dibuang (Outliers)</div>
+        <div className="flex flex-col gap-4 justify-center">
+            <div className="bg-white p-6 rounded-2xl border-2 border-slate-100 text-center shadow-sm">
+                <div className="text-xs font-black text-slate-400 uppercase mb-4 tracking-widest">Statistik Outlier</div>
+                <div className="grid grid-cols-2 divide-x divide-slate-100">
+                   <div>
+                       <div className="text-4xl font-black text-slate-800">{records.filter((r:any) => r.isOutlier).length}</div>
+                       <div className="text-[10px] font-bold text-amber-600 uppercase mt-2 tracking-tighter">Dibuang (Outliers)</div>
+                   </div>
+                   <div>
+                       <div className="text-4xl font-black text-emerald-700">{records.filter((r:any) => !r.isOutlier).length}</div>
+                       <div className="text-[10px] font-bold text-emerald-600 uppercase mt-2 tracking-tighter">Diterima (Verified)</div>
+                   </div>
+                </div>
             </div>
-            <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100 text-center">
-                <div className="text-4xl font-black text-emerald-700">{records.filter((r:any) => !r.isOutlier).length}</div>
-                <div className="text-[10px] font-bold text-emerald-600 uppercase mt-2">Diterima (Verified)</div>
+            <div className="p-5 bg-[#0284c7]/5 rounded-2xl border border-sky-100 space-y-2">
+               <div className="text-[10px] font-black text-[#0284c7] uppercase">Tips Deteksi</div>
+               <p className="text-[11px] text-slate-600 italic leading-relaxed">
+                  "Gunakan manual range jika Anda mengetahui batas fisik sumur pantau atau dermaga untuk membuang data 'jump' yang tidak terdeteksi oleh Z-Score."
+               </p>
             </div>
         </div>
       </div>
@@ -2030,19 +2242,23 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
               <div className="flex justify-between items-end">
                 <div className="space-y-1">
                   <h4 className="text-sm font-black text-slate-800 uppercase font-display">Window Size (menit)</h4>
-                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai 15-60 menit untuk data frekuensi tinggi, atau 720 (12 jam) guna mereduksi noise pasut.</p>
+                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai 15-60 menit untuk data frekuensi tinggi, atau 1440 (24 jam) guna mereduksi noise pasut harian.</p>
                 </div>
-                <div className="flex items-baseline gap-1">
-                    <span className="text-2xl font-black text-[#0284c7] font-mono">{window}</span>
-                    <span className="text-[10px] font-black text-slate-400">m</span>
+                <div className="flex items-center gap-3">
+                   <div className="relative">
+                      <input 
+                         type="number" 
+                         min="1" 
+                         max="10080" 
+                         value={window} 
+                         onChange={(e) => setWindow(parseInt(e.target.value) || 0)}
+                         className="w-32 bg-white border border-slate-200 rounded-xl px-4 py-2 text-xl font-black text-[#0284c7] font-mono outline-none focus:ring-2 focus:ring-sky-100"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">min</span>
+                   </div>
                 </div>
               </div>
-              <input 
-                type="range" min="1" max="1440" step="1" 
-                value={Number.isNaN(window) ? 15 : window} 
-                onChange={(e) => setWindow(parseInt(e.target.value))}
-                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
-              />
+              <p className="text-[10px] text-slate-400 italic">Window size menentukan panjang data yang dirata-ratakan. Semakin besar nilai, grafik akan semakin halus (smooth).</p>
             </div>
           )}
 
@@ -2185,41 +2401,10 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
 
   const displayPredsRaw = useMemo(() => {
-    // 366 days safe threshold for leap years
-    const oneYearHours = 366 * 24;
-    
-    if (predictions.length <= oneYearHours) {
-      return predictions.map((p: any) => ({
-          ...p,
-          timeMs: p.timestamp.getTime()
-      }));
-    } else {
-      // If > 1 year: Show only the first year as monthly means
-      const firstYearData = predictions.slice(0, oneYearHours);
-      const monthlyData: Record<string, { sum: number, count: number, date: Date, max: number, min: number }> = {};
-      
-      firstYearData.forEach((p: any) => {
-          const monthKey = format(p.timestamp, 'yyyy-MM');
-          if (!monthlyData[monthKey]) {
-              monthlyData[monthKey] = { sum: 0, count: 0, date: p.timestamp, max: -Infinity, min: Infinity };
-          }
-          monthlyData[monthKey].sum += p.value;
-          monthlyData[monthKey].count += 1;
-          if (p.value > monthlyData[monthKey].max) monthlyData[monthKey].max = p.value;
-          if (p.value < monthlyData[monthKey].min) monthlyData[monthKey].min = p.value;
-      });
-
-      return Object.values(monthlyData).map((m: any) => ({
-          time: format(m.date, 'MMM yy'),
-          fullTime: format(m.date, 'MMMM yyyy'),
-          value: parseFloat((m.sum / m.count).toFixed(3)),
-          timestamp: m.date,
-          timeMs: m.date.getTime(),
-          dayMax: m.max,
-          dayMin: m.min,
-          isMonthlyMean: true
-      }));
-    }
+    return predictions.map((p: any) => ({
+        ...p,
+        timeMs: p.timestamp.getTime()
+    }));
   }, [predictions]);
 
   const displayPreds = useMemo(() => {
@@ -2329,7 +2514,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <Download size={14} /> TXT
               </button>
               <span className="px-3 py-2 bg-sky-50 text-[#0284c7] text-[10px] font-black rounded-lg uppercase tracking-wider">
-                  Interval: {predictions.length > 365 * 24 ? 'Monthly Mean' : '1 Hour'}
+                  Interval: 1 Hour
               </span>
             </div>
           </div>
@@ -2354,7 +2539,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 dataKey="timeMs" 
                 tick={{fontSize: 9, fill: '#64748b'}} 
                 tickFormatter={(val: number) => format(new Date(val), 'dd/MM/yyyy')}
-                interval={Math.floor(displayPreds.length/12)} 
+                interval={Math.floor(displayPreds.length/10)} 
                 axisLine={false} 
               />
               <YAxis 
@@ -2387,13 +2572,13 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#0ea5e9" fillOpacity={0.15} />
               ) : null}
 
-              <Brush dataKey="timeMs" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
+              <Brush dataKey="timeMs" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" tickFormatter={(val: number) => format(new Date(val), 'MMM yy')} />
             </AreaChart>
             </ResponsiveContainer>
           </div>
-          {predictions.length > (365 * 24) && (
-             <div className="mt-4 px-3 py-1.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded-lg uppercase tracking-widest text-center border border-amber-100 flex items-center justify-center gap-2">
-                 <AlertCircle size={14} /> Tampilan Grafik Diagregasi ke Monthly-Mean untuk Performa ({predictions.length.toLocaleString()} Jam Data Prediksi BISA DI-EXPORT)
+          {predictions.length > (31 * 24) && (
+             <div className="mt-4 px-3 py-1.5 bg-sky-50 text-sky-600 text-[10px] font-bold rounded-lg uppercase tracking-widest text-center border border-sky-100 flex items-center justify-center gap-2">
+                 <AlertCircle size={14} /> Berhasil Memproses {predictions.length.toLocaleString()} Jam Data Prediksi (Interval 1 Jam)
              </div>
           )}
           <div className="mt-6 border-t border-slate-100 pt-6">
