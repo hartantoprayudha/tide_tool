@@ -1504,38 +1504,102 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     }));
   }, [records, trend]);
 
-  const displayDataRaw = useMemo(() => {
-    if (!chartData.length) return [];
+  const tsunamiEvent = useMemo(() => {
+    if (!records || records.length < 100) return null;
     
-    // 1. If data is too large, decimate it to maintain responsiveness
-    const maxPoints = 4000; 
-    let sampled = [];
+    // Check interval
+    const t0 = records[0].timestamp.getTime();
+    const t1 = records[1].timestamp.getTime();
+    const intervalMins = (t1 - t0) / 60000;
     
-    if (chartData.length > maxPoints) {
-      const step = Math.ceil(chartData.length / maxPoints);
-      for (let i = 0; i < chartData.length; i += step) {
-        sampled.push(chartData[i]);
-      }
-    } else {
-      sampled = chartData;
+    // Tsunami detection is typically relevant for high freq data (<= 2 min)
+    if (intervalMins > 2) return null; 
+
+    // High Pass Filter: Subtract ~3 hour Moving Average
+    const windowSize = Math.floor(180 / intervalMins);
+    if (records.length < windowSize) return null;
+
+    let residuals = new Array(records.length).fill(0);
+    let sum = 0;
+    for(let i=0; i<windowSize; i++) {
+       sum += records[i].filtered;
+    }
+    
+    for(let i=Math.floor(windowSize/2); i < records.length - Math.ceil(windowSize/2); i++) {
+        let ma = sum / windowSize;
+        residuals[i] = records[i].filtered - ma;
+        sum -= records[i - Math.floor(windowSize/2)].filtered;
+        if (i + Math.ceil(windowSize/2) < records.length) {
+           sum += records[i + Math.ceil(windowSize/2)].filtered;
+        }
     }
 
-    // 2. Add timeMs only for the sampled points to save memory
-    return sampled.map(r => ({
-        ...r,
-        timeMs: r.timestamp.getTime()
-    }));
-  }, [chartData]);
+    // Find anomalous residual > 0.10m 
+    const threshold = 0.10;
+    const maxRes = Math.max(...residuals.map(Math.abs));
+    if (maxRes < threshold) return null;
+
+    const startIdx = residuals.findIndex(r => Math.abs(r) >= 0.05);
+    const revIdx = [...residuals].reverse().findIndex(r => Math.abs(r) >= 0.05);
+    const endIdx = residuals.length - 1 - revIdx;
+    
+    if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+         let maxVal = -Infinity;
+         let maxTime = null;
+         for(let i = startIdx; i <= endIdx; i++) {
+             if (records[i].filtered > maxVal) {
+                 maxVal = records[i].filtered;
+                 maxTime = records[i].timestamp;
+             }
+         }
+         return {
+            start: records[startIdx].timestamp,
+            end: records[endIdx].timestamp,
+            maxHeight: maxVal,
+            maxTime: maxTime
+         };
+    }
+
+    return null;
+  }, [records]);
+
+  const displayDataRaw = useMemo(() => {
+    // We only keep this empty intentionally or remove its usage to safely prevent memory explosion.
+    // Wait, the previous implementation did decimation here. Let's do dynamic decimation instead.
+    return [];
+  }, []);
   
   const displayData = useMemo(() => {
-    if (!zoomDomain) return displayDataRaw;
-    const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-    const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-    if (startIndex === -1 || endIndex === -1) return displayDataRaw;
-    let s = startIndex, e = endIndex;
-    if (s > e) { s = endIndex; e = startIndex; }
-    return displayDataRaw.slice(s, e + 1);
-  }, [displayDataRaw, zoomDomain]);
+     if (!chartData.length) return [];
+     
+     let baseData = chartData;
+     if (zoomDomain) {
+         let s = chartData.findIndex((d: any) => d.timestamp.getTime() >= Math.min(zoomDomain.start, zoomDomain.end));
+         let e = chartData.findIndex((d: any) => d.timestamp.getTime() >= Math.max(zoomDomain.start, zoomDomain.end));
+         
+         if (s !== -1 && e !== -1) {
+            if (s > e) { let temp = s; s = e; e = temp; }
+            baseData = chartData.slice(s, e + 1);
+         }
+     }
+
+     const maxPoints = 4000;
+     let sampled = [];
+
+     if (baseData.length > maxPoints) {
+         const step = Math.ceil(baseData.length / maxPoints);
+         for (let i = 0; i < baseData.length; i += step) {
+             sampled.push(baseData[i]);
+         }
+     } else {
+         sampled = baseData;
+     }
+
+     return sampled.map(r => ({
+         ...r,
+         timeMs: r.timestamp.getTime()
+     }));
+  }, [chartData, zoomDomain]);
 
   const zoom = () => {
     if (refAreaLeft === refAreaRight || refAreaRight === '') {
@@ -1552,22 +1616,16 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const applyPartialOffset = () => {
     if (localOffset === 0) return;
-    if (displayDataRaw.length === 0) return;
+    if (chartData.length === 0) return;
 
     let startMs, endMs;
 
     if (zoomDomain) {
-        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-        if (startIndex === -1 || endIndex === -1) return;
-        let s = startIndex, e = endIndex;
-        if (s > e) { s = endIndex; e = startIndex; }
-
-        startMs = displayDataRaw[s].timestamp.getTime();
-        endMs = displayDataRaw[e].timestamp.getTime();
+        startMs = Math.min(zoomDomain.start, zoomDomain.end);
+        endMs = Math.max(zoomDomain.start, zoomDomain.end);
     } else {
-        startMs = displayDataRaw[0].timestamp.getTime();
-        endMs = displayDataRaw[displayDataRaw.length - 1].timestamp.getTime();
+        startMs = chartData[0].timestamp.getTime();
+        endMs = chartData[chartData.length - 1].timestamp.getTime();
     }
 
     const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: localOffset, scale: 1 }];
@@ -1579,23 +1637,17 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const applyScaling = () => {
     if (!scaleReference || !scaleTarget || !scaleFactor) return;
-    if (displayDataRaw.length === 0) return;
+    if (chartData.length === 0) return;
     
     let startMs, endMs;
     
     if (zoomDomain) {
-        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-        if (startIndex === -1 || endIndex === -1) return;
-        let s = startIndex, e = endIndex;
-        if (s > e) { s = endIndex; e = startIndex; }
-        
-        startMs = displayDataRaw[s].timestamp.getTime();
-        endMs = displayDataRaw[e].timestamp.getTime();
+        startMs = Math.min(zoomDomain.start, zoomDomain.end);
+        endMs = Math.max(zoomDomain.start, zoomDomain.end);
     } else {
         // Apply globally if no zoom domain is selected
-        startMs = displayDataRaw[0].timestamp.getTime();
-        endMs = displayDataRaw[displayDataRaw.length - 1].timestamp.getTime();
+        startMs = chartData[0].timestamp.getTime();
+        endMs = chartData[chartData.length - 1].timestamp.getTime();
     }
 
     const newMods = [...modifiers, { startMs, endMs, sensor: scaleTarget, offset: 0, scale: scaleFactor }];
@@ -1814,7 +1866,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Multi-Sensor Overlay</label>
                 <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
                     {availableSensors.map((s: string) => {
-                        const palette = ['#6366f1', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+                        const palette = ['#6366f1', '#3b82f6', '#ff00ff', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
                         const color = palette[availableSensors.indexOf(s) % palette.length];
                         const isActive = visibleSensors.includes(s);
                         return (
@@ -1835,6 +1887,37 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
              </div>
           </div>
       </div>
+      
+      {tsunamiEvent && (
+          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-6 shadow-sm mb-6 flex items-start gap-5 animate-in fade-in slide-in-from-top-4 duration-500">
+              <div className="p-3 bg-white rounded-full text-rose-500 shadow-sm border border-rose-100">
+                  <AlertCircle size={28} />
+              </div>
+              <div className="flex-1 space-y-3">
+                  <h3 className="text-xl font-black text-rose-600 tracking-tight flex items-center gap-2">
+                       Tsunami Event Detected
+                       <span className="px-2 py-0.5 bg-rose-500 text-white text-[10px] uppercase font-bold rounded-full ml-2">High Frequency Anomalies</span>
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-white p-3 rounded-xl border border-rose-100 shadow-sm">
+                          <label className="text-[10px] font-black text-rose-400 uppercase tracking-widest block mb-1">Ketinggian Maksimum</label>
+                          <div className="text-lg font-black text-rose-700 font-mono">{tsunamiEvent.maxHeight.toFixed(3)} m</div>
+                          <div className="text-[10px] text-rose-500 mt-1">pada {format(tsunamiEvent.maxTime, 'dd MMM yyyy HH:mm:ss')}</div>
+                      </div>
+                      <div className="bg-white p-3 rounded-xl border border-rose-100 shadow-sm">
+                          <label className="text-[10px] font-black text-rose-400 uppercase tracking-widest block mb-1">Mulai Kejadian</label>
+                          <div className="text-sm font-bold text-slate-700">{format(tsunamiEvent.start, 'dd MMM yyyy')}</div>
+                          <div className="text-lg font-black text-rose-700 font-mono">{format(tsunamiEvent.start, 'HH:mm:ss')} UTC</div>
+                      </div>
+                      <div className="bg-white p-3 rounded-xl border border-rose-100 shadow-sm">
+                          <label className="text-[10px] font-black text-rose-400 uppercase tracking-widest block mb-1">Berakhirnya Kejadian</label>
+                          <div className="text-sm font-bold text-slate-700">{format(tsunamiEvent.end, 'dd MMM yyyy')}</div>
+                          <div className="text-lg font-black text-rose-700 font-mono">{format(tsunamiEvent.end, 'HH:mm:ss')} UTC</div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
 
       <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
         <div className="relative mb-6 flex justify-center items-center min-h-[32px]">
@@ -1916,7 +1999,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                           </div>
                           
                           {visibleSensors.map((s, idx) => {
-                             const palette = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
+                             const palette = ['#2563eb', '#059669', '#ff00ff', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
                              const color = palette[availableSensors.indexOf(s) % palette.length];
                              return (
                                <div key={s} className="flex items-center justify-between gap-6 text-[11px]">
@@ -1971,7 +2054,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               ) : null}
 
               {availableSensors.map((sensor, idx) => {
-                  const palette = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
+                  const palette = ['#2563eb', '#059669', '#ff00ff', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
                   const color = palette[idx % palette.length];
                   if (!visibleSensors.includes(sensor)) return null;
                   return (
@@ -2008,7 +2091,9 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
           </ResponsiveContainer>
         </div>
         <div className="mt-4 flex items-center gap-2 justify-center">
-             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest">Visual Optimization: Hourly Sampling Active</div>
+             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest">
+                 Visual Optimization: {displayData.length === chartData.length || displayData.length < 4000 ? 'Showing Raw High-Frequency Data' : `Dynamic Sampling Active (${displayData.length} points)`}
+             </div>
         </div>
       </div>
     </div>
