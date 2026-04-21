@@ -29,7 +29,6 @@ import {
   Line, 
   XAxis, 
   YAxis, 
-  ZAxis,
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
@@ -158,7 +157,7 @@ export default function App() {
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
   const [visibleSensors, setVisibleSensors] = useState<string[]>([]);
-  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('15');
+  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('9');
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
@@ -302,37 +301,24 @@ export default function App() {
         // 1. Data Parsing with flexible Date format
         // Optimization: Pre-calculate formats and avoid object creation in inner sensors loop where possible
         const fmts = ['dd/MM/yyyy HH:mm:ss', 'dd/MM/yyyy HH:mm', 'dd-MM-yyyy HH:mm:ss', 'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd HH:mm', 'ddMMyyyy HH:mm', 'ddMMyyyy HHmm', 'dd/MM/yyyy HH.mm'];
-        let activeFmt: string | null = null;
-        let useNativeDate = false;
         
         let processed: TideRecord[] = [];
         for (let i = 0; i < rawRows.length; i++) {
           const row = rawRows[i];
           let tsStr = (row['Timestamp'] || row[0] || "").trim();
           let valStr = (row[currentSensor] || "").trim();
-          if (!tsStr) continue;
           tsStr = tsStr.replace(/\s+/g, ' ');
 
           let dateObj: Date = new Date(NaN);
-          if (activeFmt) {
-            dateObj = parse(tsStr, activeFmt, new Date());
-          } else if (useNativeDate) {
-            dateObj = new Date(tsStr);
-          } else {
-            for (const fmt of fmts) {
-              const p = parse(tsStr, fmt, new Date());
-              if (isValid(p)) {
-                activeFmt = fmt;
-                dateObj = p;
-                break;
-              }
-            }
-            if (!isValid(dateObj)) {
-              dateObj = new Date(tsStr);
-              if (isValid(dateObj)) useNativeDate = true;
+          for (const fmt of fmts) {
+            const p = parse(tsStr, fmt, new Date());
+            if (isValid(p)) {
+              dateObj = p;
+              break;
             }
           }
 
+          if (!isValid(dateObj)) dateObj = new Date(tsStr);
           if (!isValid(dateObj)) continue;
           
           if (inputIsUTC) {
@@ -1317,7 +1303,6 @@ export default function App() {
                     timeOffset={timeOffset}
                     isDeTiding={isDeTiding}
                     setIsDeTiding={setIsDeTiding}
-                    harmonicResults={harmonicResults}
                     onReset={() => {
                         setVerticalOffset(0);
                         setTimeOffset(0);
@@ -1482,7 +1467,7 @@ export default function App() {
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, harmonicResults }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -1519,166 +1504,38 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     }));
   }, [records, trend]);
 
-  const tsunamiEvent = useMemo(() => {
-    if (!records || records.length < 100 || !harmonicResults || harmonicResults.length === 0) return null;
-    
-    // Check interval
-    const t0 = records[0].timestamp.getTime();
-    const t1 = records[1].timestamp.getTime();
-    const intervalMins = (t1 - t0) / 60000;
-    
-    // Tsunami detection is typically relevant for high freq data (<= 5 min)
-    if (intervalMins > 5) return null; 
-
-    // Find anomalies in the gradient (rate of change)
-    const span = Math.max(1, Math.floor(4 / intervalMins)); // 4 mins span
-    const gradThreshold = 0.04; // 4 cm change in short window is anomalous
-
-    // Ketinggian tsunami dihitung dari selisih antara tinggi muka laut sesaat (raw data) 
-    // dengan nilai prediksi tinggi muka laut menggunakan 15 konstanta harmonik standar IHO.
-    // So we first generate the predicted tide and the residuals
-    const t0_ms = records[0].timestamp.getTime();
-    let residuals = new Array(records.length).fill(0);
-    
-    for (let i = 0; i < records.length; i++) {
-        const t_hours = (records[i].timestamp.getTime() - t0_ms) / 3600000;
-        let predicted = z0;
-        for (const r of harmonicResults) {
-             predicted += r.amp * Math.cos(2 * Math.PI * r.freq * t_hours - r.phase * (Math.PI / 180));
-        }
-        // Use raw data if available (ignoring NaN outliers if not fixed, or use filtered if raw is faulty)
-        // Usually, raw data might have NaN, so we safely fallback to filtered if raw is missing.
-        const actual = !isNaN(records[i].raw) ? records[i].raw : records[i].filtered;
-        residuals[i] = actual - predicted;
-    }
-
-    let gradients = new Array(records.length).fill(0);
-    let maxGradIdx = -1;
-    let maxGradVal = 0;
-    for (let i = span; i < records.length; i++) {
-        // Gradient of residuals
-        gradients[i] = residuals[i] - residuals[i-span];
-        if (Math.abs(gradients[i]) > maxGradVal) {
-            maxGradVal = Math.abs(gradients[i]);
-            maxGradIdx = i;
-        }
-    }
-
-    if (maxGradVal < gradThreshold) return null;
-
-    const quietLimit = 0.015; // 1.5 cm gradient or less is considered quiet background noise
-    const quietRequired = Math.floor(120 / intervalMins); // 2 hours of quiet
-
-    // Search backward to find start
-    let startIdx = maxGradIdx;
-    let quietCount = 0;
-    for (let i = maxGradIdx; i >= span; i--) {
-        if (Math.abs(gradients[i]) < quietLimit) {
-            quietCount++;
-            if (quietCount >= quietRequired) {
-                // startIdx is the point right before this quiet streak ends
-                startIdx = i + quietRequired; 
-                break;
-            }
-        } else {
-            quietCount = 0;
-        }
-    }
-    if (quietCount < quietRequired) startIdx = span;
-
-    // Search forward to find end
-    let endIdx = maxGradIdx;
-    quietCount = 0;
-    for (let i = maxGradIdx; i < records.length; i++) {
-        if (Math.abs(gradients[i]) < quietLimit) {
-            quietCount++;
-            if (quietCount >= quietRequired) {
-                endIdx = i - quietRequired;
-                break;
-            }
-        } else {
-            quietCount = 0;
-        }
-    }
-    if (quietCount < quietRequired) endIdx = records.length - 1;
-
-    let maxVal = 0;
-    let maxTime = null;
-    for(let i = startIdx; i <= endIdx; i++) {
-        // The absolute maximum residual within the event bounds is the tsunami height
-        if (Math.abs(residuals[i]) > Math.abs(maxVal)) {
-            maxVal = residuals[i];
-            maxTime = records[i].timestamp;
-        }
-    }
-
-    // Usually absolute height is shown, but showing signed is fine. We will take absolute.
-    return {
-       start: records[startIdx].timestamp,
-       end: records[endIdx].timestamp,
-       maxHeight: Math.abs(maxVal),
-       maxTime: maxTime
-    };
-  }, [records, harmonicResults, z0]);
-
   const displayDataRaw = useMemo(() => {
-    // We only keep this empty intentionally or remove its usage to safely prevent memory explosion.
-    // Wait, the previous implementation did decimation here. Let's do dynamic decimation instead.
-    return [];
-  }, []);
+    if (!chartData.length) return [];
+    
+    // 1. If data is too large, decimate it to maintain responsiveness
+    const maxPoints = 4000; 
+    let sampled = [];
+    
+    if (chartData.length > maxPoints) {
+      const step = Math.ceil(chartData.length / maxPoints);
+      for (let i = 0; i < chartData.length; i += step) {
+        sampled.push(chartData[i]);
+      }
+    } else {
+      sampled = chartData;
+    }
+
+    // 2. Add timeMs only for the sampled points to save memory
+    return sampled.map(r => ({
+        ...r,
+        timeMs: r.timestamp.getTime()
+    }));
+  }, [chartData]);
   
   const displayData = useMemo(() => {
-     if (!chartData.length) return [];
-     
-     let baseData = chartData;
-     if (zoomDomain) {
-         let s = chartData.findIndex((d: any) => d.timestamp.getTime() >= Math.min(zoomDomain.start, zoomDomain.end));
-         let e = chartData.findIndex((d: any) => d.timestamp.getTime() >= Math.max(zoomDomain.start, zoomDomain.end));
-         
-         if (s !== -1 && e !== -1) {
-            if (s > e) { let temp = s; s = e; e = temp; }
-            baseData = chartData.slice(s, e + 1);
-         }
-     }
-
-     const maxPoints = 4000;
-     let sampled = [];
-
-     if (baseData.length > maxPoints) {
-         const chunks = Math.floor(maxPoints / 2);
-         const step = Math.max(2, Math.floor(baseData.length / chunks));
-         
-         for (let i = 0; i < baseData.length; i += step) {
-             let chunkEnd = Math.min(i + step, baseData.length);
-             let minIdx = i;
-             let maxIdx = i;
-             
-             // Very fast inline loop for min/max within chunk
-             for (let j = i + 1; j < chunkEnd; j++) {
-                 const val = baseData[j].filtered || 0;
-                 if (val < (baseData[minIdx].filtered || 0)) minIdx = j;
-                 if (val > (baseData[maxIdx].filtered || 0)) maxIdx = j;
-             }
-             
-             if (minIdx === maxIdx) {
-                 sampled.push(baseData[minIdx]);
-             } else if (minIdx < maxIdx) {
-                 sampled.push(baseData[minIdx]);
-                 sampled.push(baseData[maxIdx]);
-             } else {
-                 sampled.push(baseData[maxIdx]);
-                 sampled.push(baseData[minIdx]);
-             }
-         }
-     } else {
-         sampled = baseData;
-     }
-
-     return sampled.map(r => ({
-         ...r,
-         timeMs: r.timestamp.getTime()
-     }));
-  }, [chartData, zoomDomain]);
+    if (!zoomDomain) return displayDataRaw;
+    const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+    const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
+    if (startIndex === -1 || endIndex === -1) return displayDataRaw;
+    let s = startIndex, e = endIndex;
+    if (s > e) { s = endIndex; e = startIndex; }
+    return displayDataRaw.slice(s, e + 1);
+  }, [displayDataRaw, zoomDomain]);
 
   const zoom = () => {
     if (refAreaLeft === refAreaRight || refAreaRight === '') {
@@ -1695,16 +1552,22 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const applyPartialOffset = () => {
     if (localOffset === 0) return;
-    if (chartData.length === 0) return;
+    if (displayDataRaw.length === 0) return;
 
     let startMs, endMs;
 
     if (zoomDomain) {
-        startMs = Math.min(zoomDomain.start, zoomDomain.end);
-        endMs = Math.max(zoomDomain.start, zoomDomain.end);
+        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
+        if (startIndex === -1 || endIndex === -1) return;
+        let s = startIndex, e = endIndex;
+        if (s > e) { s = endIndex; e = startIndex; }
+
+        startMs = displayDataRaw[s].timestamp.getTime();
+        endMs = displayDataRaw[e].timestamp.getTime();
     } else {
-        startMs = chartData[0].timestamp.getTime();
-        endMs = chartData[chartData.length - 1].timestamp.getTime();
+        startMs = displayDataRaw[0].timestamp.getTime();
+        endMs = displayDataRaw[displayDataRaw.length - 1].timestamp.getTime();
     }
 
     const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: localOffset, scale: 1 }];
@@ -1716,17 +1579,23 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const applyScaling = () => {
     if (!scaleReference || !scaleTarget || !scaleFactor) return;
-    if (chartData.length === 0) return;
+    if (displayDataRaw.length === 0) return;
     
     let startMs, endMs;
     
     if (zoomDomain) {
-        startMs = Math.min(zoomDomain.start, zoomDomain.end);
-        endMs = Math.max(zoomDomain.start, zoomDomain.end);
+        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
+        if (startIndex === -1 || endIndex === -1) return;
+        let s = startIndex, e = endIndex;
+        if (s > e) { s = endIndex; e = startIndex; }
+        
+        startMs = displayDataRaw[s].timestamp.getTime();
+        endMs = displayDataRaw[e].timestamp.getTime();
     } else {
         // Apply globally if no zoom domain is selected
-        startMs = chartData[0].timestamp.getTime();
-        endMs = chartData[chartData.length - 1].timestamp.getTime();
+        startMs = displayDataRaw[0].timestamp.getTime();
+        endMs = displayDataRaw[displayDataRaw.length - 1].timestamp.getTime();
     }
 
     const newMods = [...modifiers, { startMs, endMs, sensor: scaleTarget, offset: 0, scale: scaleFactor }];
@@ -1966,37 +1835,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
              </div>
           </div>
       </div>
-      
-      {tsunamiEvent && (
-          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-6 shadow-sm mb-6 flex items-start gap-5 animate-in fade-in slide-in-from-top-4 duration-500">
-              <div className="p-3 bg-white rounded-full text-rose-500 shadow-sm border border-rose-100">
-                  <AlertCircle size={28} />
-              </div>
-              <div className="flex-1 space-y-3">
-                  <h3 className="text-xl font-black text-rose-600 tracking-tight flex items-center gap-2">
-                       Tsunami Event Detected
-                       <span className="px-2 py-0.5 bg-rose-500 text-white text-[10px] uppercase font-bold rounded-full ml-2">High Frequency Anomalies</span>
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="bg-white p-3 rounded-xl border border-rose-100 shadow-sm">
-                          <label className="text-[10px] font-black text-rose-400 uppercase tracking-widest block mb-1">Ketinggian Maksimum</label>
-                          <div className="text-lg font-black text-rose-700 font-mono">{tsunamiEvent.maxHeight.toFixed(3)} m</div>
-                          <div className="text-[10px] text-rose-500 mt-1">pada {format(tsunamiEvent.maxTime, 'dd MMM yyyy HH:mm:ss')}</div>
-                      </div>
-                      <div className="bg-white p-3 rounded-xl border border-rose-100 shadow-sm">
-                          <label className="text-[10px] font-black text-rose-400 uppercase tracking-widest block mb-1">Mulai Kejadian</label>
-                          <div className="text-sm font-bold text-slate-700">{format(tsunamiEvent.start, 'dd MMM yyyy')}</div>
-                          <div className="text-lg font-black text-rose-700 font-mono">{format(tsunamiEvent.start, 'HH:mm:ss')} UTC</div>
-                      </div>
-                      <div className="bg-white p-3 rounded-xl border border-rose-100 shadow-sm">
-                          <label className="text-[10px] font-black text-rose-400 uppercase tracking-widest block mb-1">Berakhirnya Kejadian</label>
-                          <div className="text-sm font-bold text-slate-700">{format(tsunamiEvent.end, 'dd MMM yyyy')}</div>
-                          <div className="text-lg font-black text-rose-700 font-mono">{format(tsunamiEvent.end, 'HH:mm:ss')} UTC</div>
-                      </div>
-                  </div>
-              </div>
-          </div>
-      )}
 
       <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
         <div className="relative mb-6 flex justify-center items-center min-h-[32px]">
@@ -2058,7 +1896,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 domain={yDomain} 
                 width={80}
               />
-              <ZAxis type="number" range={[10, 10]} />
               <Tooltip 
                 cursor={{ stroke: '#94a3b8', strokeWidth: 1.5, strokeDasharray: '4 4' }}
                 content={({ active, payload, label }) => {
@@ -2138,15 +1975,17 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                   const color = palette[idx % palette.length];
                   if (!visibleSensors.includes(sensor)) return null;
                   return (
-                    <Scatter 
+                    <Line 
                       key={sensor}
                       hide={hiddenLines[sensor]} 
                       dataKey={`allSamples.${sensor}`}
-                      fill={color}
-                      opacity={0.6}
+                      stroke="none"
+                      strokeWidth={0}
+                      dot={{ r: 2.5, fill: color, fillOpacity: 0.6, strokeWidth: 0 }}
+                      activeDot={{ r: 3, fill: color }}
+                      type="monotone"
                       name={sensor} 
                       isAnimationActive={false} 
-                      shape="circle"
                     />
                   );
               })}
@@ -2169,9 +2008,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
           </ResponsiveContainer>
         </div>
         <div className="mt-4 flex items-center gap-2 justify-center">
-             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest">
-                 Visual Optimization: {displayData.length === chartData.length || displayData.length < 4000 ? 'Showing Raw High-Frequency Data' : `Dynamic Sampling Active (${displayData.length} points)`}
-             </div>
+             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest">Visual Optimization: Hourly Sampling Active</div>
         </div>
       </div>
     </div>
