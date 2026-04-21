@@ -1126,34 +1126,32 @@ export default function App() {
              </label>
           </div>
 
-          <div className="flex gap-2">
-            <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="flex-1 group flex flex-col items-center justify-center gap-1 py-4 bg-[#0284c7] text-white rounded-xl hover:bg-[#0ea5e9] transition-all shadow-lg shadow-sky-100"
-            >
-                <div className="flex items-center gap-2 font-bold text-sm">
-                    <Upload size={14} />
-                    Import Data
-                </div>
-                <span className="text-[8px] font-bold opacity-60 uppercase tracking-tighter">format file csv, txt</span>
-            </button>
-            
             {records.length > 0 && (
+              <div className="flex gap-2">
                 <button 
-                    onClick={() => {
-                        setVerticalOffset(0);
-                        setTimeOffset(0);
-                        setModifiers([]);
-                        runAnalysis(rawData, selectedSensor, 0, 0, []);
-                    }}
-                    title="Reset semua offset dan skala"
-                    className="w-16 flex flex-col items-center justify-center gap-1 py-4 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 hover:text-rose-600 transition-all border border-rose-100"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-1 group flex flex-col items-center justify-center gap-1 py-4 bg-[#0284c7] text-white rounded-xl hover:bg-[#0ea5e9] transition-all shadow-lg shadow-sky-100"
                 >
-                    <RefreshCw size={14} />
-                    <span className="text-[8px] font-bold uppercase tracking-tighter px-1 text-center leading-tight">Reset</span>
+                    <div className="flex items-center gap-2 font-bold text-sm">
+                        <Upload size={14} />
+                        Import Data
+                    </div>
+                    <span className="text-[8px] font-bold opacity-60 uppercase tracking-tighter">format file csv, txt</span>
+                </button>
+              </div>
+            )}
+            {!records.length && (
+                <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="group w-full flex flex-col items-center justify-center gap-1 py-4 bg-[#0284c7] text-white rounded-xl hover:bg-[#0ea5e9] transition-all shadow-lg shadow-sky-100"
+                >
+                    <div className="flex items-center gap-2 font-bold text-sm">
+                        <Upload size={14} />
+                        Import Data
+                    </div>
+                    <span className="text-[8px] font-bold opacity-60 uppercase tracking-tighter">format file csv, txt</span>
                 </button>
             )}
-          </div>
           <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".csv,.txt" />
           
           <div className="flex items-center gap-3 px-3 py-2 text-[#64748b] text-[10px] font-bold uppercase tracking-wider">
@@ -1265,6 +1263,12 @@ export default function App() {
                     setModifiers={setModifiers}
                     verticalOffset={verticalOffset}
                     timeOffset={timeOffset}
+                    onReset={() => {
+                        setVerticalOffset(0);
+                        setTimeOffset(0);
+                        setModifiers([]);
+                        runAnalysis(rawData, selectedSensor, 0, 0, []);
+                    }}
                 />
             )}
             {activeTab === 'outlier' && records.length > 0 && (
@@ -1391,7 +1395,7 @@ export default function App() {
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -1749,6 +1753,14 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         <div className="relative mb-6 flex justify-center items-center min-h-[32px]">
           <h3 className="text-2xl font-black text-slate-800 px-2 font-display text-center">{title}</h3>
           <div className="absolute right-0 top-0 flex gap-2 export-exclude">
+            <button 
+                onClick={onReset}
+                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-rose-100 mr-2"
+                title="Reset all corrections (Offsets, Modifiers, Scaling)"
+            >
+                <RefreshCw size={14} />
+                General Reset
+            </button>
             {zoomDomain && (
               <button onClick={zoomOut} className="px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors mr-4 shadow-sm border border-sky-200"><ZoomOut size={14} /> Reset Zoom X</button>
             )}
@@ -1817,7 +1829,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                           </div>
                           
                           {visibleSensors.map((s, idx) => {
-                             const palette = ['#6366f1', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+                             const palette = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
                              const color = palette[availableSensors.indexOf(s) % palette.length];
                              return (
                                <div key={s} className="flex items-center justify-between gap-6 text-[11px]">
@@ -1872,7 +1884,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               ) : null}
 
               {availableSensors.map((sensor, idx) => {
-                  const palette = ['#6366f1', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+                  const palette = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
                   const color = palette[idx % palette.length];
                   if (!visibleSensors.includes(sensor)) return null;
                   return (
@@ -1882,7 +1894,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                       dataKey={`allSamples.${sensor}`}
                       stroke="none"
                       strokeWidth={0}
-                      dot={{ r: 1.5, fill: color, fillOpacity: 0.6, strokeWidth: 0 }}
+                      dot={{ r: 2.5, fill: color, fillOpacity: 0.6, strokeWidth: 0 }}
                       activeDot={{ r: 3, fill: color }}
                       type="monotone"
                       name={sensor} 
@@ -2173,7 +2185,8 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
 
   const displayPredsRaw = useMemo(() => {
-    const oneYearHours = 365 * 24;
+    // 366 days safe threshold for leap years
+    const oneYearHours = 366 * 24;
     
     if (predictions.length <= oneYearHours) {
       return predictions.map((p: any) => ({
