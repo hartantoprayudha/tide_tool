@@ -20,6 +20,7 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize,
+  ChevronRight,
   X
 } from 'lucide-react';
 import { 
@@ -144,6 +145,36 @@ interface PartialModifier {
   scale: number;
 }
 
+const TIMEZONES = [
+    { label: 'UTC-12:00', value: -12 },
+    { label: 'UTC-11:00', value: -11 },
+    { label: 'UTC-10:00', value: -10 },
+    { label: 'UTC-09:00', value: -9 },
+    { label: 'UTC-08:00', value: -8 },
+    { label: 'UTC-07:00', value: -7 },
+    { label: 'UTC-06:00', value: -6 },
+    { label: 'UTC-05:00', value: -5 },
+    { label: 'UTC-04:00', value: -4 },
+    { label: 'UTC-03:00', value: -3 },
+    { label: 'UTC-02:00', value: -2 },
+    { label: 'UTC-01:00', value: -1 },
+    { label: 'UTC+00:00 (GMT)', value: 0 },
+    { label: 'UTC+01:00', value: 1 },
+    { label: 'UTC+02:00', value: 2 },
+    { label: 'UTC+03:00', value: 3 },
+    { label: 'UTC+04:00', value: 4 },
+    { label: 'UTC+05:00', value: 5 },
+    { label: 'UTC+06:00', value: 6 },
+    { label: 'UTC+07:00 (WIB)', value: 7 },
+    { label: 'UTC+08:00 (WITA)', value: 8 },
+    { label: 'UTC+09:00 (WIT)', value: 9 },
+    { label: 'UTC+10:00', value: 10 },
+    { label: 'UTC+11:00', value: 11 },
+    { label: 'UTC+12:00', value: 12 },
+    { label: 'UTC+13:00', value: 13 },
+    { label: 'UTC+14:00', value: 14 },
+];
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [records, setRecords] = useState<TideRecord[]>([]);
@@ -161,7 +192,8 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
-  const [inputIsUTC, setInputIsUTC] = useState<boolean>(true);
+  const [inputTimezoneOffset, setInputTimezoneOffset] = useState<number>(0);
+  const [showTimezoneModal, setShowTimezoneModal] = useState<boolean>(false);
   
   // Analysis State
   const [zThreshold, setZThreshold] = useState(3.0);
@@ -286,7 +318,7 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, timezoneOffset: number = inputTimezoneOffset) => {
     if (!rawRows.length) return;
     const currentSensor = sensorToUse || selectedSensor;
     if (!currentSensor) return;
@@ -321,16 +353,16 @@ export default function App() {
           if (!isValid(dateObj)) dateObj = new Date(tsStr);
           if (!isValid(dateObj)) continue;
           
-          if (inputIsUTC) {
-              dateObj = new Date(Date.UTC(
-                  dateObj.getFullYear(),
-                  dateObj.getMonth(),
-                  dateObj.getDate(),
-                  dateObj.getHours(),
-                  dateObj.getMinutes(),
-                  dateObj.getSeconds()
-              ));
-          }
+          // Interpret input components as a timestamp in the specified timezone
+          // Actual UTC time = Components - timezoneOffset
+          dateObj = new Date(Date.UTC(
+              dateObj.getFullYear(),
+              dateObj.getMonth(),
+              dateObj.getDate(),
+              dateObj.getHours(),
+              dateObj.getMinutes(),
+              dateObj.getSeconds()
+          ) - (timezoneOffset * 3600000));
 
           const unmodifiedDateMs = dateObj.getTime();
           if (tOffset !== 0) {
@@ -809,6 +841,7 @@ export default function App() {
         setModifiers([]); // Reset modifiers on new file load
         runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, []);
         setActiveTab('dashboard');
+        setShowTimezoneModal(true);
       } catch (err) {
         alert("Terjadi kesalahan saat membaca file CSV.");
       }
@@ -1146,18 +1179,12 @@ export default function App() {
             </div>
           </div>
           
-          <div className="flex items-center justify-between px-1 py-1">
+          <div className="hidden">
              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-display flex items-center gap-1 cursor-pointer" title="Centang jika waktu di file data Anda merupakan waktu UTC. Menghindari shift akibat timezone lokal komputer.">
                 <input 
                     type="checkbox" 
-                    checked={inputIsUTC} 
-                    onChange={(e) => {
-                        setInputIsUTC(e.target.checked);
-                        if (rawData.length) {
-                             // re-run analysis to re-parse time
-                             runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers);
-                        }
-                    }} 
+                    checked={false} 
+                    onChange={(e) => {}} 
                     className="rounded text-[#0284c7] focus:ring-[#0284c7]"
                 />
                 Input Time is UTC
@@ -1449,7 +1476,59 @@ export default function App() {
             )}
             
             {/* Loading Overlay */}
-            {isLoading && (
+            {/* Timezone Configuration Modal */}
+          {showTimezoneModal && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[60] flex items-center justify-center p-4 animate-in fade-in duration-300">
+                <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-300">
+                    <div className="p-8 space-y-6 text-center">
+                        <div className="mx-auto w-16 h-16 bg-sky-50 rounded-2xl flex items-center justify-center text-sky-600 mb-2">
+                             <Clock size={32} />
+                        </div>
+                        <div className="space-y-2">
+                            <h3 className="text-xl font-black text-slate-800">Konfigurasi Zona Waktu</h3>
+                            <p className="text-sm text-slate-500 leading-relaxed">
+                                Mohon konfirmasi zona waktu data yang Anda unggah agar hasil analisis pasang surut akurat.
+                            </p>
+                        </div>
+                        
+                        <div className="space-y-3 pt-2 text-left">
+                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">Pilih Zona Waktu (Default: UTC+0)</label>
+                            <div className="relative">
+                                <select 
+                                    value={inputTimezoneOffset}
+                                    onChange={(e) => setInputTimezoneOffset(parseFloat(e.target.value))}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-sm font-black text-slate-800 outline-none focus:ring-4 focus:ring-sky-100 appearance-none transition-all"
+                                >
+                                    {TIMEZONES.map(tz => (
+                                        <option key={tz.value} value={tz.value}>{tz.label}</option>
+                                    ))}
+                                </select>
+                                <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                                    <ChevronRight size={20} className="rotate-90" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="pt-4 flex flex-col gap-3">
+                            <button 
+                                onClick={() => {
+                                    setShowTimezoneModal(false);
+                                    runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, inputTimezoneOffset);
+                                }}
+                                className="w-full py-4 bg-[#0284c7] hover:bg-sky-600 text-white font-black rounded-2xl shadow-xl shadow-sky-100 transition-all active:scale-95"
+                            >
+                                Konfirmasi & Jalankan Analisis
+                            </button>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 p-4 border-t border-slate-100 text-center">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Akurasi Waktu Adalah Kunci Analisis Harmonik</p>
+                    </div>
+                </div>
+            </div>
+          )}
+
+          {isLoading && (
               <div className="fixed inset-0 bg-white/60 backdrop-blur-[2px] z-50 flex flex-col items-center justify-center gap-4 animate-in fade-in duration-300">
                 <div className="relative">
                   <div className="w-16 h-16 border-4 border-slate-100 rounded-full"></div>
