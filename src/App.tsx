@@ -29,6 +29,7 @@ import {
   Line, 
   XAxis, 
   YAxis, 
+  ZAxis,
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
@@ -1536,31 +1537,69 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
     // Find anomalous residual > 0.10m 
     const threshold = 0.10;
-    const maxRes = Math.max(...residuals.map(Math.abs));
-    if (maxRes < threshold) return null;
-
-    const startIdx = residuals.findIndex(r => Math.abs(r) >= 0.05);
-    const revIdx = [...residuals].reverse().findIndex(r => Math.abs(r) >= 0.05);
-    const endIdx = residuals.length - 1 - revIdx;
-    
-    if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
-         let maxVal = -Infinity;
-         let maxTime = null;
-         for(let i = startIdx; i <= endIdx; i++) {
-             if (records[i].filtered > maxVal) {
-                 maxVal = records[i].filtered;
-                 maxTime = records[i].timestamp;
-             }
-         }
-         return {
-            start: records[startIdx].timestamp,
-            end: records[endIdx].timestamp,
-            maxHeight: maxVal,
-            maxTime: maxTime
-         };
+    let peakIdx = 0;
+    let maxRes = 0;
+    for (let i = 0; i < records.length; i++) {
+        const absRes = Math.abs(residuals[i]);
+        if (absRes > maxRes) {
+            maxRes = absRes;
+            peakIdx = i;
+        }
     }
 
-    return null;
+    if (maxRes < threshold) return null;
+
+    const quietLimit = 0.035;
+    const quietRequired = Math.floor(120 / intervalMins); // 2 hours of quiet
+
+    // Search backward to find start
+    let startIdx = peakIdx;
+    let quietCount = 0;
+    for (let i = peakIdx; i >= 0; i--) {
+        if (Math.abs(residuals[i]) < quietLimit) {
+            quietCount++;
+            if (quietCount >= quietRequired) {
+                // startIdx is the point right before this quiet streak ends
+                startIdx = i + quietRequired; 
+                break;
+            }
+        } else {
+            quietCount = 0;
+        }
+    }
+    if (quietCount < quietRequired) startIdx = 0;
+
+    // Search forward to find end
+    let endIdx = peakIdx;
+    quietCount = 0;
+    for (let i = peakIdx; i < records.length; i++) {
+        if (Math.abs(residuals[i]) < quietLimit) {
+            quietCount++;
+            if (quietCount >= quietRequired) {
+                endIdx = i - quietRequired;
+                break;
+            }
+        } else {
+            quietCount = 0;
+        }
+    }
+    if (quietCount < quietRequired) endIdx = records.length - 1;
+
+    let maxVal = -Infinity;
+    let maxTime = null;
+    for(let i = startIdx; i <= endIdx; i++) {
+        if (records[i].filtered > maxVal) {
+            maxVal = records[i].filtered;
+            maxTime = records[i].timestamp;
+        }
+    }
+
+    return {
+       start: records[startIdx].timestamp,
+       end: records[endIdx].timestamp,
+       maxHeight: maxVal,
+       maxTime: maxTime
+    };
   }, [records]);
 
   const displayDataRaw = useMemo(() => {
@@ -1979,6 +2018,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 domain={yDomain} 
                 width={80}
               />
+              <ZAxis type="number" range={[10, 10]} />
               <Tooltip 
                 cursor={{ stroke: '#94a3b8', strokeWidth: 1.5, strokeDasharray: '4 4' }}
                 content={({ active, payload, label }) => {
@@ -2058,17 +2098,15 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                   const color = palette[idx % palette.length];
                   if (!visibleSensors.includes(sensor)) return null;
                   return (
-                    <Line 
+                    <Scatter 
                       key={sensor}
                       hide={hiddenLines[sensor]} 
                       dataKey={`allSamples.${sensor}`}
-                      stroke="none"
-                      strokeWidth={0}
-                      dot={{ r: 2.5, fill: color, fillOpacity: 0.6, strokeWidth: 0 }}
-                      activeDot={{ r: 3, fill: color }}
-                      type="monotone"
+                      fill={color}
+                      opacity={0.6}
                       name={sensor} 
                       isAnimationActive={false} 
+                      shape="circle"
                     />
                   );
               })}
