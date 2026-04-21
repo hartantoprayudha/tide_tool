@@ -54,7 +54,6 @@ interface TideRecord {
   raw: number;
   filtered: number;
   isOutlier: boolean;
-  timeStr: string;
   allSamples?: Record<string, number>;
 }
 
@@ -199,38 +198,53 @@ export default function App() {
     const numComps = comps.length;
     const numParams = 1 + 2 * numComps;
 
-    // Construct Matrix A and vector b
-    const A: number[][] = Array.from({ length: numParams }, () => new Array(numParams).fill(0));
-    const b: number[] = new Array(numParams).fill(0);
+    // Construct Matrix A and vector b using Typed Arrays for performance
+    const A = new Float64Array(numParams * numParams);
+    const b = new Float64Array(numParams);
 
-    const f_list = comps.map(c => 2 * Math.PI * HARMONIC_FREQS[c].f);
-
+    const f_list = new Float64Array(comps.map(c => 2 * Math.PI * HARMONIC_FREQS[c].f));
+    const rowVals = new Float64Array(numParams);
+    
     for (let i = 0; i < numRows; i++) {
-        const rowVals = new Array(numParams);
-        rowVals[0] = 1; // Constant term Z0
+        const ti = t[i];
+        rowVals[0] = 1;
         for (let j = 0; j < numComps; j++) {
-            rowVals[1 + 2 * j] = Math.cos(f_list[j] * t[i]);
-            rowVals[1 + 2 * j + 1] = Math.sin(f_list[j] * t[i]);
+            const angle = f_list[j] * ti;
+            rowVals[1 + 2 * j] = Math.cos(angle);
+            rowVals[1 + 2 * j + 1] = Math.sin(angle);
         }
 
-        // Normal Equations: (A^T * A) x = A^T * y
+        const yi = y[i];
         for (let r = 0; r < numParams; r++) {
-            for (let c = 0; c < numParams; c++) {
-                A[r][c] += rowVals[r] * rowVals[c];
+            const rv_r = rowVals[r];
+            const offset = r * numParams;
+            for (let c = r; c < numParams; c++) { 
+                A[offset + c] += rv_r * rowVals[c];
             }
-            b[r] += rowVals[r] * y[i];
+            b[r] += rv_r * yi;
         }
     }
 
-    // Apply Tikhonov Regularization (Ridge Regression)
-    // Limits the coefficients to prevent extreme magnitude blowouts (rank deficiency)
-    // especially critical for highly correlated sets like UKHO Total Tide Plus
-    for (let r = 1; r < numParams; r++) {
-        A[r][r] += 0.0001 * numRows;
+    // Fill symmetric part
+    for (let r = 0; r < numParams; r++) {
+        for (let c = 0; c < r; c++) {
+            A[r * numParams + c] = A[c * numParams + r];
+        }
     }
 
-    // Solve Ax = b using Gaussian Elimination with partial pivoting
-    const x = gaussianSolve(A, b);
+    // Convert back to 2D array for gaussianSolve (minimal overhead since n is small)
+    const A2D: number[][] = [];
+    for (let i = 0; i < numParams; i++) {
+        A2D.push(Array.from(A.slice(i * numParams, (i + 1) * numParams)));
+    }
+    const bArr = Array.from(b);
+    
+    // Apply Tikhonov Regularization
+    for (let r = 1; r < numParams; r++) {
+        A2D[r][r] += 0.0001 * numRows;
+    }
+
+    const x = gaussianSolve(A2D, bArr);
     return x;
   };
 
@@ -281,17 +295,18 @@ export default function App() {
         const isCurrentCm = currentSensor.toLowerCase().includes('(cm)');
 
         // 1. Data Parsing with flexible Date format
-        let processed: TideRecord[] = rawRows.map(row => {
+        // Optimization: Pre-calculate formats and avoid object creation in inner sensors loop where possible
+        const fmts = ['dd/MM/yyyy HH:mm:ss', 'dd/MM/yyyy HH:mm', 'ddMMyyyy HH:mm', 'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'ddMMyyyy HHmm', 'dd/MM/yyyy HH.mm'];
+        
+        let processed: TideRecord[] = [];
+        for (let i = 0; i < rawRows.length; i++) {
+          const row = rawRows[i];
           let tsStr = (row['Timestamp'] || row[0] || "").trim();
-          // Use selected sensor
           let valStr = (row[currentSensor] || "").trim();
-          
           tsStr = tsStr.replace(/\s+/g, ' ');
 
-          const formats = ['dd/MM/yyyy HH:mm:ss', 'dd/MM/yyyy HH:mm', 'ddMMyyyy HH:mm', 'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'ddMMyyyy HHmm', 'dd/MM/yyyy HH.mm'];
           let dateObj: Date = new Date(NaN);
-          
-          for (const fmt of formats) {
+          for (const fmt of fmts) {
             const p = parse(tsStr, fmt, new Date());
             if (isValid(p)) {
               dateObj = p;
@@ -300,63 +315,55 @@ export default function App() {
           }
 
           if (!isValid(dateObj)) dateObj = new Date(tsStr);
-          
-          const unmodifiedDateMs = isValid(dateObj) ? dateObj.getTime() : null;
+          if (!isValid(dateObj)) continue;
 
-          if (isValid(dateObj) && tOffset !== 0) {
-              dateObj = new Date(dateObj.getTime() + tOffset * 3600000);
+          const unmodifiedDateMs = dateObj.getTime();
+          if (tOffset !== 0) {
+              dateObj = new Date(unmodifiedDateMs + tOffset * 3600000);
           }
 
-          // Extract all sensors for multi-view
           const allSamples: Record<string, number> = {};
-          availableSensors.forEach(s => {
+          for (let sIdx = 0; sIdx < availableSensors.length; sIdx++) {
+              const s = availableSensors[sIdx];
               const sValStr = (row[s] || "").trim();
               const isCm = s.toLowerCase().includes('(cm)');
               let sValRaw = parseFloat(sValStr.replace(',', '.'));
               if (sValRaw === 999 || sValRaw === -999 || sValRaw < -200 || sValRaw > 900) sValRaw = NaN;
               if (isCm && !isNaN(sValRaw)) sValRaw = sValRaw / 100;
               
-              if (unmodifiedDateMs !== null && !isNaN(sValRaw)) {
-                  let appliedVal = sValRaw;
-                  for (const mod of activeMods) {
+              if (!isNaN(sValRaw)) {
+                  for (let mIdx = 0; mIdx < activeMods.length; mIdx++) {
+                      const mod = activeMods[mIdx];
                       if (mod.sensor === s && unmodifiedDateMs >= mod.startMs && unmodifiedDateMs <= mod.endMs) {
-                          appliedVal = (appliedVal * mod.scale) + mod.offset;
+                          sValRaw = (sValRaw * mod.scale) + mod.offset;
                       }
                   }
-                  sValRaw = appliedVal;
+                  allSamples[s] = parseFloat(sValRaw.toFixed(3));
               }
-
-              if (!isNaN(sValRaw)) {
-                allSamples[s] = parseFloat((sValRaw).toFixed(3));
-              }
-          });
+          }
 
           let valRaw = parseFloat(valStr.replace(',', '.'));
           if (valRaw === 999 || valRaw === -999 || valRaw < -200 || valRaw > 900) valRaw = NaN;
           if (isCurrentCm && !isNaN(valRaw)) valRaw = valRaw / 100;
           valRaw += vOffset;
           
-          if (unmodifiedDateMs !== null && !isNaN(valRaw)) {
-              let appliedVal = valRaw;
-              for (const mod of activeMods) {
+          if (!isNaN(valRaw)) {
+              for (let mIdx = 0; mIdx < activeMods.length; mIdx++) {
+                  const mod = activeMods[mIdx];
                   if (mod.sensor === currentSensor && unmodifiedDateMs >= mod.startMs && unmodifiedDateMs <= mod.endMs) {
-                      appliedVal = (appliedVal * mod.scale) + mod.offset;
+                      valRaw = (valRaw * mod.scale) + mod.offset;
                   }
               }
-              valRaw = appliedVal;
           }
 
-          const val = isNaN(valRaw) ? NaN : parseFloat(valRaw.toFixed(3)); 
-
-          return {
+          processed.push({
             timestamp: dateObj,
-            raw: val,
+            raw: isNaN(valRaw) ? NaN : parseFloat(valRaw.toFixed(3)),
             allSamples,
             filtered: 0,
-            isOutlier: false,
-            timeStr: isValid(dateObj) ? format(dateObj, 'dd/MM/yy HH:mm') : "Invalid"
-          };
-        }).filter(r => isValid(r.timestamp) && r.timeStr !== "Invalid");
+            isOutlier: false
+          });
+        }
 
         if (processed.length === 0) {
           alert("Gagal memproses data. Kolom sensor atau format waktu mungkin salah.");
@@ -385,14 +392,13 @@ export default function App() {
             }
             if (currIdx < processed.length && Math.abs(processed[currIdx].timestamp.getTime() - t) <= dt / 2) {
                 const rec = processed[currIdx];
-                regularized.push({ ...rec, timestamp: new Date(t), timeStr: format(new Date(t), 'dd/MM/yy HH:mm') });
+                regularized.push({ ...rec, timestamp: new Date(t) });
             } else {
                 regularized.push({
                     timestamp: new Date(t),
                     raw: NaN,
                     filtered: 0,
-                    isOutlier: false,
-                    timeStr: format(new Date(t), 'dd/MM/yy HH:mm')
+                    isOutlier: false
                 });
             }
         }
@@ -483,16 +489,40 @@ export default function App() {
             }
         }
 
-        // 3. Low-Pass Filter Logic (Using interpolatable 'cleanedInput')
+        // 3. Low-Pass Filter Logic (Optimized Sliding Window)
         if (filterType === 'ma') {
           const maSamples = Math.max(1, Math.round((filterWindow * 60000) / dt));
-          processed = processed.map((r, i) => {
-            const start = Math.max(0, i - Math.floor(maSamples / 2));
-            const end = Math.min(cleanedInput.length, i + Math.ceil(maSamples / 2));
-            const windowVals = cleanedInput.slice(start, end);
-            const avg = windowVals.reduce((s, x) => s + x, 0) / windowVals.length;
-            return { ...r, filtered: parseFloat(avg.toFixed(3)) }; 
-          });
+          const n = cleanedInput.length;
+          const filteredArr = new Float64Array(n);
+          
+          let windowSum = 0;
+          const half = Math.floor(maSamples / 2);
+          
+          // Initial window sum
+          for (let i = 0; i <= half && i < n; i++) {
+            windowSum += cleanedInput[i];
+          }
+          
+          for (let i = 0; i < n; i++) {
+            const right = i + half;
+            const left = i - half - 1;
+            
+            if (right < n && right > half) {
+              windowSum += cleanedInput[right];
+            }
+            if (left >= 0) {
+              windowSum -= cleanedInput[left];
+            }
+            
+            const start = Math.max(0, i - half);
+            const end = Math.min(n - 1, i + half);
+            const count = end - start + 1;
+            filteredArr[i] = windowSum / count;
+          }
+
+          for(let i = 0; i < n; i++) {
+            processed[i].filtered = parseFloat(filteredArr[i].toFixed(3));
+          }
         } else if (filterType === 'median') {
           processed = processed.map((r, i) => {
             const start = Math.max(0, i - Math.floor(medianWindow / 2));
@@ -620,23 +650,44 @@ export default function App() {
                 const lines = text.trim().split('\n');
                 if (lines.length > 0) {
                     const firstLine = lines[0];
-                    // Check for headerless tab/whitespace format: Date followed by 2+ numbers
-                    // Match pattern: 09/01/2025 13:00:00	999	172	172
-                    const tabParts = firstLine.split('\t');
-                    const spaceParts = firstLine.split(/\s{2,}/);
-                    const parts = tabParts.length > spaceParts.length ? tabParts : spaceParts;
+                    // Split by tabs or multiple spaces first
+                    let p = firstLine.split(/\t|\s{2,}/).filter(x => x.trim() !== "");
                     
-                    if (parts.length >= 2) {
-                        const d = parse(parts[0].trim(), 'dd/MM/yyyy HH:mm:ss', new Date());
-                        if (isValid(d)) {
-                            // High confidence headerless format
+                    // IF we have only 2 parts and it's not a full timestamp, maybe it's space delimited
+                    if (p.length < 3) {
+                        p = firstLine.split(/\s+/).filter(x => x.trim() !== "");
+                    }
+
+                    if (p.length >= 2) {
+                        // Strategy 1: Column 1 is full timestamp
+                        const dRaw = parse(p[0].trim(), 'dd/MM/yyyy HH:mm:ss', new Date());
+                        
+                        // Strategy 2: Column 1 + Column 2 is timestamp
+                        const tsCombined = (p[0].trim() + " " + p[1].trim()).trim();
+                        const dCombined = parse(tsCombined, 'dd/MM/yyyy HH:mm:ss', new Date());
+
+                        if (isValid(dCombined) && p.length >= 3) {
+                            // Format: Date | Time | Val...
                             setTimeout(() => {
                                 const data = lines.map(line => {
-                                    const p = line.split(/\t|\s{2,}/);
-                                    const obj: any = { 'Timestamp': p[0].trim() };
-                                    for (let i = 1; i < p.length; i++) {
-                                        // User said these are in cm, we'll mark them as (cm) to trigger auto-scaling later
-                                        obj[`Sensor ${i} (cm)`] = p[i]?.trim();
+                                    const parts = line.split(/\t|\s+/).filter(x => x.trim() !== "");
+                                    const obj: any = { 'Timestamp': (parts[0]?.trim() + " " + parts[1]?.trim()).trim() };
+                                    for (let i = 2; i < parts.length; i++) {
+                                        obj[`Sensor ${i - 1} (cm)`] = parts[i]?.trim();
+                                    }
+                                    return obj;
+                                });
+                                resolve({ data, meta: { fields: Object.keys(data[0]) }, errors: [] } as any);
+                            }, 50);
+                            return;
+                        } else if (isValid(dRaw)) {
+                            // Format: FullTimestamp | Val...
+                            setTimeout(() => {
+                                const data = lines.map(line => {
+                                    const parts = line.split(/\t|\s{2,}/).filter(x => x.trim() !== "");
+                                    const obj: any = { 'Timestamp': parts[0].trim() };
+                                    for (let i = 1; i < parts.length; i++) {
+                                        obj[`Sensor ${i} (cm)`] = parts[i]?.trim();
                                     }
                                     return obj;
                                 });
@@ -1286,7 +1337,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   // Zoom States
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
   const [refAreaRight, setRefAreaRight] = useState<string>('');
-  const [zoomDomain, setZoomDomain] = useState<{start: string, end: string} | null>(null);
+  const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
 
   const outliers = useMemo(() => records.filter((r:any) => r.isOutlier).length, [records]);
 
@@ -1310,23 +1361,31 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const displayDataRaw = useMemo(() => {
     if (!chartData.length) return [];
-    const sorted = [...chartData].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    const sampled = [];
-    const seenHours = new Set();
-    for (const r of sorted) {
-      const hKey = format(r.timestamp, 'yyyyMMddHH');
-      if (!seenHours.has(hKey)) {
-        seenHours.add(hKey);
-        sampled.push(r);
+    
+    // 1. If data is too large, decimate it to maintain responsiveness
+    const maxPoints = 4000; 
+    let sampled = [];
+    
+    if (chartData.length > maxPoints) {
+      const step = Math.ceil(chartData.length / maxPoints);
+      for (let i = 0; i < chartData.length; i += step) {
+        sampled.push(chartData[i]);
       }
+    } else {
+      sampled = chartData;
     }
-    return sampled;
+
+    // 2. Add timeMs only for the sampled points to save memory
+    return sampled.map(r => ({
+        ...r,
+        timeMs: r.timestamp.getTime()
+    }));
   }, [chartData]);
   
   const displayData = useMemo(() => {
     if (!zoomDomain) return displayDataRaw;
-    const startIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.start);
-    const endIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.end);
+    const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+    const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
     if (startIndex === -1 || endIndex === -1) return displayDataRaw;
     let s = startIndex, e = endIndex;
     if (s > e) { s = endIndex; e = startIndex; }
@@ -1339,7 +1398,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
       setRefAreaRight('');
       return;
     }
-    setZoomDomain({ start: refAreaLeft, end: refAreaRight });
+    setZoomDomain({ start: Number(refAreaLeft), end: Number(refAreaRight) });
     setRefAreaLeft('');
     setRefAreaRight('');
   };
@@ -1351,8 +1410,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         alert("Pilih area pada grafik dengan melakukan zoom (klik dan tarik) terlebih dahulu.");
         return;
     }
-    const startIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.start);
-    const endIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.end);
+    const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+    const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
     if (startIndex === -1 || endIndex === -1) return;
     let s = startIndex, e = endIndex;
     if (s > e) { s = endIndex; e = startIndex; }
@@ -1373,8 +1432,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         alert("Pilih area pada grafik dengan melakukan zoom (klik dan tarik) terlebih dahulu.");
         return;
     }
-    const startIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.start);
-    const endIndex = displayDataRaw.findIndex((d: any) => d.timeStr === zoomDomain.end);
+    const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+    const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
     if (startIndex === -1 || endIndex === -1) return;
     let s = startIndex, e = endIndex;
     if (s > e) { s = endIndex; e = startIndex; }
@@ -1576,7 +1635,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Multi-Sensor Overlay</label>
                 <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
                     {availableSensors.map((s: string) => {
-                        const palette = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+                        const palette = ['#6366f1', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
                         const color = palette[availableSensors.indexOf(s) % palette.length];
                         const isActive = visibleSensors.includes(s);
                         return (
@@ -1633,7 +1692,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             >
               <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
               <XAxis 
-                dataKey="timeStr" 
+                dataKey="timeMs" 
+                tickFormatter={(val: number) => format(new Date(val), 'dd/MM HH:mm')}
                 tick={{fontSize: 9, fill:'#64748b'}} 
                 interval={Math.floor(displayData.length/12)} 
                 axisLine={false} 
@@ -1656,7 +1716,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     const data = payload[0].payload;
                     return (
                       <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5 pointer-events-none min-w-[200px]">
-                        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">Waktu: {label}</p>
+                        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">Waktu: {format(new Date(Number(label)), 'dd/MM/yyyy HH:mm:ss')}</p>
                         <div className="space-y-2 w-full">
                           <div className="flex items-center justify-between gap-6 text-[11px]">
                             <div className="flex items-center gap-2">
@@ -1669,7 +1729,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                           </div>
                           
                           {visibleSensors.map((s, idx) => {
-                             const palette = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+                             const palette = ['#6366f1', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
                              const color = palette[availableSensors.indexOf(s) % palette.length];
                              return (
                                <div key={s} className="flex items-center justify-between gap-6 text-[11px]">
@@ -1724,7 +1784,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               ) : null}
 
               {availableSensors.map((sensor, idx) => {
-                  const palette = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+                  const palette = ['#6366f1', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
                   const color = palette[idx % palette.length];
                   if (!visibleSensors.includes(sensor)) return null;
                   return (
@@ -2022,11 +2082,14 @@ const PredictionTooltip = ({ active, payload }: any) => {
 function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title }: any) {
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
   const [refAreaRight, setRefAreaRight] = useState<string>('');
-  const [zoomDomain, setZoomDomain] = useState<{start: string, end: string} | null>(null);
+  const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
 
   const displayPredsRaw = useMemo(() => {
     if (predictions.length <= 365 * 24) {
-      return predictions;
+      return predictions.map((p: any) => ({
+          ...p,
+          timeMs: p.timestamp.getTime()
+      }));
     } else {
       // Calculate Monthly Means for > 1 year
       const monthlyData: Record<string, { sum: number, count: number, date: Date, max: number, min: number }> = {};
@@ -2045,6 +2108,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           fullTime: format(m.date, 'MMMM yyyy'),
           value: parseFloat((m.sum / m.count).toFixed(3)),
           timestamp: m.date,
+          timeMs: m.date.getTime(),
           dayMax: m.max,
           dayMin: m.min,
           isMonthlyMean: true
@@ -2054,8 +2118,8 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
 
   const displayPreds = useMemo(() => {
     if (!zoomDomain) return displayPredsRaw;
-    const startIndex = displayPredsRaw.findIndex((d: any) => (d.timeStr || d.time) === zoomDomain.start);
-    const endIndex = displayPredsRaw.findIndex((d: any) => (d.timeStr || d.time) === zoomDomain.end);
+    const startIndex = displayPredsRaw.findIndex((d: any) => (d.timeMs || d.timestamp?.getTime()) === zoomDomain.start);
+    const endIndex = displayPredsRaw.findIndex((d: any) => (d.timeMs || d.timestamp?.getTime()) === zoomDomain.end);
     if (startIndex === -1 || endIndex === -1) return displayPredsRaw;
     let s = startIndex, e = endIndex;
     if (s > e) { s = endIndex; e = startIndex; }
@@ -2070,7 +2134,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
       setRefAreaRight('');
       return;
     }
-    setZoomDomain({ start: refAreaLeft, end: refAreaRight });
+    setZoomDomain({ start: Number(refAreaLeft), end: Number(refAreaRight) });
     setRefAreaLeft('');
     setRefAreaRight('');
   };
@@ -2180,7 +2244,13 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="time" tick={{fontSize: 9, fill: '#64748b'}} interval={Math.floor(displayPreds.length/12)} axisLine={false} />
+              <XAxis 
+                dataKey="timeMs" 
+                tick={{fontSize: 9, fill: '#64748b'}} 
+                tickFormatter={(val: number) => format(new Date(val), 'dd/MM/yyyy')}
+                interval={Math.floor(displayPreds.length/12)} 
+                axisLine={false} 
+              />
               <YAxis 
                 tickFormatter={(val: number) => val.toFixed(3)}
                 label={{ value: 'Elevasi (m)', angle: -90, position: 'insideLeft', offset: -10, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
@@ -2211,7 +2281,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#0ea5e9" fillOpacity={0.15} />
               ) : null}
 
-              <Brush dataKey="time" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
+              <Brush dataKey="timeMs" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
             </AreaChart>
             </ResponsiveContainer>
           </div>
