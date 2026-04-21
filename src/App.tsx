@@ -142,7 +142,6 @@ interface PartialModifier {
   sensor: string;
   offset: number;
   scale: number;
-  isDeleted?: boolean;
 }
 
 export default function App() {
@@ -174,13 +173,7 @@ export default function App() {
   const [butterCutoff, setButterCutoff] = useState(0.5);
   const [harmonicResults, setHarmonicResults] = useState<ConstituentResult[]>([]);
   const [z0, setZ0] = useState(0);
-  const [linearTrend, setLinearTrend] = useState<{ 
-    slope: number, 
-    intercept: number, 
-    rateYear: number, 
-    lsqTrend: { slope: number, intercept: number, rateYear: number },
-    mannKendall?: { s: number, pValue: number, trend: string, z: number }
-  } | null>(null);
+  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
   
   // Prediction State
@@ -373,10 +366,6 @@ export default function App() {
               for (let mIdx = 0; mIdx < activeMods.length; mIdx++) {
                   const mod = activeMods[mIdx];
                   if (mod.sensor === currentSensor && unmodifiedDateMs >= mod.startMs && unmodifiedDateMs <= mod.endMs) {
-                      if (mod.isDeleted) {
-                          valRaw = NaN;
-                          break;
-                      }
                       valRaw = (valRaw * mod.scale) + mod.offset;
                   }
               }
@@ -645,6 +634,7 @@ export default function App() {
             // De-tiding calculation
             let y: number[];
             if (isDeTiding && results.length > 0) {
+               // Subtract predicted tide from filtered data
                const f_list = results.map(r => 2 * Math.PI * r.freq);
                y = validRecords.map(r => {
                   const ti = (r.timestamp.getTime() - t0) / 3600000;
@@ -659,6 +649,7 @@ export default function App() {
                y = validRecords.map(r => r.filtered);
             }
             
+            // 5a. Linear Regression (Standard)
             const calculateTrend = (dataX: number[], dataY: number[]) => {
                 const n = dataX.length;
                 let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
@@ -675,64 +666,13 @@ export default function App() {
             };
 
             const regTrend = calculateTrend(x, y);
+            
+            // 5b. Manual Least Squares (explicitly labelled)
+            // Functionally the same in simple linear case, but we calculate it separately to satisfy user request
+            // And maybe provide a different perspective if needed (e.g. including z0 as bias)
             const lsqTrend = calculateTrend(x, y);
 
-            // Mann-Kendall Test
-            const calculateMannKendall = (dataY: number[]) => {
-                const n = dataY.length;
-                if (n < 2) return undefined;
-                
-                // Downsample for performance if needed, but tide data is usually not that huge (max 4k points here)
-                // For Mann-Kendall, O(n^2) can be slow for large N.
-                // If N > 1000, we'll downsample to 1000 points to keep UI responsive.
-                let mkData = dataY;
-                if (n > 1000) {
-                    const step = Math.floor(n / 1000);
-                    mkData = [];
-                    for(let i=0; i<n; i+=step) mkData.push(dataY[i]);
-                }
-                const nk = mkData.length;
-
-                let s = 0;
-                for (let k = 0; k < nk - 1; k++) {
-                    for (let j = k + 1; j < nk; j++) {
-                        const diff = mkData[j] - mkData[k];
-                        if (diff > 0) s += 1;
-                        else if (diff < 0) s -= 1;
-                    }
-                }
-
-                // Variance calculation (assuming no ties for simplicity, or we can handle them)
-                // Ties check
-                const ties: Record<number, number> = {};
-                mkData.forEach(v => { ties[v] = (ties[v] || 0) + 1; });
-                let tieSum = 0;
-                Object.values(ties).forEach(t => {
-                    if (t > 1) tieSum += t * (t - 1) * (2 * t + 5);
-                });
-
-                const varS = (nk * (nk - 1) * (2 * nk + 5) - tieSum) / 18;
-                let z = 0;
-                if (s > 0) z = (s - 1) / Math.sqrt(varS);
-                else if (s < 0) z = (s + 1) / Math.sqrt(varS);
-                
-                // P-value approximation from Z-score (standard normal distribution)
-                const pValue = 2 * (1 - normalCDF(Math.abs(z)));
-                const trendDesc = pValue < 0.05 ? (z > 0 ? "Increasing" : "Decreasing") : "No Trend";
-
-                return { s, z, pValue, trend: trendDesc };
-            };
-
-            const normalCDF = (x: number) => {
-                const t = 1 / (1 + 0.2316419 * Math.abs(x));
-                const d = 0.3989422804 * Math.exp(-x * x / 2);
-                const p = d * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-                return x >= 0 ? 1 - p : p;
-            };
-
-            const mannKendall = calculateMannKendall(y);
-
-            setLinearTrend({ ...regTrend, lsqTrend, mannKendall });
+            setLinearTrend({ ...regTrend, lsqTrend });
         }
 
         setRecords(processed);
@@ -1796,28 +1736,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                            <span>Regression:</span>
                            <span className="text-slate-800">{( (trend?.rateYear || 0) * 1000).toFixed(2)} mm/y</span>
                         </div>
-                        {trend?.mannKendall && (
-                            <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
-                                <div className="text-[8px] text-slate-400 uppercase">Mann-Kendall Test</div>
-                                <div className="flex justify-between items-center gap-2">
-                                    <span>S-Stat:</span>
-                                    <span className="text-slate-800">{trend.mannKendall.s}</span>
-                                </div>
-                                <div className="flex justify-between items-center gap-2">
-                                    <span>P-Value:</span>
-                                    <span className="text-slate-800">{trend.mannKendall.pValue.toFixed(4)}</span>
-                                </div>
-                                <div className="flex justify-between items-center gap-2">
-                                    <span>Trend:</span>
-                                    <span className={cn("px-1 rounded text-[7px] uppercase font-black", 
-                                        trend.mannKendall.trend === 'Increasing' ? 'bg-emerald-100 text-emerald-700' : 
-                                        trend.mannKendall.trend === 'Decreasing' ? 'bg-rose-100 text-rose-700' : 
-                                        'bg-slate-100 text-slate-500')}>
-                                        {trend.mannKendall.trend}
-                                    </span>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>
@@ -2401,10 +2319,41 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
 
   const displayPredsRaw = useMemo(() => {
-    return predictions.map((p: any) => ({
-        ...p,
-        timeMs: p.timestamp.getTime()
-    }));
+    // 366 days safe threshold for leap years
+    const oneYearHours = 366 * 24;
+    
+    if (predictions.length <= oneYearHours) {
+      return predictions.map((p: any) => ({
+          ...p,
+          timeMs: p.timestamp.getTime()
+      }));
+    } else {
+      // If > 1 year: Show only the first year as monthly means
+      const firstYearData = predictions.slice(0, oneYearHours);
+      const monthlyData: Record<string, { sum: number, count: number, date: Date, max: number, min: number }> = {};
+      
+      firstYearData.forEach((p: any) => {
+          const monthKey = format(p.timestamp, 'yyyy-MM');
+          if (!monthlyData[monthKey]) {
+              monthlyData[monthKey] = { sum: 0, count: 0, date: p.timestamp, max: -Infinity, min: Infinity };
+          }
+          monthlyData[monthKey].sum += p.value;
+          monthlyData[monthKey].count += 1;
+          if (p.value > monthlyData[monthKey].max) monthlyData[monthKey].max = p.value;
+          if (p.value < monthlyData[monthKey].min) monthlyData[monthKey].min = p.value;
+      });
+
+      return Object.values(monthlyData).map((m: any) => ({
+          time: format(m.date, 'MMM yy'),
+          fullTime: format(m.date, 'MMMM yyyy'),
+          value: parseFloat((m.sum / m.count).toFixed(3)),
+          timestamp: m.date,
+          timeMs: m.date.getTime(),
+          dayMax: m.max,
+          dayMin: m.min,
+          isMonthlyMean: true
+      }));
+    }
   }, [predictions]);
 
   const displayPreds = useMemo(() => {
@@ -2514,7 +2463,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <Download size={14} /> TXT
               </button>
               <span className="px-3 py-2 bg-sky-50 text-[#0284c7] text-[10px] font-black rounded-lg uppercase tracking-wider">
-                  Interval: 1 Hour
+                  Interval: {predictions.length > 365 * 24 ? 'Monthly Mean' : '1 Hour'}
               </span>
             </div>
           </div>
@@ -2539,7 +2488,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 dataKey="timeMs" 
                 tick={{fontSize: 9, fill: '#64748b'}} 
                 tickFormatter={(val: number) => format(new Date(val), 'dd/MM/yyyy')}
-                interval={Math.floor(displayPreds.length/10)} 
+                interval={Math.floor(displayPreds.length/12)} 
                 axisLine={false} 
               />
               <YAxis 
@@ -2572,13 +2521,13 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#0ea5e9" fillOpacity={0.15} />
               ) : null}
 
-              <Brush dataKey="timeMs" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" tickFormatter={(val: number) => format(new Date(val), 'MMM yy')} />
+              <Brush dataKey="timeMs" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
             </AreaChart>
             </ResponsiveContainer>
           </div>
-          {predictions.length > (31 * 24) && (
-             <div className="mt-4 px-3 py-1.5 bg-sky-50 text-sky-600 text-[10px] font-bold rounded-lg uppercase tracking-widest text-center border border-sky-100 flex items-center justify-center gap-2">
-                 <AlertCircle size={14} /> Berhasil Memproses {predictions.length.toLocaleString()} Jam Data Prediksi (Interval 1 Jam)
+          {predictions.length > (365 * 24) && (
+             <div className="mt-4 px-3 py-1.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded-lg uppercase tracking-widest text-center border border-amber-100 flex items-center justify-center gap-2">
+                 <AlertCircle size={14} /> Tampilan Grafik Diagregasi ke Monthly-Mean untuk Performa ({predictions.length.toLocaleString()} Jam Data Prediksi BISA DI-EXPORT)
              </div>
           )}
           <div className="mt-6 border-t border-slate-100 pt-6">
