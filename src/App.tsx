@@ -158,7 +158,7 @@ export default function App() {
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
   const [visibleSensors, setVisibleSensors] = useState<string[]>([]);
-  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('9');
+  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('15');
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
@@ -302,24 +302,37 @@ export default function App() {
         // 1. Data Parsing with flexible Date format
         // Optimization: Pre-calculate formats and avoid object creation in inner sensors loop where possible
         const fmts = ['dd/MM/yyyy HH:mm:ss', 'dd/MM/yyyy HH:mm', 'dd-MM-yyyy HH:mm:ss', 'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd HH:mm', 'ddMMyyyy HH:mm', 'ddMMyyyy HHmm', 'dd/MM/yyyy HH.mm'];
+        let activeFmt: string | null = null;
+        let useNativeDate = false;
         
         let processed: TideRecord[] = [];
         for (let i = 0; i < rawRows.length; i++) {
           const row = rawRows[i];
           let tsStr = (row['Timestamp'] || row[0] || "").trim();
           let valStr = (row[currentSensor] || "").trim();
+          if (!tsStr) continue;
           tsStr = tsStr.replace(/\s+/g, ' ');
 
           let dateObj: Date = new Date(NaN);
-          for (const fmt of fmts) {
-            const p = parse(tsStr, fmt, new Date());
-            if (isValid(p)) {
-              dateObj = p;
-              break;
+          if (activeFmt) {
+            dateObj = parse(tsStr, activeFmt, new Date());
+          } else if (useNativeDate) {
+            dateObj = new Date(tsStr);
+          } else {
+            for (const fmt of fmts) {
+              const p = parse(tsStr, fmt, new Date());
+              if (isValid(p)) {
+                activeFmt = fmt;
+                dateObj = p;
+                break;
+              }
+            }
+            if (!isValid(dateObj)) {
+              dateObj = new Date(tsStr);
+              if (isValid(dateObj)) useNativeDate = true;
             }
           }
 
-          if (!isValid(dateObj)) dateObj = new Date(tsStr);
           if (!isValid(dateObj)) continue;
           
           if (inputIsUTC) {
@@ -1304,6 +1317,7 @@ export default function App() {
                     timeOffset={timeOffset}
                     isDeTiding={isDeTiding}
                     setIsDeTiding={setIsDeTiding}
+                    harmonicResults={harmonicResults}
                     onReset={() => {
                         setVerticalOffset(0);
                         setTimeOffset(0);
@@ -1468,7 +1482,7 @@ export default function App() {
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, harmonicResults }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -1506,57 +1520,60 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   }, [records, trend]);
 
   const tsunamiEvent = useMemo(() => {
-    if (!records || records.length < 100) return null;
+    if (!records || records.length < 100 || !harmonicResults || harmonicResults.length === 0) return null;
     
     // Check interval
     const t0 = records[0].timestamp.getTime();
     const t1 = records[1].timestamp.getTime();
     const intervalMins = (t1 - t0) / 60000;
     
-    // Tsunami detection is typically relevant for high freq data (<= 2 min)
-    if (intervalMins > 2) return null; 
+    // Tsunami detection is typically relevant for high freq data (<= 5 min)
+    if (intervalMins > 5) return null; 
 
-    // High Pass Filter: Subtract ~3 hour Moving Average
-    const windowSize = Math.floor(180 / intervalMins);
-    if (records.length < windowSize) return null;
+    // Find anomalies in the gradient (rate of change)
+    const span = Math.max(1, Math.floor(4 / intervalMins)); // 4 mins span
+    const gradThreshold = 0.04; // 4 cm change in short window is anomalous
 
+    // Ketinggian tsunami dihitung dari selisih antara tinggi muka laut sesaat (raw data) 
+    // dengan nilai prediksi tinggi muka laut menggunakan 15 konstanta harmonik standar IHO.
+    // So we first generate the predicted tide and the residuals
+    const t0_ms = records[0].timestamp.getTime();
     let residuals = new Array(records.length).fill(0);
-    let sum = 0;
-    for(let i=0; i<windowSize; i++) {
-       sum += records[i].filtered;
-    }
     
-    for(let i=Math.floor(windowSize/2); i < records.length - Math.ceil(windowSize/2); i++) {
-        let ma = sum / windowSize;
-        residuals[i] = records[i].filtered - ma;
-        sum -= records[i - Math.floor(windowSize/2)].filtered;
-        if (i + Math.ceil(windowSize/2) < records.length) {
-           sum += records[i + Math.ceil(windowSize/2)].filtered;
-        }
-    }
-
-    // Find anomalous residual > 0.10m 
-    const threshold = 0.10;
-    let peakIdx = 0;
-    let maxRes = 0;
     for (let i = 0; i < records.length; i++) {
-        const absRes = Math.abs(residuals[i]);
-        if (absRes > maxRes) {
-            maxRes = absRes;
-            peakIdx = i;
+        const t_hours = (records[i].timestamp.getTime() - t0_ms) / 3600000;
+        let predicted = z0;
+        for (const r of harmonicResults) {
+             predicted += r.amp * Math.cos(2 * Math.PI * r.freq * t_hours - r.phase * (Math.PI / 180));
+        }
+        // Use raw data if available (ignoring NaN outliers if not fixed, or use filtered if raw is faulty)
+        // Usually, raw data might have NaN, so we safely fallback to filtered if raw is missing.
+        const actual = !isNaN(records[i].raw) ? records[i].raw : records[i].filtered;
+        residuals[i] = actual - predicted;
+    }
+
+    let gradients = new Array(records.length).fill(0);
+    let maxGradIdx = -1;
+    let maxGradVal = 0;
+    for (let i = span; i < records.length; i++) {
+        // Gradient of residuals
+        gradients[i] = residuals[i] - residuals[i-span];
+        if (Math.abs(gradients[i]) > maxGradVal) {
+            maxGradVal = Math.abs(gradients[i]);
+            maxGradIdx = i;
         }
     }
 
-    if (maxRes < threshold) return null;
+    if (maxGradVal < gradThreshold) return null;
 
-    const quietLimit = 0.035;
+    const quietLimit = 0.015; // 1.5 cm gradient or less is considered quiet background noise
     const quietRequired = Math.floor(120 / intervalMins); // 2 hours of quiet
 
     // Search backward to find start
-    let startIdx = peakIdx;
+    let startIdx = maxGradIdx;
     let quietCount = 0;
-    for (let i = peakIdx; i >= 0; i--) {
-        if (Math.abs(residuals[i]) < quietLimit) {
+    for (let i = maxGradIdx; i >= span; i--) {
+        if (Math.abs(gradients[i]) < quietLimit) {
             quietCount++;
             if (quietCount >= quietRequired) {
                 // startIdx is the point right before this quiet streak ends
@@ -1567,13 +1584,13 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             quietCount = 0;
         }
     }
-    if (quietCount < quietRequired) startIdx = 0;
+    if (quietCount < quietRequired) startIdx = span;
 
     // Search forward to find end
-    let endIdx = peakIdx;
+    let endIdx = maxGradIdx;
     quietCount = 0;
-    for (let i = peakIdx; i < records.length; i++) {
-        if (Math.abs(residuals[i]) < quietLimit) {
+    for (let i = maxGradIdx; i < records.length; i++) {
+        if (Math.abs(gradients[i]) < quietLimit) {
             quietCount++;
             if (quietCount >= quietRequired) {
                 endIdx = i - quietRequired;
@@ -1585,22 +1602,24 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     }
     if (quietCount < quietRequired) endIdx = records.length - 1;
 
-    let maxVal = -Infinity;
+    let maxVal = 0;
     let maxTime = null;
     for(let i = startIdx; i <= endIdx; i++) {
-        if (records[i].filtered > maxVal) {
-            maxVal = records[i].filtered;
+        // The absolute maximum residual within the event bounds is the tsunami height
+        if (Math.abs(residuals[i]) > Math.abs(maxVal)) {
+            maxVal = residuals[i];
             maxTime = records[i].timestamp;
         }
     }
 
+    // Usually absolute height is shown, but showing signed is fine. We will take absolute.
     return {
        start: records[startIdx].timestamp,
        end: records[endIdx].timestamp,
-       maxHeight: maxVal,
+       maxHeight: Math.abs(maxVal),
        maxTime: maxTime
     };
-  }, [records]);
+  }, [records, harmonicResults, z0]);
 
   const displayDataRaw = useMemo(() => {
     // We only keep this empty intentionally or remove its usage to safely prevent memory explosion.
@@ -1626,9 +1645,30 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
      let sampled = [];
 
      if (baseData.length > maxPoints) {
-         const step = Math.ceil(baseData.length / maxPoints);
+         const chunks = Math.floor(maxPoints / 2);
+         const step = Math.max(2, Math.floor(baseData.length / chunks));
+         
          for (let i = 0; i < baseData.length; i += step) {
-             sampled.push(baseData[i]);
+             let chunkEnd = Math.min(i + step, baseData.length);
+             let minIdx = i;
+             let maxIdx = i;
+             
+             // Very fast inline loop for min/max within chunk
+             for (let j = i + 1; j < chunkEnd; j++) {
+                 const val = baseData[j].filtered || 0;
+                 if (val < (baseData[minIdx].filtered || 0)) minIdx = j;
+                 if (val > (baseData[maxIdx].filtered || 0)) maxIdx = j;
+             }
+             
+             if (minIdx === maxIdx) {
+                 sampled.push(baseData[minIdx]);
+             } else if (minIdx < maxIdx) {
+                 sampled.push(baseData[minIdx]);
+                 sampled.push(baseData[maxIdx]);
+             } else {
+                 sampled.push(baseData[maxIdx]);
+                 sampled.push(baseData[minIdx]);
+             }
          }
      } else {
          sampled = baseData;
