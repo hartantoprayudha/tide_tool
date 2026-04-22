@@ -221,6 +221,7 @@ export default function App() {
   const [predStartDate, setPredStartDate] = useState(formatUTC(new Date(), 'yyyy-MM-dd'));
   const [predEndDate, setPredEndDate] = useState(formatUTC(addDays(new Date(), 7), 'yyyy-MM-dd'));
   const [predictions, setPredictions] = useState<any[]>([]);
+  const [dataLengthWarning, setDataLengthWarning] = useState<string | null>(null);
   const [chartTitle, setChartTitle] = useState("Tide Analysis Visualization");
 
   // Dynamic README Context for Github Sync
@@ -472,20 +473,35 @@ export default function App() {
         const validForRough = processed.filter(r => !isNaN(r.raw));
         const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
         const y_vals_raw = validForRough.map(r => r.raw);
-        const roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, compsToFit);
-        const roughZ0 = roughSolution[0] || 0;
-        let roughHatAmpSum = 0;
-        for (let i = 0; i < compsToFit.length; i++) {
-            const a = roughSolution[1 + 2 * i] || 0;
-            const b = roughSolution[1 + 2 * i + 1] || 0;
-            roughHatAmpSum += Math.sqrt(a * a + b * b);
-        }
-        const roughHAT = roughZ0 + roughHatAmpSum;
-        const roughLAT = roughZ0 - roughHatAmpSum;
-
-        // B. Mark Outliers (either via statistical Z-score OR being strictly outside HAT/LAT bounds)
         const meanRaw = y_vals_raw.reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1);
         const stdRaw = Math.sqrt(y_vals_raw.map(x => Math.pow(x - meanRaw, 2)).reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1));
+
+        const durationHoursCheck = (processed[processed.length - 1].timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
+        const _isInsufficient = durationHoursCheck < 29 * 24;
+        
+        let roughZ0 = meanRaw;
+        let roughHAT = meanRaw + 3 * stdRaw; // fallback
+        let roughLAT = meanRaw - 3 * stdRaw; // fallback
+
+        if (!_isInsufficient) {
+            const roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, compsToFit);
+            roughZ0 = roughSolution[0] || meanRaw;
+            let roughHatAmpSum = 0;
+            for (let i = 0; i < compsToFit.length; i++) {
+                const a = roughSolution[1 + 2 * i] || 0;
+                const b = roughSolution[1 + 2 * i + 1] || 0;
+                roughHatAmpSum += Math.sqrt(a * a + b * b);
+            }
+            if (roughHatAmpSum > 0) {
+               roughHAT = roughZ0 + roughHatAmpSum;
+               roughLAT = roughZ0 - roughHatAmpSum;
+            }
+            setDataLengthWarning(null);
+        } else {
+            setDataLengthWarning("Warning: Panjang data Anda kurang dari 29 piantan (hari). Analisis harmonik dan prediksi pasut tidak dapat dilakukan.");
+        }
+
+        // B. Mark Outliers (either via statistical Z-score OR being strictly outside HAT/LAT bounds)
         
         processed = processed.map(r => {
             if (isNaN(r.raw)) {
@@ -634,37 +650,46 @@ export default function App() {
         const t_hours = validForFinal.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
         const y_vals = validForFinal.map(r => r.filtered);
         
-        const solution = solveLeastSquares(t_hours, y_vals, compsToFit);
-        const fittedZ0 = solution[0] || 0;
-        const results: ConstituentResult[] = compsToFit.map((c, i) => {
-            const a = solution[1 + 2 * i] || 0;
-            const b = solution[1 + 2 * i + 1] || 0;
-            const amp = Math.sqrt(a * a + b * b);
-            let phase = Math.atan2(b, a) * (180 / Math.PI);
-            if (phase < 0) phase += 360;
-            return {
-              comp: c,
-              amp,
-              phase,
-              desc: HARMONIC_FREQS[c].d,
-              freq: HARMONIC_FREQS[c].f
-            };
-        });
+        let fittedZ0 = meanRaw;
+        let results: ConstituentResult[] = [];
+        
+        if (!_isInsufficient) {
+            const solution = solveLeastSquares(t_hours, y_vals, compsToFit);
+            fittedZ0 = solution[0] || meanRaw;
+            results = compsToFit.map((c, i) => {
+                const a = solution[1 + 2 * i] || 0;
+                const b = solution[1 + 2 * i + 1] || 0;
+                const amp = Math.sqrt(a * a + b * b);
+                let phase = Math.atan2(b, a) * (180 / Math.PI);
+                if (phase < 0) phase += 360;
+                return {
+                  comp: c,
+                  amp,
+                  phase,
+                  desc: HARMONIC_FREQS[c].d,
+                  freq: HARMONIC_FREQS[c].f
+                };
+            });
+        }
 
         setZ0(parseFloat(fittedZ0.toFixed(3)));
         setHarmonicResults(results);
 
         // Chart Datum Calculations
-        const am2 = results.find(r => r.comp === 'M2')?.amp || 0;
-        const as2 = results.find(r => r.comp === 'S2')?.amp || 0;
-        const sumAmp = results.reduce((acc, r) => acc + r.amp, 0);
-        
-        setDatums({
-            mhws: fittedZ0 + (am2 + as2),
-            mlws: fittedZ0 - (am2 + as2),
-            hat: fittedZ0 + sumAmp,
-            lat: fittedZ0 - sumAmp
-        });
+        if (!_isInsufficient) {
+            const am2 = results.find(r => r.comp === 'M2')?.amp || 0;
+            const as2 = results.find(r => r.comp === 'S2')?.amp || 0;
+            const sumAmp = results.reduce((acc, r) => acc + r.amp, 0);
+            
+            setDatums({
+                mhws: fittedZ0 + (am2 + as2),
+                mlws: fittedZ0 - (am2 + as2),
+                hat: fittedZ0 + sumAmp,
+                lat: fittedZ0 - sumAmp
+            });
+        } else {
+            setDatums(null);
+        }
 
         // 5. Linear Trend & Least Squares Analysis with optional De-Tiding
         let validRecords = processed.filter(r => !isNaN(r.filtered) && !r.isOutlier);
@@ -1344,6 +1369,18 @@ export default function App() {
             </div>
           )}
         </header>
+        
+        {dataLengthWarning && (
+            <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-r-xl shadow-sm animate-in slide-in-from-top-2">
+                <div className="flex items-start">
+                    <AlertCircle className="text-rose-500 mt-0.5 mr-3" size={20} />
+                    <div>
+                        <h3 className="text-rose-800 font-bold text-sm">Perhatian</h3>
+                        <p className="text-rose-700 text-xs mt-1">{dataLengthWarning}</p>
+                    </div>
+                </div>
+            </div>
+        )}
 
         {!records.length && (activeTab !== 'readme' && activeTab !== 'about') ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-2xl border border-[#e2e8f0] p-12 text-center gap-6 shadow-sm">
@@ -1482,6 +1519,7 @@ export default function App() {
                     onExport={exportPredictions}
                     isLoading={isLoading}
                     title={chartTitle}
+                    hasInsufficientData={!!dataLengthWarning}
                 />
             )}
             
@@ -2425,7 +2463,7 @@ const PredictionTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title }: any) {
+function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title, hasInsufficientData }: any) {
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
   const [refAreaRight, setRefAreaRight] = useState<string>('');
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
@@ -2540,9 +2578,14 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <AlertCircle size={10} className="inline mr-1" /> Tanggal Tidak Valid
               </span>
             )}
+            {hasInsufficientData && (
+              <span className="text-[10px] text-rose-500 font-bold uppercase animate-pulse px-2 mb-2 text-center">
+                 Kurang dari 29 Piantan
+              </span>
+            )}
             <button 
               onClick={onGenerate}
-              disabled={isLoading || !startDate || !endDate || endDate < startDate}
+              disabled={isLoading || !startDate || !endDate || endDate < startDate || hasInsufficientData}
               className="w-full py-3.5 bg-[#0284c7] text-white rounded-2xl font-black hover:bg-[#0ea5e9] transition-all flex items-center justify-center gap-3 shadow-xl shadow-sky-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />} 
