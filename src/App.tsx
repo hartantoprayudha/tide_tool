@@ -110,7 +110,41 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   '2SM2': { f: 0.086155266, d: 'Shallow water semidiurnal' },
   'M3': { f: 0.120767102, d: 'Lunar terdiurnal' },
   'M8': { f: 0.322045602, d: 'Shallow water eighth diurnal' },
-  '2MK3': { f: 0.122292147, d: 'Shallow water terdiurnal' }
+  '2MK3': { f: 0.122292147, d: 'Shallow water terdiurnal' },
+  // Adding 33 more to complete UTide 67 Constants
+  'MSM': { f: 0.001309781, d: 'Lunar monthly' },
+  'ALP1': { f: 0.034396570, d: 'Diurnal' },
+  'SIG1': { f: 0.035908722, d: 'Diurnal' },
+  'TAU1': { f: 0.038933027, d: 'Diurnal' },
+  'BET1': { f: 0.040040445, d: 'Diurnal' },
+  'NO1': { f: 0.040268594, d: 'Diurnal' },
+  'CHI1': { f: 0.040470968, d: 'Diurnal' },
+  'S1': { f: 0.041666672, d: 'Solar diurnal' },
+  'PSI1': { f: 0.041894820, d: 'Diurnal' },
+  'PHI1': { f: 0.042008900, d: 'Diurnal' },
+  'THE1': { f: 0.043082000, d: 'Diurnal' },
+  'SO1': { f: 0.044602700, d: 'Diurnal' },
+  'OQ2': { f: 0.075974900, d: 'Semidiurnal' },
+  'EPS2': { f: 0.076177300, d: 'Semidiurnal' },
+  'MKS2': { f: 0.080739500, d: 'Semidiurnal' },
+  'LDA2': { f: 0.081821200, d: 'Semidiurnal' },
+  'R2': { f: 0.083447400, d: 'Semidiurnal' },
+  'MSN2': { f: 0.084845500, d: 'Semidiurnal' },
+  'ETA2': { f: 0.085073600, d: 'Semidiurnal' },
+  'MO3': { f: 0.119242100, d: 'Terdiurnal' },
+  'SO3': { f: 0.122064000, d: 'Terdiurnal' },
+  'SK3': { f: 0.125114100, d: 'Terdiurnal' },
+  'SN4': { f: 0.162332600, d: 'Quarter diurnal' },
+  'MK4': { f: 0.164072900, d: 'Quarter diurnal' },
+  'SK4': { f: 0.166894800, d: 'Quarter diurnal' },
+  '2MK5': { f: 0.202803500, d: 'Fifth diurnal' },
+  '2SK5': { f: 0.208447400, d: 'Fifth diurnal' },
+  '2MN6': { f: 0.240022100, d: 'Sixth diurnal' },
+  '2MS6': { f: 0.244356100, d: 'Sixth diurnal' },
+  '2MK6': { f: 0.244584300, d: 'Sixth diurnal' },
+  '2SM6': { f: 0.247178100, d: 'Sixth diurnal' },
+  'MSK6': { f: 0.247406200, d: 'Sixth diurnal' },
+  '3MK7': { f: 0.283314900, d: 'Seventh diurnal' }
 };
 
 const getMoonEvents = (data: any[]) => {
@@ -164,7 +198,7 @@ export default function App() {
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
   const [visibleSensors, setVisibleSensors] = useState<string[]>([]);
-  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '15' | 'UKHO'>('9');
+  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '27' | 'UKHO' | 'UTIDE'>('9');
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
@@ -179,7 +213,7 @@ export default function App() {
   const [butterCutoff, setButterCutoff] = useState(0.5);
   const [harmonicResults, setHarmonicResults] = useState<ConstituentResult[]>([]);
   const [z0, setZ0] = useState(0);
-  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
+  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
   
   // Prediction State
@@ -429,8 +463,9 @@ export default function App() {
         let compsToFit: string[] = [];
         if (constituentSet === '4') compsToFit = ['M2', 'S2', 'K1', 'O1'];
         else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
-        else if (constituentSet === '15') compsToFit = ['M2', 'S2', 'N2', 'K2', 'K1', 'O1', 'P1', 'Q1', 'Mf', 'Mm', 'M4', 'MS4', 'MN4', 'S4', 'M6'];
-        else compsToFit = Object.keys(HARMONIC_FREQS); // UKHO
+        else if (constituentSet === '27') compsToFit = ['M2', 'S2', 'N2', 'K2', 'K1', 'O1', 'P1', 'Q1', 'Mf', 'Mm', 'M4', 'MS4', 'MN4', 'S4', 'M6', 'S6', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'J1', 'OO1', 'Ssa', 'Sa', 'RHO1', 'M1'];
+        else if (constituentSet === 'UKHO') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', 'OO1', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 'Mm', 'Ssa', 'Sa', 'RHO1', 'M1', 'PI1', '2Q1', '2SM2', 'M3', 'M8', '2MK3'];
+        else compsToFit = Object.keys(HARMONIC_FREQS); // UTIDE (All 67)
 
         // A. Quick 1st Pass Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
         const validForRough = processed.filter(r => !isNaN(r.raw));
@@ -677,7 +712,72 @@ export default function App() {
             // And maybe provide a different perspective if needed (e.g. including z0 as bias)
             const lsqTrend = calculateTrend(x, y);
 
-            setLinearTrend({ ...regTrend, lsqTrend });
+            // 5c. STL Decomposition-based Trend (Simplified 1-Year Moving Average) for data > 1 year
+            let stlTrendData: ReturnType<typeof calculateTrend> | undefined;
+            const tEnd = processed[processed.length - 1].timestamp.getTime();
+            const durationHours = (tEnd - t0) / 3600000;
+            
+            if (durationHours > 8760) {
+                const dt_ms = (tEnd - t0) / (processed.length - 1);
+                const windowSize = Math.max(1, Math.round((365.25 * 24 * 3600 * 1000) / dt_ms));
+                const halfWindow = Math.floor(windowSize / 2);
+    
+                const yFull = new Float64Array(processed.length);
+                yFull.fill(NaN);
+                
+                const f_list = results.map(r => 2 * Math.PI * r.freq);
+                for (let i = 0; i < processed.length; i++) {
+                    const r = processed[i];
+                    if (!isNaN(r.filtered) && !r.isOutlier) {
+                        if (isDeTiding && results.length > 0) {
+                            const ti = (r.timestamp.getTime() - t0) / 3600000;
+                            let tideSum = 0;
+                            for (let k = 0; k < results.length; k++) {
+                                tideSum += results[k].amp * Math.cos(f_list[k] * ti - results[k].phase * (Math.PI / 180));
+                            }
+                            yFull[i] = r.filtered - tideSum;
+                        } else {
+                            yFull[i] = r.filtered;
+                        }
+                    }
+                }
+                
+                const stlTrendX: number[] = [];
+                const stlTrendY: number[] = [];
+                let currentSum = 0;
+                let currentCount = 0;
+                
+                for (let i = 0; i < windowSize && i < yFull.length; i++) {
+                    if (!isNaN(yFull[i])) {
+                        currentSum += yFull[i];
+                        currentCount++;
+                    }
+                }
+                
+                for (let i = halfWindow; i < yFull.length - halfWindow; i++) {
+                    if (currentCount > (windowSize * 0.25)) { // Output if we have at least 25% of data in the window
+                        stlTrendX.push((processed[i].timestamp.getTime() - t0) / 3600000);
+                        stlTrendY.push(currentSum / currentCount);
+                    }
+                    
+                    const outgoingIdx = i - halfWindow;
+                    if (outgoingIdx >= 0 && !isNaN(yFull[outgoingIdx])) {
+                        currentSum -= yFull[outgoingIdx];
+                        currentCount--;
+                    }
+                    const incomingIdx = outgoingIdx + windowSize;
+                    if (incomingIdx < yFull.length && !isNaN(yFull[incomingIdx])) {
+                        currentSum += yFull[incomingIdx];
+                        currentCount++;
+                    }
+                }
+                
+                if (stlTrendX.length > 2) {
+                    stlTrendData = calculateTrend(stlTrendX, stlTrendY);
+                }
+            }
+
+            setLinearTrend({ ...regTrend, lsqTrend, stlTrend: stlTrendData });
         }
 
         setRecords(processed);
@@ -1102,8 +1202,9 @@ export default function App() {
             >
               <option value="4">4 Constants (Basic)</option>
               <option value="9">9 Constants (Standard)</option>
-              <option value="15">15 Constants (IHO/TWCWG)</option>
-              <option value="UKHO">UKHO Total Tide Plus</option>
+              <option value="27">27 Constants (IHO/TWCWG)</option>
+              <option value="UKHO">UKHO Total Tide (34)</option>
+              <option value="UTIDE">UTide Standard (67)</option>
             </select>
           </div>
 
@@ -1719,14 +1820,20 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <StatCard label="Z0 (MSL)" value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} trend="Least Squares Fit" />
             <div className="relative group">
                 <StatCard 
-                  label="Linear Trend" 
-                  value={`${trend ? (trend.rateYear * 1000).toFixed(2) : "0.00"} mm/y`} 
-                  trend={isDeTiding ? "De-tided Regr" : "Linear Regr"} 
-                  trendColor={trend?.rateYear > 0 ? "text-red-500" : "text-emerald-500"} 
+                  label="Sea Level Trend" 
+                  value={`${trend ? ((trend.stlTrend ? trend.stlTrend.rateYear : trend.rateYear) * 1000).toFixed(2) : "0.00"} mm/y`} 
+                  trend={trend?.stlTrend ? "STL Decomposition" : (isDeTiding ? "De-tided Regr" : "Linear Regr")} 
+                  trendColor={trend ? ((trend.stlTrend ? trend.stlTrend.rateYear : trend.rateYear) > 0 ? "text-red-500" : "text-emerald-500") : "text-slate-500"} 
                 />
                 <div className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <div className="bg-white shadow-xl border border-slate-200 p-2 rounded-lg text-[9px] font-bold text-slate-500 min-w-[120px]">
                         <div className="border-b border-slate-100 pb-1 mb-1 text-slate-400 uppercase">Trend Methods</div>
+                        {trend?.stlTrend && (
+                          <div className="flex justify-between items-center gap-2">
+                             <span>STL Trend:</span>
+                             <span className="text-slate-800">{(trend.stlTrend.rateYear * 1000).toFixed(2)} mm/y</span>
+                          </div>
+                        )}
                         <div className="flex justify-between items-center gap-2">
                            <span>Least Square:</span>
                            <span className="text-slate-800">{( (trend?.lsqTrend?.rateYear || 0) * 1000).toFixed(2)} mm/y</span>
