@@ -828,10 +828,10 @@ export default function App() {
     setTimeout(() => {
         try {
             const [sYear, sMonth, sDay] = predStartDate.split('-');
-            const start = new Date(Number(sYear), Number(sMonth) - 1, Number(sDay), 0, 0, 0);
+            const start = new Date(Date.UTC(Number(sYear), Number(sMonth) - 1, Number(sDay), 0, 0, 0));
             
             const [eYear, eMonth, eDay] = predEndDate.split('-');
-            const end = new Date(Number(eYear), Number(eMonth) - 1, Number(eDay), 23, 59, 59);
+            const end = new Date(Date.UTC(Number(eYear), Number(eMonth) - 1, Number(eDay) + 1, 0, 0, 0));
 
             if (!isValid(start) || !isValid(end)) {
                 alert("Tanggal prediksi tidak valid");
@@ -2332,7 +2332,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
       const monthlyData: Record<string, { sum: number, count: number, date: Date, max: number, min: number }> = {};
       
       firstYearData.forEach((p: any) => {
-          const monthKey = format(p.timestamp, 'yyyy-MM');
+          const monthKey = formatUTC(p.timestamp, 'yyyy-MM');
           if (!monthlyData[monthKey]) {
               monthlyData[monthKey] = { sum: 0, count: 0, date: p.timestamp, max: -Infinity, min: Infinity };
           }
@@ -2343,8 +2343,8 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
       });
 
       return Object.values(monthlyData).map((m: any) => ({
-          time: format(m.date, 'MMM yy'),
-          fullTime: format(m.date, 'MMMM yyyy'),
+          time: formatUTC(m.date, 'MMM yy'),
+          fullTime: formatUTC(m.date, 'MMMM yyyy'),
           value: parseFloat((m.sum / m.count).toFixed(3)),
           timestamp: m.date,
           timeMs: m.date.getTime(),
