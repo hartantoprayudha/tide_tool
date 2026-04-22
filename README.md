@@ -5,7 +5,7 @@ Direktorat Sistem Referensi Geospasial
 
 Aplikasi BIG Tidal Analysis adalah platform analisis deret waktu pasang surut air laut yang dirancang untuk memproses data dari berbagai sensor tekanan (CSV data) dan memberikan hasil analisis harmonik presisi, ekspor datum, serta prediksi masa depan.
 
-<img width="2878" height="1080" alt="Screenshot 2026-04-18 115643" src="https://github.com/user-attachments/assets/6ff47a4f-5a0b-4632-82a2-8a8753a3f570" />
+<img width="2878" height="1260" alt="Screenshot 2026-04-18 115643" src="https://github.com/user-attachments/assets/6ff47a4f-5a0b-4632-82a2-8a8753a3f570" />
 
 ---
 
@@ -17,7 +17,7 @@ Untuk mulai menggunakan aplikasi ini, Anda dapat mengunduh format contoh data CS
 * [📥 Unduh Contoh Data Pasut 2 - Sample CM (cm)](/examples/sample_cm.csv)
 * [📥 Unduh Contoh Data Pasut 3 - Combined (m)](/examples/combined.csv)
 * [📥 Unduh Contoh Data Pasut 4 - Outlier Sample (m)](/examples/sample_data.csv)
-* [📥 Unduh Contoh Data Pasut 5 - Long data (m)](/examples/smrg_2011_2025_h.txt)
+
 ---
 
 ## 1. Quick Start Local Server (Untuk Pengguna Pemula)
@@ -36,9 +36,6 @@ Bagi pengguna OS Windows yang ingin menjalankan seluruh aplikasi ini secara loka
 - **Akses Dashboard**: Cukup memuat file observasi Anda berformat `.csv` (memiliki kolom Timestamp & Sensor).
 - **Interactive Toggles**: Pada bagian grafik/chart, Anda dapat mengklik legenda (contoh: *Analyzed Level* atau *Prediction*) untuk menampilkan atau menyembunyikannya.
 - **Prediksi Interaktif**: Terdapat panel prediction yang bisa dikalkulasi berdasarkan set konstanta harmonik (misal: UKHO, 9 Constants, dll). Grafik prediksi maksimal dirender s/d 1 tahun untuk menjaga performa (HW Accel by default).
-
-![Prediction & Filter Module](https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=1200&h=450&fit=crop&blur=2)
-*(Ilustrasi Panel Filter Data & Visualisasi Prediksi Harmonik)*
 
 ---
 
@@ -75,8 +72,8 @@ Untuk kebutuhan automasi *pipeline* data geospasial, sistem *machine learning*, 
 **Endpoint Master URL**:
 'https://ais-dev-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.app/api/analyze'
 
-![Web API & JSON Response](https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&h=450&fit=crop&blur=2)
-*(Ilustrasi console terminal dalam mengakses Web API BIG Tidal Analysis)*
+**Alternative Link**:
+'https://tide-tool.vercel.app/'
 
 ### Alur Eksekusi API
 Fungsi API ini menerima data deret waktu format CSV murni, memproses nilai harmoniknya di sisi server (Backend), lalu mengembalikan respon datum dan amplitudo secara terstruktur dalam format `JSON`.
@@ -108,8 +105,6 @@ curl -X POST https://ais-dev-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.
 }
 ```
 
-![Integrasi Backend API](https://images.unsplash.com/photo-1558494949-ef010cbdcc31?q=80&w=1200&h=450&fit=crop&blur=2)
-*(Ilustrasi integrasi arsitektur Backend Data Center)*
 
 ---
 
@@ -124,10 +119,9 @@ Bagi peneliti, surveyor, dan akademia yang membutuhkan landasan teori (*scientif
 ---
 
 ## Fitur Unggulan:
-- **IHO Compliant Constituents**: Pilihan algoritma Harmonic Set (9 konstanta, 37 komponen, hingga UKHO).
+- **IHO Compliant Constituents**: Pilihan algoritma Harmonic Set (4, 9, 27, 34 hingga 67 konstanta).
 - **Moon Phase Indicator**: Menampilkan overlay fase-fase bulan pada puncak data (Purnama / Bulan Baru) sesuai standar IHO.
 - **Outlier & Spike Removal**: Modul filter otomatis untuk mendeteksi *outlier* (Z-Score) filter dan eksklusi *extremes* HAT/LAT rentang teoretis.
 - **Report Generation**: Tersedia fitur Text/CSV Report dengan pembulatan presisi saintifik 3 digit desimal di belakang koma.
 
-![BIG Tidal Tools](https://images.unsplash.com/photo-1460925895917-afdab827c52f?q=80&w=1200&h=450&fit=crop&blur=2)
-*(Panel Ekspor Report & Datum Chart)*
+---
