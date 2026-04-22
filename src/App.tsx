@@ -2434,11 +2434,10 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           timeMs: p.timestamp.getTime()
       }));
     } else {
-      // If > 1 year: Show only the first year as monthly means
-      const firstYearData = predictions.slice(0, oneYearHours);
+      // If > 1 year: Show entire duration as monthly means
       const monthlyData: Record<string, { sum: number, count: number, date: Date, max: number, min: number }> = {};
       
-      firstYearData.forEach((p: any) => {
+      predictions.forEach((p: any) => {
           const monthKey = formatUTC(p.timestamp, 'yyyy-MM');
           if (!monthlyData[monthKey]) {
               monthlyData[monthKey] = { sum: 0, count: 0, date: p.timestamp, max: -Infinity, min: Infinity };
@@ -2569,7 +2568,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <Download size={14} /> TXT
               </button>
               <span className="px-3 py-2 bg-sky-50 text-[#0284c7] text-[10px] font-black rounded-lg uppercase tracking-wider">
-                  Interval: {predictions.length > 365 * 24 ? 'Monthly Mean' : '1 Hour'}
+                  Interval : {predictions.length > 366 * 24 ? 'monthly mean' : '1 Hour'}
               </span>
             </div>
           </div>
