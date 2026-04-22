@@ -47,6 +47,7 @@ import remarkGfm from 'remark-gfm';
 import * as htmlToImage from 'html-to-image';
 import download from 'downloadjs';
 import { jsPDF } from 'jspdf';
+import { Analytics } from '@vercel/analytics/react';
 
 // --- UTILS ---
 const formatUTC = (date: Date, fmt: string) => {
@@ -1561,6 +1562,7 @@ export default function App() {
           </div>
         )}
       </main>
+      <Analytics />
     </div>
   );
 }
