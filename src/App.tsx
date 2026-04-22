@@ -20,7 +20,8 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize,
-  X
+  X,
+  Info
 } from 'lucide-react';
 import { 
   ComposedChart,
@@ -1148,7 +1149,7 @@ export default function App() {
         </button>
         
         <nav className="flex-1 space-y-1">
-          {['dashboard', 'outlier', 'filter', 'harmonic', 'predictions'].map((tab) => (
+          {['dashboard', 'outlier', 'filter', 'harmonic', 'predictions', 'about'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1164,6 +1165,7 @@ export default function App() {
               {tab === 'filter' && <Radio size={18} />}
               {tab === 'harmonic' && <Piano size={18} />}
               {tab === 'predictions' && <TrendingUp size={18} />}
+              {tab === 'about' && <Info size={18} />}
               <span className="capitalize">{tab}</span>
             </button>
           ))}
@@ -1343,7 +1345,7 @@ export default function App() {
           )}
         </header>
 
-        {!records.length && activeTab !== 'readme' ? (
+        {!records.length && (activeTab !== 'readme' && activeTab !== 'about') ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-2xl border border-[#e2e8f0] p-12 text-center gap-6 shadow-sm">
             <div className="w-20 h-20 bg-sky-50 rounded-3xl flex items-center justify-center text-[#0284c7] rotate-3 hover:rotate-0 transition-transform duration-300">
               <Waves size={40} />
@@ -1366,17 +1368,21 @@ export default function App() {
           </div>
         ) : (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-            {activeTab === 'readme' && (
+            {(activeTab === 'readme' || activeTab === 'about') && (
                 <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 shadow-sm">
                     <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
                         <div>
-                            <h2 className="text-xl font-bold font-display text-slate-800">Dokumentasi & API</h2>
-                            <p className="text-sm text-slate-500 mt-1">Laman ini tersinkronisasi otomatis (Live Sync) dari repository Github master file.</p>
+                            <h2 className="text-xl font-bold font-display text-slate-800">{activeTab === 'about' ? 'About Tide Tools' : 'Petunjuk Penggunaan'}</h2>
+                            {activeTab === 'about' && (
+                                <p className="text-sm text-slate-500 mt-1">Laman ini tersinkronisasi otomatis (Live Sync) dari repository Github master file.</p>
+                            )}
                         </div>
-                        <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-full text-xs font-semibold">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                            Synced Live
-                        </div>
+                        {activeTab === 'about' && (
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-full text-xs font-semibold">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                Synced Live
+                            </div>
+                        )}
                     </div>
                     <div className="prose prose-slate max-w-none prose-headings:font-display prose-headings:font-black prose-headings:text-slate-800 prose-p:font-sans prose-p:text-slate-600 prose-p:leading-relaxed prose-li:font-sans prose-li:text-slate-600 prose-a:text-[#0284c7] prose-img:rounded-2xl prose-img:shadow-md prose-img:border prose-img:border-slate-100 prose-img:w-full prose-img:object-cover">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{readmeContent}</ReactMarkdown>
