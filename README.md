@@ -70,7 +70,7 @@ print(values)
 Untuk kebutuhan automasi *pipeline* data geospasial, sistem *machine learning*, atau integrasi ke dasbor eksternal, BIG Tidal Analysis menyediakan jalur Web API (Representational State Transfer). 
 
 **Endpoint Master URL**:
-'https://ais-dev-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.app/api/analyze'
+'https://ais-pre-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.app/api/analyze'
 
 **Alternative Link**:
 'https://tide-tool.vercel.app/'
