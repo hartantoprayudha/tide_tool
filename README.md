@@ -17,7 +17,7 @@ Untuk mulai menggunakan aplikasi ini, Anda dapat mengunduh format contoh data CS
 * [📥 Unduh Contoh Data Pasut 2 - Sample CM (cm)](/examples/sample_cm.csv)
 * [📥 Unduh Contoh Data Pasut 3 - Combined (m)](/examples/combined.csv)
 * [📥 Unduh Contoh Data Pasut 4 - Outlier Sample (m)](/examples/sample_data.csv)
-
+* [📥 Unduh Contoh Data Pasut 5 - Long data (m)](/examples/smrg_2011_2025_h.txt)
 ---
 
 ## 1. Quick Start Local Server (Untuk Pengguna Pemula)
