@@ -47,6 +47,7 @@ import { format, addDays, parse, isValid } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import * as htmlToImage from 'html-to-image';
+import { Analytics } from '@vercel/analytics/react';
 import download from 'downloadjs';
 import { jsPDF } from 'jspdf';
 
@@ -2777,6 +2778,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           </div>
         </div>
       )}
+      <Analytics />
     </div>
   );
 }
