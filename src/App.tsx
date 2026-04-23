@@ -1026,19 +1026,36 @@ export default function App() {
 
   const exportPredictions = (formatType: 'csv' | 'txt') => {
     if (!predictions.length) return;
+    
+    // Build Fast UTC Formatter for predictions (dd/MM/yyyy HH:mm:ss)
+    const formatTimestamp = (date: Date) => {
+        const utcTime = date.getTime() + date.getTimezoneOffset() * 60000;
+        const d = new Date(utcTime);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        if (formatType === 'csv') {
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        }
+        return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    };
+
     let content = "";
     if (formatType === 'csv') {
-      content = "Timestamp,Predicted Height (m)\n";
+      const lines = ["Timestamp,Predicted Height (m)"];
       predictions.forEach(p => {
-        content += `${formatUTC(p.timestamp, 'yyyy-MM-dd HH:mm:ss')},${p.value}\n`;
+        lines.push(`${formatTimestamp(p.timestamp)},${p.value}`);
       });
+      content = lines.join('\n');
     } else {
-      content = `Tide Prediction Report\nRange: ${predStartDate} to ${predEndDate}\n`;
-      content += `Note: Timestamps are formatted as dd/mm/yyyy hh:mm:ss\n`;
-      content += `------------------------------------------\n`;
+      const lines = [
+        `Tide Prediction Report`,
+        `Range: ${predStartDate} to ${predEndDate}`,
+        `Note: Timestamps are formatted as dd/mm/yyyy hh:mm:ss`,
+        `------------------------------------------`
+      ];
       predictions.forEach(p => {
-          content += `${formatUTC(p.timestamp, 'dd/MM/yyyy HH:mm:ss')}\t${typeof p.value === 'number' ? p.value.toFixed(3) : p.value}\n`;
+          lines.push(`${formatTimestamp(p.timestamp)}\t${typeof p.value === 'number' ? p.value.toFixed(3) : p.value}`);
       });
+      content = lines.join('\n');
     }
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -1046,6 +1063,7 @@ export default function App() {
     link.href = url;
     link.download = `tide_prediction_${predStartDate}_${predEndDate}.${formatType}`;
     link.click();
+    URL.revokeObjectURL(url);
   };
 
   const [showExportModal, setShowExportModal] = useState(false);
@@ -1064,33 +1082,36 @@ export default function App() {
         return;
     }
 
-    let header = "Timestamp\t";
-    selectedKeys.forEach(k => { header += `${k.replace('(cm)', '').trim()}\t`; });
-    header = header.trim() + "\n";
+    let header = "Timestamp";
+    selectedKeys.forEach(k => { header += `\t${k.replace('(cm)', '').trim()}`; });
 
-    let content = header;
+    const lines: string[] = [header];
+
+    // Build Fast UTC Formatter for dd/MM/yyyy HH:mm:ss
+    const formatTimestamp = (date: Date) => {
+        const utcTime = date.getTime() + date.getTimezoneOffset() * 60000;
+        const d = new Date(utcTime);
+        return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+    };
+
     records.forEach(r => {
-        content += `${formatUTC(r.timestamp, 'dd/MM/yyyy HH:mm:ss')}\t`;
+        let rowStr = formatTimestamp(r.timestamp);
         selectedKeys.forEach(k => {
             if (k.endsWith('(Analyzed)')) {
                 const sensorName = k.replace(' (Analyzed)', '');
-                // The main sensor is pre-filtered. If another sensor is requested, 
-                // in this simple HYDRAS export we either recalculate or just output NaN if not main.
-                // For simplicity, we output the current filtered if it's the selected sensor
                 if (sensorName === selectedSensor) {
-                    content += `${typeof r.filtered === 'number' ? r.filtered.toFixed(3) : NaN}\t`;
+                    rowStr += `\t${typeof r.filtered === 'number' && !isNaN(r.filtered) ? r.filtered.toFixed(3) : 'NaN'}`;
                 } else {
-                    // For multiple filtered sensors, you'd need to run the filter on all. 
-                    // To keep it performant, we export 'raw' offset logic or warn user.
-                    content += `${typeof r.allSamples?.[sensorName] === 'number' ? r.allSamples[sensorName].toFixed(3) : NaN}\t`;
+                    rowStr += `\t${typeof r.allSamples?.[sensorName] === 'number' && !isNaN(r.allSamples?.[sensorName]) ? r.allSamples[sensorName].toFixed(3) : 'NaN'}`;
                 }
             } else {
-                content += `${typeof r.allSamples?.[k] === 'number' ? r.allSamples[k].toFixed(3) : NaN}\t`;
+                rowStr += `\t${typeof r.allSamples?.[k] === 'number' && !isNaN(r.allSamples?.[k]) ? r.allSamples[k].toFixed(3) : 'NaN'}`;
             }
         });
-        content = content.trim() + "\n";
+        lines.push(rowStr);
     });
 
+    const content = lines.join('\n');
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1177,10 +1198,19 @@ export default function App() {
 
     let content = "";
     if (formatType === 'csv') {
-      content = `Timestamp,${selectedSensor || 'Sensor Data'} (m),${selectedSensor || 'Sensor'} Filtered (m),Is Outlier\n`;
+      const lines = [`Timestamp,${selectedSensor || 'Sensor Data'} (m),${selectedSensor || 'Sensor'} Filtered (m),Is Outlier`];
+      
+      const formatTimestamp = (date: Date) => {
+          const utcTime = date.getTime() + date.getTimezoneOffset() * 60000;
+          const d = new Date(utcTime);
+          const pad = (n: number) => n.toString().padStart(2, '0');
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      };
+
       records.forEach(r => {
-        content += `${formatUTC(r.timestamp, 'yyyy-MM-dd HH:mm:ss')},${r.raw},${r.filtered},${r.isOutlier}\n`;
+        lines.push(`${formatTimestamp(r.timestamp)},${r.raw},${r.filtered},${r.isOutlier}`);
       });
+      content = lines.join('\n');
     } else {
       // Calculate Stats
       const t0 = records[0].timestamp.getTime();
