@@ -1204,26 +1204,47 @@ export default function App() {
       const mae = count > 0 ? (sumAbsE / count) : 0;
       const rmse = count > 0 ? Math.sqrt(sumSqE / count) : 0;
 
-      content = `Tide Analysis Report - ${fileName}\n`;
-      content += `Generated: ${new Date().toLocaleString()}\n`;
-      content += `------------------------------------------\n`;
-      content += `Chart Datums:\n`;
-      content += `MSL  (Mean Sea Level)          : ${z0.toFixed(3)} m\n`;
+      content = `Tide Analysis Report\t${fileName}\n`;
+      content += `Generated\t${new Date().toLocaleString()}\n\n`;
+
+      content += `--- CHART DATUMS & TIDAL RANGES ---\n`;
+      content += `Parameter\tValue\tUnit\n`;
+      content += `MSL (Mean Sea Level)\t${z0.toFixed(3)}\tm\n`;
       if (datums) {
-          content += `HAT  (Highest Astronomical Tide): ${datums.hat.toFixed(3)} m\n`;
-          content += `MHWS (Mean High Water Springs)  : ${datums.mhws.toFixed(3)} m\n`;
-          content += `MLWS (Mean Low Water Springs)   : ${datums.mlws.toFixed(3)} m\n`;
-          content += `LAT  (Lowest Astronomical Tide) : ${datums.lat.toFixed(3)} m\n`;
-          content += `\nTunggang Pasut (Tide Range)    : ${(datums.hat - datums.lat).toFixed(3)} m\n`;
+          const am2 = harmonicResults.find(r => r.comp === 'M2')?.amp || 0;
+          const as2 = harmonicResults.find(r => r.comp === 'S2')?.amp || 0;
+          const meanSpringTide = 2 * (am2 + as2);
+          const meanNeapTide = 2 * Math.abs(am2 - as2);
+          const maxAstroRange = datums.hat - datums.lat;
+
+          content += `HAT (Highest Astronomical Tide)\t${datums.hat.toFixed(3)}\tm\n`;
+          content += `MHWS (Mean High Water Springs)\t${datums.mhws.toFixed(3)}\tm\n`;
+          content += `MLWS (Mean Low Water Springs)\t${datums.mlws.toFixed(3)}\tm\n`;
+          content += `LAT (Lowest Astronomical Tide)\t${datums.lat.toFixed(3)}\tm\n`;
+          content += `Mean Spring Tide\t${meanSpringTide.toFixed(3)}\tm\n`;
+          content += `Mean Neap Tide\t${meanNeapTide.toFixed(3)}\tm\n`;
+          content += `Maximum Astronomical Tidal Range\t${maxAstroRange.toFixed(3)}\tm\n`;
       }
-      content += `\nModel Accuracies (Harmonic vs Analyzed):\n`;
-      content += `RMSE (Root Mean Square Error)  : ${rmse.toFixed(4)} m\n`;
-      content += `MAE  (Mean Absolute Error)     : ${mae.toFixed(4)} m\n`;
-      content += `ME   (Mean Error)              : ${me.toFixed(4)} m\n\n`;
-      content += `Harmonic Constituents:\n`;
-      content += `Comp | Amp (m) | Phase (deg) | Desc\n`;
+
+      if (linearTrend) {
+          content += `\n--- SEA LEVEL TREND ---\n`;
+          content += `Method\tRate\tUnit\n`;
+          if (linearTrend.stlTrend) {
+              content += `STL Decomposition\t${linearTrend.stlTrend.rateYear.toFixed(4)}\tm/year\n`;
+          }
+          content += `Linear Regression\t${linearTrend.rateYear.toFixed(4)}\tm/year\n`;
+      }
+
+      content += `\n--- MODEL ACCURACIES (Harmonic vs Analyzed) ---\n`;
+      content += `Parameter\tValue\tUnit\n`;
+      content += `RMSE (Root Mean Square Error)\t${rmse.toFixed(4)}\tm\n`;
+      content += `MAE (Mean Absolute Error)\t${mae.toFixed(4)}\tm\n`;
+      content += `ME (Mean Error)\t${me.toFixed(4)}\tm\n\n`;
+
+      content += `--- HARMONIC CONSTITUENTS ---\n`;
+      content += `Comp\tAmp (m)\tPhase (deg)\tDesc\n`;
       harmonicResults.forEach(r => {
-        content += `${r.comp.padEnd(4)} | ${r.amp.toFixed(3).padEnd(7)} | ${r.phase.toFixed(3).padEnd(11)} | ${r.desc}\n`;
+        content += `${r.comp}\t${r.amp.toFixed(3)}\t${r.phase.toFixed(3)}\t${r.desc}\n`;
       });
     }
 
