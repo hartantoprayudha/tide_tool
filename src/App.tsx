@@ -230,12 +230,13 @@ export default function App() {
   const [readmeContent, setReadmeContent] = useState<string>('Memuat dokumentasi...');
 
   useEffect(() => {
-    fetch('/api/readme')
-      .then(res => res.json())
-      .then(data => {
-        if(data.content) setReadmeContent(data.content);
+    // Dynamically import README.md as raw string
+    // @ts-ignore
+    import('../README.md?raw')
+      .then(res => {
+        if (res.default) setReadmeContent(res.default);
       })
-      .catch(err => console.error("Failed to sync README.md", err));
+      .catch(err => console.error("Failed to load README.md", err));
   }, []);
 
   // --- CORE ANALYTICS ENGINE (Client-side) ---
