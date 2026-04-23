@@ -1418,34 +1418,34 @@ export default function App() {
             </div>
           </div>
           {records.length > 0 && (
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5">
               <button 
                 onClick={() => setShowExportModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-rose-50 border border-rose-200 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-100 shadow-sm"
+                className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-rose-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-rose-700 shadow-md shadow-rose-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
               >
-                <Download size={16} />
-                Export HYDRAS
+                <Download size={15} strokeWidth={3} />
+                EXPORT HYDRAS
               </button>
               <button 
                 onClick={() => exportReport('csv')}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-[#e2e8f0] rounded-lg text-sm font-semibold text-[#1e293b] hover:bg-slate-50 shadow-sm"
+                className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-emerald-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-emerald-700 shadow-md shadow-emerald-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
               >
-                <FileSpreadsheet size={16} />
-                Export CSV
+                <FileSpreadsheet size={15} strokeWidth={3} />
+                EXPORT CSV
               </button>
               <button 
                 onClick={() => exportReport('txt')}
-                className="flex items-center gap-2 px-4 py-2 bg-[#1e293b] text-white rounded-lg text-sm font-semibold hover:bg-slate-800 shadow-md"
+                className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-slate-800 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-slate-900 shadow-md shadow-slate-200 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
               >
-                <FileText size={16} />
-                Generate Text Report
+                <FileText size={15} strokeWidth={3} />
+                Generate Report
               </button>
               <button 
                 onClick={exportLogTxt}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-sm font-semibold text-indigo-700 hover:bg-indigo-100 shadow-sm"
+                className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-indigo-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-indigo-700 shadow-md shadow-indigo-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
               >
-                <ClipboardList size={16} />
-                Export Log (.txt)
+                <ClipboardList size={15} strokeWidth={3} />
+                Export Log
               </button>
             </div>
           )}
