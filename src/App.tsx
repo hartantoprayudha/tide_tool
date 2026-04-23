@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { 
   LayoutDashboard, 
   Search, 
@@ -2802,6 +2803,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           </div>
         </div>
       )}
+      <SpeedInsights />
     </div>
   );
 }
