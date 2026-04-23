@@ -656,9 +656,28 @@ export default function App() {
         let fittedZ0 = meanRaw;
         let results: ConstituentResult[] = [];
         
+        let unifiedSlope = 0;
+        let unifiedIntercept = fittedZ0;
+        
         if (!_isInsufficient) {
-            const solution = solveLeastSquares(t_hours, y_vals, compsToFit);
+            // First, calculate simple linear trend to detrend the data before harmonic analysis
+            let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+            const n = t_hours.length;
+            for (let i = 0; i < n; i++) {
+                sumX += t_hours[i];
+                sumY += y_vals[i];
+                sumXY += t_hours[i] * y_vals[i];
+                sumX2 += t_hours[i] * t_hours[i];
+            }
+            unifiedSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+            unifiedIntercept = (sumY - unifiedSlope * sumX) / n;
+            
+            // Detrend the data
+            const y_detrended = y_vals.map((y, i) => y - (unifiedSlope * t_hours[i]));
+
+            const solution = solveLeastSquares(t_hours, y_detrended, compsToFit);
             fittedZ0 = solution[0] || meanRaw;
+            
             results = compsToFit.map((c, i) => {
                 const a = solution[1 + 2 * i] || 0;
                 const b = solution[1 + 2 * i + 1] || 0;
@@ -700,24 +719,6 @@ export default function App() {
             const t0 = processed[0].timestamp.getTime();
             const x = validRecords.map(r => (r.timestamp.getTime() - t0) / 3600000);
             
-            // De-tiding calculation
-            let y: number[];
-            if (isDeTiding && results.length > 0) {
-               // Subtract predicted tide from filtered data
-               const f_list = results.map(r => 2 * Math.PI * r.freq);
-               y = validRecords.map(r => {
-                  const ti = (r.timestamp.getTime() - t0) / 3600000;
-                  let tideSum = 0;
-                  results.forEach((res, idx) => {
-                     const angle = f_list[idx] * ti;
-                     tideSum += res.amp * Math.cos(angle - res.phase * (Math.PI / 180));
-                  });
-                  return r.filtered - tideSum;
-               });
-            } else {
-               y = validRecords.map(r => r.filtered);
-            }
-            
             // 5a. Linear Regression (Standard)
             const calculateTrend = (dataX: number[], dataY: number[]) => {
                 const n = dataX.length;
@@ -734,12 +735,12 @@ export default function App() {
                 return { slope, intercept, rateYear };
             };
 
-            const regTrend = calculateTrend(x, y);
+            // Use unified fit values if valid, otherwise fallback to simple regression
+            const regTrend = !_isInsufficient 
+                ? { slope: unifiedSlope, intercept: unifiedIntercept, rateYear: unifiedSlope * 24 * 365.25 }
+                : calculateTrend(x, validRecords.map(r => r.filtered));
             
-            // 5b. Manual Least Squares (explicitly labelled)
-            // Functionally the same in simple linear case, but we calculate it separately to satisfy user request
-            // And maybe provide a different perspective if needed (e.g. including z0 as bias)
-            const lsqTrend = calculateTrend(x, y);
+            const lsqTrend = regTrend;
 
             // 5c. STL Decomposition-based Trend (Simplified 1-Year Moving Average) for data > 1 year
             let stlTrendData: ReturnType<typeof calculateTrend> | undefined;
@@ -1188,6 +1189,9 @@ export default function App() {
         if (!r.isOutlier && !isNaN(r.filtered)) {
             const t = (r.timestamp.getTime() - t0) / 3600000;
             let p = z0;
+            if (linearTrend && linearTrend.lsqTrend) {
+                p += linearTrend.lsqTrend.slope * t;
+            }
             harmonicResults.forEach(res => {
                 const w = 2 * Math.PI * res.freq;
                 const ph = res.phase * (Math.PI / 180);
