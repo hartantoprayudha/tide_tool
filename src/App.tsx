@@ -21,7 +21,8 @@ import {
   ZoomOut,
   Maximize,
   X,
-  Info
+  Info,
+  ClipboardList
 } from 'lucide-react';
 import { 
   ComposedChart,
@@ -184,6 +185,7 @@ interface PartialModifier {
   sensor: string;
   offset: number;
   scale: number;
+  referenceSensor?: string;
 }
 
 export default function App() {
@@ -1096,6 +1098,78 @@ export default function App() {
     setShowExportModal(false);
   };
 
+  const exportLogTxt = () => {
+    let grossErrors = 0;
+    const sensorKey = selectedSensor || availableSensors[0] || '';
+    rawData.forEach(row => {
+      const valStr = (row[sensorKey] || "").toString().trim();
+      let valRaw = parseFloat(valStr.replace(',', '.'));
+      if (isNaN(valRaw) || valRaw === 999 || valRaw === -999 || valRaw < -200 || valRaw > 900) {
+        grossErrors++;
+      }
+    });
+
+    const isCurrentCm = sensorKey.toLowerCase().includes('(cm)');
+
+    let logContent = "=========================================================\n";
+    logContent += "       BIG TIDAL ANALYSIS - DATA MANIPULATION LOG        \n";
+    logContent += "=========================================================\n\n";
+    logContent += `Waktu Ekspor      : ${formatUTC(new Date(), 'yyyy-MM-dd HH:mm:ss')} UTC\n`;
+    logContent += `Nama File Asli    : ${fileName || 'Tidak ada file'}\n`;
+    logContent += `Sensor Dipilih    : ${sensorKey || 'Otomatis'} ${isCurrentCm ? '(dikonversi dari cm ke m)' : '(m)'}\n\n`;
+    logContent += "---------------------------------------------------------\n";
+    logContent += "LANGKAH MANIPULASI (PARAMETER YANG DIGUNAKAN):\n";
+    logContent += "---------------------------------------------------------\n";
+    logContent += `1. Value Offset     : ${verticalOffset} m\n`;
+    
+    const offsetMods = modifiers.filter(m => m.offset !== 0);
+    const scaleMods = modifiers.filter(m => m.scale !== 1);
+    
+    logContent += `2. Local Offset     : ${offsetMods.length} koreksi\n`;
+    offsetMods.forEach((m, i) => {
+      logContent += `   - Offset [${i+1}]: ${m.offset} m pada sensor target [${m.sensor}] (${formatUTC(new Date(m.startMs), 'yyyy-MM-dd HH:mm')} sd ${formatUTC(new Date(m.endMs), 'yyyy-MM-dd HH:mm')})\n`;
+    });
+
+    logContent += `3. Scaling Factor   : ${scaleMods.length} koreksi\n`;
+    scaleMods.forEach((m, i) => {
+      logContent += `   - Scaling [${i+1}]: multiplier x${m.scale.toFixed(4)} (Referensi: [${m.referenceSensor || 'TBA'}] -> Target: [${m.sensor}]) (${formatUTC(new Date(m.startMs), 'yyyy-MM-dd HH:mm')} sd ${formatUTC(new Date(m.endMs), 'yyyy-MM-dd HH:mm')})\n`;
+    });
+
+    logContent += `4. Time Offset      : ${timeOffset} jam\n`;
+    logContent += `5. Time Resampling  : otomatis berdasarkan interval data data\n`;
+    logContent += `6. Deteksi Outlier  : Z-Score Threshold: ${zThreshold} / Manual Range: [${manualMin === "" ? "none" : manualMin}, ${manualMax === "" ? "none" : manualMax}]\n`;
+    logContent += `7. Set Konstanta    : ${constituentSet}\n`;
+    logContent += `8. De-Tiding Trend  : ${isDeTiding ? 'Aktif' : 'Tidak Aktif'}\n`;
+    logContent += `9. Smoothing Filter : ${filterType} (Window: ${filterType === 'ma' ? filterWindow : filterType === 'median' ? medianWindow : 'N/A'})\n\n`;
+    
+    const outlierCount = records.filter(r => r.isOutlier).length;
+    const validCount = records.length - outlierCount;
+
+    logContent += "---------------------------------------------------------\n";
+    logContent += "STATISTIK DATA:\n";
+    logContent += "---------------------------------------------------------\n";
+    logContent += `Total Records Awal (Baris)       : ${rawData.length}\n`;
+    logContent += `Total Records Akhir (Resampled)  : ${records.length}\n`;
+    logContent += `Data Gross Error (Invalid/NaN)   : ${grossErrors}\n`;
+    logContent += `Data Terdeteksi Outlier          : ${outlierCount}\n`;
+    logContent += `Total Data Valid (Analyzed Data) : ${validCount}\n`;
+    if (records.length > 0) {
+        logContent += `Periode Data                     : ${formatUTC(records[0].timestamp, 'yyyy-MM-dd HH:mm:ss')} sd ${formatUTC(records[records.length - 1].timestamp, 'yyyy-MM-dd HH:mm:ss')}\n`;
+    }
+    logContent += `Status Peringatan                : ${dataLengthWarning ? dataLengthWarning : 'Aman (Durasi mencukupi)'}\n`;
+    logContent += "=========================================================\n";
+
+    const blob = new Blob([logContent], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Tidal_Analysis_Log_${formatUTC(new Date(), 'yyyyMMdd_HHmm')}.txt`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const exportReport = (formatType: 'csv' | 'txt') => {
     if (!records.length) return;
 
@@ -1365,6 +1439,13 @@ export default function App() {
               >
                 <FileText size={16} />
                 Generate Text Report
+              </button>
+              <button 
+                onClick={exportLogTxt}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-sm font-semibold text-indigo-700 hover:bg-indigo-100 shadow-sm"
+              >
+                <ClipboardList size={16} />
+                Export Log (.txt)
               </button>
             </div>
           )}
@@ -1742,7 +1823,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         endMs = displayDataRaw[displayDataRaw.length - 1].timestamp.getTime();
     }
 
-    const newMods = [...modifiers, { startMs, endMs, sensor: scaleTarget, offset: 0, scale: scaleFactor }];
+    const newMods = [...modifiers, { startMs, endMs, sensor: scaleTarget, offset: 0, scale: scaleFactor, referenceSensor: scaleReference }];
     setModifiers(newMods);
     runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
     alert(`Faktor skala ${scaleFactor} diterapkan pada ${zoomDomain ? 'area zoom' : 'seluruh data'} untuk sensor ${scaleTarget}`);

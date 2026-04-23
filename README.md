@@ -13,7 +13,7 @@ Aplikasi BIG Tidal Analysis adalah platform analisis deret waktu pasang surut ai
 
 Untuk mulai menggunakan aplikasi ini, Anda dapat mengunduh format contoh data CSV pasut laut yang telah kami sediakan dalam berbagai format (Meter dan Centimeter):
 
-* [📥 Unduh Contoh Data Pasut 1 - SMRG (m)](/examples/smrg.csv)
+* [📥 Unduh Contoh Data Pasut 1 - Smrg (m)](/examples/smrg.csv)
 * [📥 Unduh Contoh Data Pasut 2 - Sample CM (cm)](/examples/sample_cm.csv)
 * [📥 Unduh Contoh Data Pasut 3 - Combined (m)](/examples/combined.csv)
 * [📥 Unduh Contoh Data Pasut 4 - Outlier Sample (m)](/examples/sample_data.csv)
@@ -81,7 +81,7 @@ Fungsi API ini menerima data deret waktu format CSV murni, memproses nilai harmo
 **Contoh Pemanggilan via Console (cURL):**
 ```bash
 # Upload file CSV observasi untuk mendapatkan respon JSON
-curl -X POST https://ais-dev-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.app/api/analyze \
+curl -X POST https://ais-pre-d64oxxolfthvib2joscfyr-733612432639.asia-east1.run.app/api/analyze \
   -H "Authorization: Bearer <API_KEY_ANDA>" \
   -F "file=@data_observasi_pasut.csv" \
   -F "constituents=9"
