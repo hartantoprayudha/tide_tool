@@ -1068,6 +1068,7 @@ export default function App() {
 
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportSelections, setExportSelections] = useState<Record<string, boolean>>({});
+  const [exportIntervalMode, setExportIntervalMode] = useState<'1_minute' | 'hourly_sampling' | 'hourly_average'>('1_minute');
 
   const toggleExportSelection = (key: string) => {
       setExportSelections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1082,6 +1083,57 @@ export default function App() {
         return;
     }
 
+    const isOneMinuteData = records.length > 1 && Math.abs(records[1].timestamp.getTime() - records[0].timestamp.getTime()) >= 59000 && Math.abs(records[1].timestamp.getTime() - records[0].timestamp.getTime()) <= 61000;
+    const currentMode = isOneMinuteData ? exportIntervalMode : '1_minute';
+
+    let exportRecords = records;
+
+    if (currentMode === 'hourly_sampling') {
+        exportRecords = records.filter(r => r.timestamp.getMinutes() === 0 && r.timestamp.getSeconds() === 0);
+    } else if (currentMode === 'hourly_average') {
+        const grouped = new Map<number, typeof records>();
+        records.forEach(r => {
+            const hr = new Date(r.timestamp);
+            hr.setMinutes(0, 0, 0);
+            const key = hr.getTime();
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key)!.push(r);
+        });
+
+        exportRecords = Array.from(grouped.entries()).map(([ts, group]) => {
+            const avgRecord = { ...group[group.length - 1], timestamp: new Date(ts) };
+            
+            let filteredSum = 0;
+            let filteredCount = 0;
+            group.forEach(r => {
+                if (typeof r.filtered === 'number' && !isNaN(r.filtered)) {
+                    filteredSum += r.filtered;
+                    filteredCount++;
+                }
+            });
+            avgRecord.filtered = filteredCount > 0 ? filteredSum / filteredCount : NaN;
+
+            const avgSamples: Record<string, number> = {};
+            if (group[0].allSamples) {
+                const sampleKeys = Object.keys(group[0].allSamples);
+                sampleKeys.forEach(k => {
+                    let sum = 0;
+                    let count = 0;
+                    group.forEach(r => {
+                         if (r.allSamples && typeof r.allSamples[k] === 'number' && !isNaN(r.allSamples[k])) {
+                             sum += r.allSamples[k];
+                             count++;
+                         }
+                    });
+                    avgSamples[k] = count > 0 ? sum / count : NaN;
+                });
+            }
+            avgRecord.allSamples = avgSamples;
+
+            return avgRecord;
+        });
+    }
+
     let header = "Timestamp";
     selectedKeys.forEach(k => { header += `\t${k.replace('(cm)', '').trim()}`; });
 
@@ -1094,7 +1146,7 @@ export default function App() {
         return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
     };
 
-    records.forEach(r => {
+    exportRecords.forEach(r => {
         let rowStr = formatTimestamp(r.timestamp);
         selectedKeys.forEach(k => {
             if (k.endsWith('(Analyzed)')) {
@@ -1672,6 +1724,46 @@ export default function App() {
                           <button onClick={() => setShowExportModal(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"><X size={20} /></button>
                       </div>
                       <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+                          {records.length > 1 && Math.abs(records[1].timestamp.getTime() - records[0].timestamp.getTime()) >= 59000 && Math.abs(records[1].timestamp.getTime() - records[0].timestamp.getTime()) <= 61000 && (
+                            <div className="space-y-2 mb-4">
+                               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Opsi Interval Ekspor</div>
+                               <div className="flex flex-col gap-2 p-3 rounded-xl border border-slate-200 bg-slate-50/50">
+                                   <label className="flex items-center gap-3 cursor-pointer">
+                                       <input 
+                                           type="radio" 
+                                           name="exportInterval" 
+                                           value="1_minute" 
+                                           checked={exportIntervalMode === '1_minute'} 
+                                           onChange={() => setExportIntervalMode('1_minute')}
+                                           className="w-4 h-4 text-sky-500 border-slate-300 focus:ring-sky-500"
+                                       />
+                                       <span className="text-sm font-bold text-slate-700">1 Menit (Original)</span>
+                                   </label>
+                                   <label className="flex items-center gap-3 cursor-pointer">
+                                       <input 
+                                           type="radio" 
+                                           name="exportInterval" 
+                                           value="hourly_sampling" 
+                                           checked={exportIntervalMode === 'hourly_sampling'} 
+                                           onChange={() => setExportIntervalMode('hourly_sampling')}
+                                           className="w-4 h-4 text-sky-500 border-slate-300 focus:ring-sky-500"
+                                       />
+                                       <span className="text-sm font-bold text-slate-700">Hourly Sampling (Setiap Jam Bulat)</span>
+                                   </label>
+                                   <label className="flex items-center gap-3 cursor-pointer">
+                                       <input 
+                                           type="radio" 
+                                           name="exportInterval" 
+                                           value="hourly_average" 
+                                           checked={exportIntervalMode === 'hourly_average'} 
+                                           onChange={() => setExportIntervalMode('hourly_average')}
+                                           className="w-4 h-4 text-sky-500 border-slate-300 focus:ring-sky-500"
+                                       />
+                                       <span className="text-sm font-bold text-slate-700">Hourly Average (Rerata 1 Jam)</span>
+                                   </label>
+                               </div>
+                            </div>
+                          )}
                           <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
                               <input 
                                   type="checkbox" 
