@@ -22,7 +22,8 @@ import {
   Maximize,
   X,
   Info,
-  ClipboardList
+  ClipboardList,
+  BookOpen
 } from 'lucide-react';
 import { 
   ComposedChart,
@@ -1263,6 +1264,91 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const downloadUserGuide = () => {
+    const content = `# BIG Tidal Analysis - Scientific User Guide
+
+## Pengantar
+Aplikasi BIG Tidal Analysis dirancang untuk memproses, menganalisis, dan memodelkan data pasut (pasang surut) laut. Algoritma yang diimplementasikan dalam aplikasi ini didasarkan pada fondasi matematika dan statistik yang kuat yang berstandar internasional. Dokumen ini menjelaskan kerangka teori ilmiah dari setiap fitur pengolahan data.
+
+---
+
+## 1. Outlier Detection (Deteksi Data Ekstrem)
+Aplikasi ini menggunakan metode Z-Score dan Manual Range untuk membuang anomali atau *spike* dalam observasi data pasut.
+
+### a. Z-Score (Standard Score)
+Algoritma Z-Score mengukur seberapa jauh suatu data tunggal menyimpang dari nilai rata-rata sampelnya, diekspresikan dalam satuan standar deviasi.
+- **Teori:** Jika data berdistribusi normal, 99.7% dari data akan berada dalam rentang Z-Score antara -3 hingga 3 (aturan empiris 68-95-99.7).
+- **Implementasi:** Aplikasi menghitung *Mean* (Rata-rata) dan *Standard Deviation* dari keseluruhan deret waktu. Data yang memiliki nilai absolut Z-Score $|Z| > Threshold$ (default 3.0) diidentifikasi sebagai outlier. Algoritma ini bersifat iteratif hingga batas maksimum eliminasi (15% dari total observasi) untuk mencegah hilangnya data pasut aktual seperti saat terjadi badai (*storm surge*).
+
+### b. Manual Range Filter
+Terkadang malfungsi sensor menghasilkan lonjakan data (misal: -999 atau +9999). Filter ini bekerja dari segi fisik ambang batas (*physical thresholds*), yang secara deterministik memotong data observasi:
+$Data\_Valid = \\{ x \\in X \\mid Min \\leq x \\leq Max \\}$
+
+---
+
+## 2. Low Pass Filter (Smoothing Data)
+Karena data sering kali mengandung noise instrumental berfrekuensi tinggi atau efek gelombang angin pendek, data di-smoothing.
+
+### a. Moving Average (Rata-rata Bergerak)
+Filter konvolusi *low-pass* linear yang meratakan data dengan mengambil nilai rata-rata dalam rentang selang waktu *window* tertentu.
+- **Teori:** Meratakan deret waktu dengan mengurangi varian acak. Pada data oseanografi, *window* yang umum digunakan terpusat (*centered moving average*) agar tidak terjadi pergeseran fase (phase shift) dalam gelombang. 
+- **Persamaan:** $\\hat{x}_t = \\frac{1}{2k+1} \\sum_{i=-k}^{k} x_{t+i}$
+  (Di mana window size = $2k+1$)
+
+### b. Median Filter
+Filter non-linear yang sangat efektif untuk membuang noise *salt-and-pepper* atau paku-paku durasi pendek tanpa menghaluskan atau mendistorsi bentuk asli puncak dan lembah dari gelombang pasut (yang sangat rentan rusak oleh rata-rata bergerak).
+
+---
+
+## 3. Harmonic Analysis (Analisis Kuadrat Terkecil / Least Squares Method)
+Metode ini digunakan untuk mengekstraksi parameter konstanta harmonik pasut yang memengaruhi elevasi muka air berdasarkan periode astronomis (bulan dan matahari).
+
+### Teori Analisis Harmonik
+Ketinggian muka laut setiap saat $h(t)$ dipresentasikan sebagai kombinasi deret harmonik (Fourier):
+$h(t) = Z_0 + \\sum_{i=1}^{N} A_i \\cos(\\omega_i t - \\Phi_i)$
+- $Z_0$ = Mean Sea Level (MSL) jangka panjang (atau *vertical offset* pada stasiun tersebut).
+- $A_i$ = Amplitudo (besaran efek gravitasi / gaya pembangkit pasut konstituen ke-i).
+- $\\omega_i$ = Frekuensi angular/sudut dari konstituen ke-i yang dihitung matematis dari lintasan bulan dan matahari (konstan).
+- $\\Phi_i$ = Fase (kelambatan sudut waktu, *Phase Lag*).
+
+### Resolusi Matriks Least Squares OLS (Ordinary Least Squares)
+Aplikasi ini melinierisasi persamaan di atas lewat identitas trigonometri. Algoritma ini menggunakan regresi kuadrat terkecil multivariabel, secara analitik dipecahkan dengan Dekomposisi Cholesky (Cholesky Decomposition) untuk kestabilan numerik tertinggi. Variabel matriks disusun sebagai konstanta $\\cos(\\omega_i t)$ dan $\\sin(\\omega_i t)$ dari tiap konstituen (M2, S2, K1, O1, dsb).
+
+---
+
+## 4. De-Tiding & Sea Level Trend (Analisis Tren Kenaikan Muka Air Laut)
+Untuk melihat sinyal dari perubahan iklim, efek gelombang osilatif pasut astronomi harus dibuang (De-tiding).
+
+### a. Linear Regression
+Kecocokan *Best Fit Line* dari data ter-dekontruksi. Digunakan persamaan regresi linear $y_t = a + b \\cdot t$, di mana *slope* $b$ adalah rata-rata kecepatan Sea Level Rise (misal milimeter/tahun).
+
+### b. STL Decomposition (Seasonal and Trend decomposition using Loess)
+Pendekatan non-parametrik yang memisahkan deret waktu ke dalam tiga komponen:
+$Y_t = T_t + S_t + R_t$ (Trend + Seasonality + Remainder)
+Aplikasi ini mengekstraksi komponen Tren ($T_t$) dari data harian yang telah diproses (*Daily Averaging*). Trend jangka panjang ini tidak bergantung pada regresi yang linear sempurna, namun menangkap variasi dekadal dari kenaikan air laut secara dinamis dengan regresi polinomial lokal berseri.
+
+---
+
+## 5. Chart Datums & Range (Elevasi Referensi Peta)
+Setelah analisis didapatkan, algoritma mensintesis datum elevasi untuk kebutuhan hidrografik.
+- **HAT / LAT (Highest / Lowest Astronomical Tide):** Estimasi batas surut dan pasang terjauh murni secara teoritis berdasarkan konstituen penggerak (tergantung kepada interaksi semua konstituen).
+- **MHWS / MLWS (Mean High / Low Water Springs):** Rata-rata pasang dan surut tertinggi yang biasanya diasosiasikan dengan konstanta utama semi-diurnal (2 komponen terbesar): $Z_0 \\pm (M_2 + S_2)$.
+- **MSL (Mean Sea Level):** Rata-rata Muka Air Laut, didapatkan secara iteratif ekuivalen denga konstanta $Z_0$ di Least Squares Fitting.
+
+---
+Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrographic Organization) serta publikasi resmi rujukan oseanografi dari BIG.`;
+
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Tidal_Analysis_Scientific_User_Guide.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const exportReport = (formatType: 'csv' | 'txt') => {
     if (!records.length) return;
 
@@ -1567,38 +1653,47 @@ export default function App() {
               </p>
             </div>
           </div>
-          {records.length > 0 && (
-            <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5">
-              <button 
-                onClick={() => setShowExportModal(true)}
-                className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-rose-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-rose-700 shadow-md shadow-rose-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
-              >
-                <Download size={15} strokeWidth={3} />
-                EXPORT HYDRAS
-              </button>
-              <button 
-                onClick={() => exportReport('csv')}
-                className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-emerald-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-emerald-700 shadow-md shadow-emerald-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
-              >
-                <FileSpreadsheet size={15} strokeWidth={3} />
-                EXPORT CSV
-              </button>
-              <button 
-                onClick={() => exportReport('txt')}
-                className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-slate-800 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-slate-900 shadow-md shadow-slate-200 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
-              >
-                <FileText size={15} strokeWidth={3} />
-                Generate Report
-              </button>
-              <button 
-                onClick={exportLogTxt}
-                className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-indigo-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-indigo-700 shadow-md shadow-indigo-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
-              >
-                <ClipboardList size={15} strokeWidth={3} />
-                Export Log
-              </button>
-            </div>
-          )}
+          <div className="flex flex-col items-end gap-2.5">
+            <button 
+              onClick={downloadUserGuide}
+              className="flex items-center justify-center gap-2 px-4 h-9 bg-slate-100 text-slate-700 rounded-xl text-[11px] font-black tracking-widest hover:bg-slate-200 transition-all uppercase shadow-sm"
+            >
+              <BookOpen size={14} strokeWidth={3} />
+              User Guide
+            </button>
+            {records.length > 0 && (
+              <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5">
+                <button 
+                  onClick={() => setShowExportModal(true)}
+                  className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-rose-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-rose-700 shadow-md shadow-rose-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
+                >
+                  <Download size={15} strokeWidth={3} />
+                  EXPORT HYDRAS
+                </button>
+                <button 
+                  onClick={() => exportReport('csv')}
+                  className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-emerald-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-emerald-700 shadow-md shadow-emerald-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
+                >
+                  <FileSpreadsheet size={15} strokeWidth={3} />
+                  EXPORT CSV
+                </button>
+                <button 
+                  onClick={() => exportReport('txt')}
+                  className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-slate-800 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-slate-900 shadow-md shadow-slate-200 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
+                >
+                  <FileText size={15} strokeWidth={3} />
+                  Generate Report
+                </button>
+                <button 
+                  onClick={exportLogTxt}
+                  className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-indigo-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-indigo-700 shadow-md shadow-indigo-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
+                >
+                  <ClipboardList size={15} strokeWidth={3} />
+                  Export Log
+                </button>
+              </div>
+            )}
+          </div>
         </header>
         
         {dataLengthWarning && (
