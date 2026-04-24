@@ -38,6 +38,45 @@ export default function SummarizeView() {
   const [error, setError] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [leftWidth, setLeftWidth] = useState(50);
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseDown = () => {
+    setIsDragging(true);
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const percentage = (x / rect.width) * 100;
+      if (percentage >= 15 && percentage <= 85) {
+        setLeftWidth(percentage);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    
+    // Disable text selection globally while dragging
+    const oldSelect = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = oldSelect;
+    };
+  }, [isDragging]);
+
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
@@ -239,64 +278,16 @@ export default function SummarizeView() {
         {error && <p className="text-rose-500 text-sm mt-3 font-semibold">{error}</p>}
       </div>
 
-      <div className="flex-1 overflow-hidden flex flex-col p-6 gap-6">
-          {/* Map View */}
-          <div className="flex-[1.2] bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col min-h-[300px]">
-             <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                  <h3 className="font-bold text-slate-700">Peta Sebaran Sea Level Trend</h3>
-                  <div className="text-xs text-slate-500 flex items-center gap-2">
-                     <span>Trend:</span>
-                     <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(-0.01) }}></div> -
-                     <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(0) }}></div> 0
-                     <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(0.01) }}></div> +
-                  </div>
-              </div>
-              <div className="flex-1 relative bg-slate-100 min-h-0">
-                  <MapContainer 
-                    bounds={mapBounds} 
-                    style={{ height: "100%", width: "100%", zIndex: 0 }}
-                    key="shared-map"
-                  >
-                      <BoundsUpdater bounds={mapBounds} />
-                      <TileLayer
-                        attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
-                        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                      />
-                      {summaryData.map((row, idx) => {
-                          const color = getColorForTrend(row.stlTrend);
-                          return (
-                            <CircleMarker 
-                                key={idx} 
-                                center={[row.latitude, row.longitude]} 
-                                radius={8}
-                                pathOptions={{
-                                    color: '#ffffff',
-                                    weight: 2,
-                                    fillColor: color,
-                                    fillOpacity: 0.8
-                                }}
-                            >
-                                <Popup>
-                                    <div className="text-sm font-sans">
-                                        <div className="font-bold text-slate-800 mb-1">{row.stationName}</div>
-                                        <div className="text-slate-600 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
-                                            <span>Lat:</span> <span>{row.latitude.toFixed(5)}</span>
-                                            <span>Lon:</span> <span>{row.longitude.toFixed(5)}</span>
-                                            <span className="font-medium text-slate-800 mt-1">STL Trend:</span> 
-                                            <span className="font-medium text-slate-800 mt-1">{row.stlTrend.toFixed(5)} m/yr</span>
-                                        </div>
-                                    </div>
-                                </Popup>
-                                <LeafletTooltip>{row.stationName}</LeafletTooltip>
-                            </CircleMarker>
-                          );
-                      })}
-                  </MapContainer>
-              </div>
-          </div>
-
+      <div 
+        ref={containerRef}
+        className="flex-1 overflow-hidden flex flex-col xl:flex-row p-6 gap-6 xl:gap-0"
+        style={{ 
+          '--left-width': `${leftWidth}%`,
+          cursor: isDragging ? 'col-resize' : 'default',
+        } as React.CSSProperties}
+      >
           {/* Table View */}
-          <div className="flex-1 bg-white border border-slate-200 rounded-xl flex flex-col min-h-[250px] overflow-hidden">
+          <div className="w-full xl:w-[calc(var(--left-width)-12px)] flex-none bg-white border border-slate-200 rounded-xl flex flex-col min-h-[300px] xl:min-h-0 overflow-hidden">
               <div className="p-4 bg-slate-50 border-b border-slate-200">
                   <h3 className="font-bold text-slate-700">Tabel Gabungan Data</h3>
               </div>
@@ -353,6 +344,69 @@ export default function SummarizeView() {
                           )}
                       </tbody>
                   </table>
+              </div>
+          </div>
+
+          {/* Resizer Handle */}
+          <div 
+            className="hidden xl:flex w-6 cursor-col-resize items-center justify-center group shrink-0"
+            onMouseDown={handleMouseDown}
+          >
+            <div className={`w-1 h-12 rounded-full transition-colors ${isDragging ? 'bg-sky-500' : 'bg-slate-200 group-hover:bg-sky-400'}`} />
+          </div>
+
+          {/* Map View */}
+          <div className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col min-h-[400px]">
+             <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                  <h3 className="font-bold text-slate-700">Peta Sebaran Sea Level Trend</h3>
+                  <div className="text-xs text-slate-500 flex items-center gap-2">
+                     <span>Trend:</span>
+                     <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(-0.01) }}></div> -
+                     <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(0) }}></div> 0
+                     <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(0.01) }}></div> +
+                  </div>
+              </div>
+              <div className="flex-1 relative bg-slate-100 min-h-[400px]">
+                  <MapContainer 
+                    bounds={mapBounds} 
+                    style={{ height: "100%", width: "100%", zIndex: 0 }}
+                    key="shared-map"
+                  >
+                      <BoundsUpdater bounds={mapBounds} />
+                      <TileLayer
+                        attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
+                        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                      />
+                      {summaryData.map((row, idx) => {
+                          const color = getColorForTrend(row.stlTrend);
+                          return (
+                            <CircleMarker 
+                                key={idx} 
+                                center={[row.latitude, row.longitude]} 
+                                radius={8}
+                                pathOptions={{
+                                    color: '#ffffff',
+                                    weight: 2,
+                                    fillColor: color,
+                                    fillOpacity: 0.8
+                                }}
+                            >
+                                <Popup>
+                                    <div className="text-sm font-sans">
+                                        <div className="font-bold text-slate-800 mb-1">{row.stationName}</div>
+                                        <div className="text-slate-600 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+                                            <span>Lat:</span> <span>{row.latitude.toFixed(5)}</span>
+                                            <span>Lon:</span> <span>{row.longitude.toFixed(5)}</span>
+                                            <span className="font-medium text-slate-800 mt-1">STL Trend:</span> 
+                                            <span className="font-medium text-slate-800 mt-1">{row.stlTrend.toFixed(5)} m/yr</span>
+                                        </div>
+                                    </div>
+                                </Popup>
+                                <LeafletTooltip>{row.stationName}</LeafletTooltip>
+                            </CircleMarker>
+                          );
+                      })}
+                  </MapContainer>
               </div>
           </div>
       </div>
