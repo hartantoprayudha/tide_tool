@@ -206,7 +206,7 @@ export default function SummarizeView() {
           Spatial Summary
         </h2>
         <p className="text-slate-500 mt-1">
-          Upload file laporan TXT yang digenerate oleh aplikasi ini, lalu ekstrak hasilnya ke dalam tabel gabungan dan rasakan persebaran spasial sea level trend.
+          Silakan upload file(s) report hasil pengolahan anda (*.txt)
         </p>
 
         <div className="mt-6 flex flex-wrap gap-4 items-center">
