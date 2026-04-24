@@ -23,8 +23,11 @@ import {
   X,
   Info,
   ClipboardList,
-  BookOpen
+  BookOpen,
+  Map as MapIcon
 } from 'lucide-react';
+import SummarizeView from './SummarizeView';
+
 import { 
   ComposedChart,
   Scatter,
@@ -1468,7 +1471,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
         </button>
         
         <nav className="flex-1 space-y-1">
-          {['dashboard', 'outlier', 'filter', 'harmonic', 'predictions', 'about'].map((tab) => (
+          {['dashboard', 'outlier', 'filter', 'harmonic', 'predictions', 'summarize', 'about'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1484,6 +1487,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
               {tab === 'filter' && <Radio size={18} />}
               {tab === 'harmonic' && <Piano size={18} />}
               {tab === 'predictions' && <TrendingUp size={18} />}
+              {tab === 'summarize' && <MapIcon size={18} />}
               {tab === 'about' && <Info size={18} />}
               <span className="capitalize">{tab}</span>
             </button>
@@ -1752,6 +1756,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     </div>
                 </div>
             )}
+            {activeTab === 'summarize' && <SummarizeView />}
             {activeTab === 'dashboard' && records.length > 0 && (
                 <DashboardView 
                     records={records} 
