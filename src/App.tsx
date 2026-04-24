@@ -1712,7 +1712,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             </div>
         )}
 
-        {!records.length && (activeTab !== 'readme' && activeTab !== 'about') ? (
+        {!records.length && (activeTab !== 'readme' && activeTab !== 'about' && activeTab !== 'summarize') ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-2xl border border-[#e2e8f0] p-12 text-center gap-6 shadow-sm">
             <div className="w-20 h-20 bg-sky-50 rounded-3xl flex items-center justify-center text-[#0284c7] rotate-3 hover:rotate-0 transition-transform duration-300">
               <Waves size={40} />
