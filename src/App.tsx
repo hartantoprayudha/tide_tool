@@ -197,6 +197,12 @@ export default function App() {
   const [fileName, setFileName] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Station Metadata
+  const [showMetadataModal, setShowMetadataModal] = useState(false);
+  const stationNameRef = useRef("");
+  const stationLatRef = useRef("");
+  const stationLonRef = useRef("");
+
   // Configuration State
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
@@ -206,6 +212,17 @@ export default function App() {
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
   
+  const [vOffsetStr, setVOffsetStr] = useState<string>('');
+  const [tOffsetStr, setTOffsetStr] = useState<string>('');
+
+  useEffect(() => {
+    setVOffsetStr(verticalOffset === 0 ? '' : verticalOffset.toString());
+  }, [verticalOffset]);
+
+  useEffect(() => {
+    setTOffsetStr(timeOffset === 0 ? '' : timeOffset.toString());
+  }, [timeOffset]);
+
   // Analysis State
   const [zThreshold, setZThreshold] = useState(3.0);
   const [manualMin, setManualMin] = useState<number | "">("");
@@ -944,6 +961,7 @@ export default function App() {
         setModifiers([]); // Reset modifiers on new file load
         runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, []);
         setActiveTab('dashboard');
+        setShowMetadataModal(true);
       } catch (err) {
         alert("Terjadi kesalahan saat membaca file CSV.");
       }
@@ -1291,6 +1309,14 @@ export default function App() {
       const rmse = count > 0 ? Math.sqrt(sumSqE / count) : 0;
 
       content = `Tide Analysis Report\t${fileName}\n`;
+      const sName = stationNameRef.current;
+      const sLat = stationLatRef.current;
+      const sLon = stationLonRef.current;
+      if (sName || sLat || sLon) {
+          content += `Station Name\t${sName || '-'}\n`;
+          content += `Latitude\t${sLat ? Number(sLat).toFixed(6) : '-'}\n`;
+          content += `Longitude\t${sLon ? Number(sLon).toFixed(6) : '-'}\n`;
+      }
       content += `Generated\t${new Date().toLocaleString()}\n\n`;
 
       content += `--- CHART DATUMS & TIDAL RANGES ---\n`;
@@ -1434,12 +1460,20 @@ export default function App() {
                 <input 
                   type="number"
                   step="0.01"
-                  value={Number.isNaN(verticalOffset) || verticalOffset === 0 ? '' : verticalOffset}
+                  value={vOffsetStr}
                   placeholder="0.00"
-                  onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 0;
-                      setVerticalOffset(val);
-                      runAnalysis(rawData, selectedSensor, val, timeOffset);
+                  onChange={(e) => setVOffsetStr(e.target.value)}
+                  onBlur={() => {
+                      const val = parseFloat(vOffsetStr) || 0;
+                      if (val !== verticalOffset) {
+                          setVerticalOffset(val);
+                          runAnalysis(rawData, selectedSensor, val, timeOffset);
+                      }
+                  }}
+                  onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                          e.currentTarget.blur();
+                      }
                   }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
                 />
@@ -1449,12 +1483,20 @@ export default function App() {
                 <input 
                   type="number"
                   step="0.5"
-                  value={Number.isNaN(timeOffset) || timeOffset === 0 ? '' : timeOffset}
+                  value={tOffsetStr}
                   placeholder="0.0"
-                  onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 0;
-                      setTimeOffset(val);
-                      runAnalysis(rawData, selectedSensor, verticalOffset, val);
+                  onChange={(e) => setTOffsetStr(e.target.value)}
+                  onBlur={() => {
+                      const val = parseFloat(tOffsetStr) || 0;
+                      if (val !== timeOffset) {
+                          setTimeOffset(val);
+                          runAnalysis(rawData, selectedSensor, verticalOffset, val);
+                      }
+                  }}
+                  onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                          e.currentTarget.blur();
+                      }
                   }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
                 />
@@ -1710,6 +1752,59 @@ export default function App() {
                     title={chartTitle}
                     hasInsufficientData={!!dataLengthWarning}
                 />
+            )}
+            
+            {/* Metadata Modal */}
+            {showMetadataModal && (
+              <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 block">
+                  <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                      <div className="p-6 pb-4 border-b border-slate-100 flex items-center justify-between">
+                          <div>
+                              <h3 className="text-lg font-black text-slate-800 font-display">Metadata Stasiun</h3>
+                              <p className="text-xs text-slate-500 font-medium">Lengkapi data stasiun (Opsional)</p>
+                          </div>
+                      </div>
+                      <div className="p-6 space-y-4">
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Nama Stasiun</label>
+                              <input 
+                                  type="text" 
+                                  defaultValue={stationNameRef.current}
+                                  onChange={(e) => stationNameRef.current = e.target.value}
+                                  placeholder="Contoh: Stasiun Tanjung Priok"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
+                              />
+                          </div>
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Latitude (Degrees)</label>
+                              <input 
+                                  type="number" 
+                                  step="0.000001"
+                                  defaultValue={stationLatRef.current}
+                                  onChange={(e) => stationLatRef.current = e.target.value}
+                                  placeholder="Contoh: -6.103000"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
+                              />
+                          </div>
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Longitude (Degrees)</label>
+                              <input 
+                                  type="number" 
+                                  step="0.000001"
+                                  defaultValue={stationLonRef.current}
+                                  onChange={(e) => stationLonRef.current = e.target.value}
+                                  placeholder="Contoh: 106.883000"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
+                              />
+                          </div>
+                      </div>
+                      <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                          <button onClick={() => setShowMetadataModal(false)} className="px-6 py-2 bg-[#0284c7] hover:bg-sky-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors">
+                              Selesai
+                          </button>
+                      </div>
+                  </div>
+              </div>
             )}
             
             {/* Export Modal */}
