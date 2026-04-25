@@ -2396,7 +2396,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
       <div className="flex flex-col xl:flex-row gap-6">
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-5">
             <StatCard label="Z0 (MSL)" value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} trend="Least Squares Fit" />
-            <div className="relative group">
+            <div className="relative group h-full">
                 <StatCard 
                   label="Sea Level Trend" 
                   value={`${trend ? ((trend.stlTrend ? trend.stlTrend.rateYear : trend.rateYear) * 1000).toFixed(2) : "0.00"} mm/y`} 
@@ -2539,10 +2539,10 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
           </div>
       </div>
 
-      <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
-        <div className="relative mb-6 flex justify-center items-center min-h-[32px]">
+      <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] p-6 pt-10 shadow-sm relative">
+        <div className="relative mb-8 flex justify-center items-center">
           <h3 className="text-2xl font-black text-slate-800 px-2 font-display text-center">{title}</h3>
-          <div className="absolute right-0 top-0 flex gap-2 export-exclude">
+          <div className="absolute right-0 -top-4 flex gap-2 export-exclude">
             <button 
                 onClick={onReset}
                 className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-rose-100 mr-2"
@@ -3289,11 +3289,11 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
 
 function StatCard({ label, value, trend, trendColor }: { label: string, value: string, trend: string, trendColor?: string }) {
   return (
-    <div className="relative overflow-hidden bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-lg transition-all flex flex-col gap-1.5 group">
+    <div className="relative h-full overflow-hidden bg-white p-5 lg:p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-lg transition-all flex flex-col gap-1.5 group">
       <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-sky-100/50 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
       <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-display z-10">{label}</div>
-      <div className="text-[2.5rem] leading-none font-black text-transparent bg-clip-text bg-gradient-to-br from-sky-600 to-indigo-600 font-display tracking-tighter drop-shadow-sm z-10">{value}</div>
-      <div className={cn("text-[10px] mt-1 font-bold z-10", trendColor || "text-slate-400")}>{trend}</div>
+      <div className="text-3xl xl:text-[2rem] leading-tight font-black text-transparent bg-clip-text bg-gradient-to-br from-sky-600 to-indigo-600 font-display tracking-tighter drop-shadow-sm z-10 break-words">{value}</div>
+      <div className={cn("text-[10px] mt-auto pt-1 font-bold z-10", trendColor || "text-slate-400")}>{trend}</div>
     </div>
   );
 }
