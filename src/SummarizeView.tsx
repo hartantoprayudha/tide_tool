@@ -288,10 +288,10 @@ export default function SummarizeView() {
       >
           {/* Table View */}
           <div className="w-full xl:w-[calc(var(--left-width)-12px)] flex-none bg-white border border-slate-200 rounded-xl flex flex-col h-[400px] xl:h-full overflow-hidden">
-              <div className="p-4 bg-slate-50 border-b border-slate-200">
+              <div className="p-4 flex-none bg-slate-50 border-b border-slate-200">
                   <h3 className="font-bold text-slate-700">Tabel Gabungan Data</h3>
               </div>
-              <div className="flex-1 overflow-auto p-0">
+              <div className="flex-1 min-h-0 overflow-auto p-0">
                   <table className="w-full text-left text-sm whitespace-nowrap">
                       <thead className="bg-slate-100 sticky top-0 z-10 text-slate-600">
                          <tr>
@@ -356,8 +356,8 @@ export default function SummarizeView() {
           </div>
 
           {/* Map View */}
-          <div className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col min-h-[400px]">
-             <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+          <div className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col h-[400px] xl:h-full">
+             <div className="p-4 flex-none bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <h3 className="font-bold text-slate-700">Peta Sebaran Sea Level Trend</h3>
                   <div className="text-xs text-slate-500 flex items-center gap-2">
                      <span>Trend:</span>
@@ -366,7 +366,7 @@ export default function SummarizeView() {
                      <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(0.01) }}></div> +
                   </div>
               </div>
-              <div className="flex-1 relative bg-slate-100 min-h-[400px]">
+              <div className="flex-1 min-h-0 relative bg-slate-100">
                   <MapContainer 
                     bounds={mapBounds} 
                     style={{ height: "100%", width: "100%", zIndex: 0 }}

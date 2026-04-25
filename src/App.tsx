@@ -150,7 +150,14 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   '2MK6': { f: 0.244584300, d: 'Sixth diurnal' },
   '2SM6': { f: 0.247178100, d: 'Sixth diurnal' },
   'MSK6': { f: 0.247406200, d: 'Sixth diurnal' },
-  '3MK7': { f: 0.283314900, d: 'Seventh diurnal' }
+  '3MK7': { f: 0.283314900, d: 'Seventh diurnal' },
+  'E2': { f: 0.076177300, d: 'EPS2' },
+  'La2': { f: 0.081821200, d: 'LDA2' },
+  'Mu2': { f: 0.077689470, d: 'MU2' },
+  'Nu2': { f: 0.079201621, d: 'NU2' },
+  'MSqm': { f: 0.004333900, d: 'Lunar solar quarter monthly' },
+  'Mtm': { f: 0.004562100, d: 'Lunar third monthly' },
+  'N4': { f: 0.157998498, d: 'Over-tide' }
 };
 
 const getMoonEvents = (data: any[]) => {
@@ -212,7 +219,7 @@ export default function App() {
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
   const [visibleSensors, setVisibleSensors] = useState<string[]>([]);
-  const [constituentSet, setConstituentSet] = useState<'4' | '9' | '27' | 'UKHO' | 'UTIDE'>('9');
+  const [constituentSet, setConstituentSet] = useState<'4' | '9' | 'IHO23' | 'FES2014' | 'UTIDE' | 'AUTO'>('9');
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
@@ -237,6 +244,7 @@ export default function App() {
   const [medianWindow, setMedianWindow] = useState(3);
   const [butterCutoff, setButterCutoff] = useState(0.5);
   const [harmonicResults, setHarmonicResults] = useState<ConstituentResult[]>([]);
+  const [rmseVal, setRmseVal] = useState<number | null>(null);
   const [z0, setZ0] = useState(0);
   const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
@@ -246,6 +254,7 @@ export default function App() {
   const [predEndDate, setPredEndDate] = useState(formatUTC(addDays(new Date(), 7), 'yyyy-MM-dd'));
   const [predictions, setPredictions] = useState<any[]>([]);
   const [dataLengthWarning, setDataLengthWarning] = useState<string | null>(null);
+  const [autoDiagnostics, setAutoDiagnostics] = useState<{ rayleighPassed: number, totalTested: number, snrPassed: number } | null>(null);
   const [chartTitle, setChartTitle] = useState("Tide Analysis Visualization");
 
   // Dynamic README Context for Github Sync
@@ -353,7 +362,7 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding) => {
     if (!rawRows.length) return;
     const currentSensor = sensorToUse || selectedSensor;
     if (!currentSensor) return;
@@ -496,10 +505,38 @@ export default function App() {
 
         // 2. Harmonic Outlier Detection (Two-Pass Logic)
         let compsToFit: string[] = [];
+        
+        const durationHoursCheck = (processed[processed.length - 1].timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
+        
         if (constituentSet === '4') compsToFit = ['M2', 'S2', 'K1', 'O1'];
         else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
-        else if (constituentSet === '27') compsToFit = ['M2', 'S2', 'N2', 'K2', 'K1', 'O1', 'P1', 'Q1', 'Mf', 'Mm', 'M4', 'MS4', 'MN4', 'S4', 'M6', 'S6', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'J1', 'OO1', 'Ssa', 'Sa', 'RHO1', 'M1'];
-        else if (constituentSet === 'UKHO') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', 'OO1', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 'Mm', 'Ssa', 'Sa', 'RHO1', 'M1', 'PI1', '2Q1', '2SM2', 'M3', 'M8', '2MK3'];
+        else if (constituentSet === 'IHO23') compsToFit = ['Sa', 'Ssa', 'Mm', 'Mf', 'Q1', 'O1', 'P1', 'K1', 'J1', '2N2', 'MU2', 'N2', 'NU2', 'M2', 'L2', 'T2', 'S2', 'R2', 'K2', 'MN4', 'M4', 'MS4', 'M6'];
+        else if (constituentSet === 'FES2014') compsToFit = ['2N2', 'E2', 'J1', 'K1', 'K2', 'L2', 'La2', 'M2', 'M3', 'M4', 'M6', 'M8', 'Mf', 'MKS2', 'Mm', 'MN4', 'MS4', 'MSf', 'MSqm', 'Mtm', 'Mu2', 'N2', 'N4', 'Nu2', 'O1', 'P1', 'Q1', 'R2', 'S1', 'S2', 'S4', 'Sa', 'Ssa', 'T2'];
+        else if (constituentSet === 'AUTO') {
+            const rayleighCriterionFreq = 1.0 / durationHoursCheck;
+            const priorityList = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 'Mm', 'Ssa', 'Sa', 'E2', 'La2', 'M3', 'M8', 'MKS2', 'MSqm', 'Mtm', 'N4', 'R2', 'S1'];
+            
+            Object.keys(HARMONIC_FREQS).forEach(k => {
+                if (!priorityList.includes(k)) priorityList.push(k);
+            });
+            
+            let autoComps: string[] = [];
+            priorityList.forEach(c => {
+                 if (!HARMONIC_FREQS[c]) return;
+                 let canAdd = true;
+                 for (let i = 0; i < autoComps.length; i++) {
+                     if (Math.abs(HARMONIC_FREQS[c].f - HARMONIC_FREQS[autoComps[i]].f) < rayleighCriterionFreq) {
+                         canAdd = false;
+                         break;
+                     }
+                 }
+                 if (canAdd) autoComps.push(c);
+            });
+            compsToFit = autoComps;
+            if (autoComps.length > 0) {
+               setAutoDiagnostics({ rayleighPassed: autoComps.length, totalTested: Object.keys(HARMONIC_FREQS).length, snrPassed: 0 });
+            }
+        }
         else compsToFit = Object.keys(HARMONIC_FREQS); // UTIDE (All 67)
 
         // A. Quick 1st Pass Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
@@ -509,7 +546,6 @@ export default function App() {
         const meanRaw = y_vals_raw.reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1);
         const stdRaw = Math.sqrt(y_vals_raw.map(x => Math.pow(x - meanRaw, 2)).reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1));
 
-        const durationHoursCheck = (processed[processed.length - 1].timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
         const _isInsufficient = durationHoursCheck < 29 * 24;
         
         let roughZ0 = meanRaw;
@@ -708,20 +744,51 @@ export default function App() {
             const solution = solveLeastSquares(t_hours, y_detrended, compsToFit);
             fittedZ0 = solution[0] || meanRaw;
             
+            // Calculate residuals for ANOVA/SNR
+            let residualVariance = 0;
+            if (constituentSet === 'AUTO') {
+               let sumResSq = 0;
+               for (let i = 0; i < t_hours.length; i++) {
+                   let fitVal = fittedZ0;
+                   for (let j = 0; j < compsToFit.length; j++) {
+                       const a = solution[1 + 2 * j] || 0;
+                       const b = solution[1 + 2 * j + 1] || 0;
+                       const phaseArg = 2 * Math.PI * HARMONIC_FREQS[compsToFit[j]].f * t_hours[i];
+                       fitVal += a * Math.cos(phaseArg) + b * Math.sin(phaseArg);
+                   }
+                   sumResSq += Math.pow(y_detrended[i] - fitVal, 2);
+               }
+               residualVariance = sumResSq / Math.max(1, t_hours.length - compsToFit.length * 2 - 1);
+            }
+            
+            let snrPassedCount = 0;
+            
             results = compsToFit.map((c, i) => {
                 const a = solution[1 + 2 * i] || 0;
                 const b = solution[1 + 2 * i + 1] || 0;
                 const amp = Math.sqrt(a * a + b * b);
                 let phase = Math.atan2(b, a) * (180 / Math.PI);
                 if (phase < 0) phase += 360;
+                
+                let snr = 0;
+                if (constituentSet === 'AUTO' && residualVariance > 0) {
+                    snr = (amp * amp / 2) / (residualVariance / t_hours.length);
+                    if (snr > 2) snrPassedCount++; // Conventional significance threshold
+                }
+                
                 return {
                   comp: c,
                   amp,
                   phase,
                   desc: HARMONIC_FREQS[c].d,
-                  freq: HARMONIC_FREQS[c].f
+                  freq: HARMONIC_FREQS[c].f,
+                  snr: constituentSet === 'AUTO' ? snr : undefined
                 };
             });
+            
+            if (constituentSet === 'AUTO') {
+                setAutoDiagnostics(prev => prev ? { ...prev, snrPassed: snrPassedCount } : null);
+            }
         }
 
         setZ0(parseFloat(fittedZ0.toFixed(3)));
@@ -789,7 +856,7 @@ export default function App() {
                 for (let i = 0; i < processed.length; i++) {
                     const r = processed[i];
                     if (!isNaN(r.filtered) && !r.isOutlier) {
-                        if (isDeTiding && results.length > 0) {
+                        if (useDeTiding && results.length > 0) {
                             const ti = (r.timestamp.getTime() - t0) / 3600000;
                             let tideSum = 0;
                             for (let k = 0; k < results.length; k++) {
@@ -838,6 +905,28 @@ export default function App() {
             }
 
             setLinearTrend({ ...regTrend, lsqTrend, stlTrend: stlTrendData });
+            
+            // Calculate RMSE
+            let sumSqE = 0, countE = 0;
+            const rt0 = processed[0].timestamp.getTime();
+            processed.forEach(r => {
+                if (!r.isOutlier && !isNaN(r.filtered)) {
+                    const rt = (r.timestamp.getTime() - rt0) / 3600000;
+                    let p = fittedZ0;
+                    if (!_isInsufficient) {
+                        p += unifiedSlope * rt;
+                    }
+                    results.forEach(res => {
+                        const w = 2 * Math.PI * res.freq;
+                        const ph = res.phase * (Math.PI / 180);
+                        p += res.amp * Math.cos(w * rt - ph);
+                    });
+                    sumSqE += Math.pow(r.filtered - p, 2);
+                    countE++;
+                }
+            });
+            const rVal = countE > 0 ? Math.sqrt(sumSqE / countE) : 0;
+            setRmseVal(rVal);
         }
 
         setRecords(processed);
@@ -1245,7 +1334,7 @@ export default function App() {
     logContent += `5. Time Resampling  : otomatis berdasarkan interval data data\n`;
     logContent += `6. Deteksi Outlier  : Z-Score Threshold: ${zThreshold} / Manual Range: [${manualMin === "" ? "none" : manualMin}, ${manualMax === "" ? "none" : manualMax}]\n`;
     logContent += `7. Set Konstanta    : ${constituentSet}\n`;
-    logContent += `8. De-Tiding Trend  : ${isDeTiding ? 'Aktif' : 'Tidak Aktif'}\n`;
+    logContent += `8. De-Tiding Trend  : ${useDeTiding ? 'Aktif' : 'Tidak Aktif'}\n`;
     logContent += `9. Smoothing Filter : ${filterType} (Window: ${filterType === 'ma' ? filterWindow : filterType === 'median' ? medianWindow : 'N/A'})\n\n`;
     
     const outlierCount = records.filter(r => r.isOutlier).length;
@@ -1536,10 +1625,18 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             >
               <option value="4">4 Constants (Basic)</option>
               <option value="9">9 Constants (Standard)</option>
-              <option value="27">27 Constants (IHO/TWCWG)</option>
-              <option value="UKHO">UKHO Total Tide (34)</option>
+              <option value="IHO23">IHO 23 Constants (GeoTide)</option>
+              <option value="FES2014">FES2014 (34 Constants)</option>
               <option value="UTIDE">UTide Standard (67)</option>
+              <option value="AUTO">Auto (Rayleigh & SNR)</option>
             </select>
+            {constituentSet === 'AUTO' && autoDiagnostics && (
+               <div className="mt-2 p-2 bg-sky-50 rounded text-[10px] text-sky-800 space-y-1">
+                   <div className="flex justify-between"><span>Tested Constituents:</span> <span className="font-bold">{autoDiagnostics.totalTested}</span></div>
+                   <div className="flex justify-between"><span>Passed Rayleigh (Resolved):</span> <span className="font-bold">{autoDiagnostics.rayleighPassed}</span></div>
+                   <div className="flex justify-between"><span>Significant Signal (SNR &gt; 2):</span> <span className="font-bold">{autoDiagnostics.snrPassed}</span></div>
+               </div>
+            )}
           </div>
 
           <div className="space-y-1.5 pt-4 border-t border-slate-100">
@@ -1821,31 +1918,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             )}
             {activeTab === 'harmonic' && records.length > 0 && (
               <div className="space-y-6">
-                 <div className="bg-white rounded-2xl border border-slate-200 p-6 flex items-center justify-between shadow-sm">
-                    <div className="flex items-center gap-3">
-                       <Waves className="text-sky-500" size={24} />
-                       <div>
-                          <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">Tren Analysis Options</h4>
-                          <p className="text-[10px] text-slate-500 font-medium">Pengaturan sebelum kalkulasi tren kenaikan muka laut.</p>
-                       </div>
-                    </div>
-                    <label className="flex items-center gap-3 px-4 py-2 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
-                       <input 
-                          type="checkbox" 
-                          checked={isDeTiding} 
-                          onChange={(e) => {
-                             setIsDeTiding(e.target.checked);
-                             runAnalysis(rawData);
-                          }}
-                          className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
-                       />
-                       <div className="flex flex-col">
-                          <span className="text-xs font-bold text-slate-700 uppercase">Aktifkan De-Tiding</span>
-                          <span className="text-[9px] text-slate-500">Kurangi komponen pasut sebelum menghitung tren.</span>
-                       </div>
-                    </label>
-                 </div>
-                 <HarmonicView results={harmonicResults} />
+                 <HarmonicView results={harmonicResults} rmse={rmseVal} />
               </div>
             )}
             {activeTab === 'predictions' && records.length > 0 && (
@@ -2054,7 +2127,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const [scaleReference, setScaleReference] = useState<string>('');
   const [scaleTarget, setScaleTarget] = useState<string>('');
   const [localOffset, setLocalOffset] = useState<number>(0);
-  const [brushIndices, setBrushIndices] = useState<{ start: number, end: number } | null>(null);
   
   // Zoom States
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
@@ -2094,8 +2166,9 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         // Snap to hour by setting minutes, seconds and ms to 0
         const hourMs = new Date(timeMs).setMinutes(0, 0, 0);
         if (hourMs !== lastHourMs) {
+            const { timestamp, ...restProps } = chartData[i];
             sampled.push({
-                ...chartData[i],
+                ...restProps,
                 timeMs
             });
             lastHourMs = hourMs;
@@ -2106,13 +2179,24 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   }, [chartData]);
   
   const displayData = useMemo(() => {
-    if (!zoomDomain) return displayDataRaw;
-    const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-    const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-    if (startIndex === -1 || endIndex === -1) return displayDataRaw;
-    let s = startIndex, e = endIndex;
-    if (s > e) { s = endIndex; e = startIndex; }
-    return displayDataRaw.slice(s, e + 1);
+    let sliced = displayDataRaw;
+    if (zoomDomain) {
+        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
+        if (startIndex !== -1 && endIndex !== -1) {
+            let s = startIndex, e = endIndex;
+            if (s > e) { s = endIndex; e = startIndex; }
+            sliced = displayDataRaw.slice(s, e + 1);
+        }
+    }
+
+    // Dynamic decimation to prevent lag on huge datasets (> 1 year)
+    // Ensures rendering is fast, while preserving exactly hourly view when users zoom in.
+    if (sliced.length > 2500) {
+        const step = Math.ceil(sliced.length / 2500);
+        return sliced.filter((_, i) => i % step === 0);
+    }
+    return sliced;
   }, [displayDataRaw, zoomDomain]);
 
   const handleDragAction = () => {
@@ -2409,6 +2493,25 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 </div>
              </div>
 
+             {/* Trend Analysis Settings */}
+             <div className="space-y-1.5 pt-3 border-t border-slate-100">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Trend Analysis</label>
+                <label className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+                   <input 
+                      type="checkbox" 
+                      checked={isDeTiding} 
+                      onChange={(e) => {
+                         setIsDeTiding(e.target.checked);
+                         runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, e.target.checked);
+                      }}
+                      className="w-3.5 h-3.5 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
+                   />
+                   <div className="flex flex-col">
+                      <span className="text-[10px] font-bold text-slate-700 uppercase">Detide Data</span>
+                   </div>
+                </label>
+             </div>
+
              {/* Multi-sensor toggles */}
              <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Multi-Sensor Overlay</label>
@@ -2591,13 +2694,14 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                       key={sensor}
                       hide={hiddenLines[sensor]} 
                       dataKey={`allSamples.${sensor}`}
-                      stroke="none"
-                      strokeWidth={0}
-                      dot={{ r: 2.5, fill: color, fillOpacity: 0.6, strokeWidth: 0 }}
+                      stroke={color}
+                      strokeWidth={1.5}
+                      dot={false}
                       activeDot={{ r: 3, fill: color }}
                       type="monotone"
                       name={sensor} 
                       isAnimationActive={false} 
+                      connectNulls={false}
                     />
                   );
               })}
@@ -2605,16 +2709,12 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
               
               <Brush 
-                dataKey="timeStr" 
+                dataKey="timeMs" 
+                tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
                 height={30} 
                 stroke="#cbd5e1" 
                 travellerWidth={10} 
                 fill="#f8fafc" 
-                onChange={(range: any) => {
-                    if (range && typeof range.startIndex === 'number') {
-                        setBrushIndices({ start: range.startIndex, end: range.endIndex });
-                    }
-                }}
               />
             </ComposedChart>
           </ResponsiveContainer>
@@ -2843,7 +2943,7 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
   );
 }
 
-function HarmonicView({ results }: { results: ConstituentResult[] }) {
+function HarmonicView({ results, rmse }: { results: ConstituentResult[], rmse?: number | null }) {
   if (!results.length) return null;
   
   const handleDownloadCSV = () => {
@@ -2858,7 +2958,15 @@ function HarmonicView({ results }: { results: ConstituentResult[] }) {
   return (
     <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm overflow-hidden">
       <div className="flex justify-between items-start mb-6">
-        <h3 className="text-lg font-black text-slate-800 px-2 font-display">Konstanta Harmonik (Least Squares Fit)</h3>
+        <div>
+            <h3 className="text-lg font-black text-slate-800 px-2 font-display">Konstanta Harmonik (Least Squares Fit)</h3>
+            {rmse !== undefined && rmse !== null && (
+                <div className="px-2 mt-1">
+                    <span className="text-xs font-semibold text-slate-500">Root Mean Square Error (RMSE): </span>
+                    <span className="text-[13px] font-black text-sky-600">{rmse.toFixed(4)} m</span>
+                </div>
+            )}
+        </div>
         <button onClick={handleDownloadCSV} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors">
           <Download size={14} /> CSV
         </button>
@@ -2935,10 +3043,13 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
     const oneYearHours = 366 * 24;
     
     if (predictions.length <= oneYearHours) {
-      return predictions.map((p: any) => ({
-          ...p,
-          timeMs: p.timestamp.getTime()
-      }));
+      return predictions.map((p: any) => {
+          const { timestamp, ...rest } = p;
+          return {
+              ...rest,
+              timeMs: timestamp.getTime()
+          };
+      });
     } else {
       // If > 1 year: Show entire duration as monthly means
       const monthlyData: Record<string, { sum: number, count: number, date: Date, max: number, min: number }> = {};
@@ -2958,7 +3069,6 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           time: formatUTC(m.date, 'MMM yy'),
           fullTime: formatUTC(m.date, 'MMMM yyyy'),
           value: parseFloat((m.sum / m.count).toFixed(3)),
-          timestamp: m.date,
           timeMs: m.date.getTime(),
           dayMax: m.max,
           dayMin: m.min,
@@ -2968,13 +3078,22 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
   }, [predictions]);
 
   const displayPreds = useMemo(() => {
-    if (!zoomDomain) return displayPredsRaw;
-    const startIndex = displayPredsRaw.findIndex((d: any) => (d.timeMs || d.timestamp?.getTime()) === zoomDomain.start);
-    const endIndex = displayPredsRaw.findIndex((d: any) => (d.timeMs || d.timestamp?.getTime()) === zoomDomain.end);
-    if (startIndex === -1 || endIndex === -1) return displayPredsRaw;
-    let s = startIndex, e = endIndex;
-    if (s > e) { s = endIndex; e = startIndex; }
-    return displayPredsRaw.slice(s, e + 1);
+    let sliced = displayPredsRaw;
+    if (zoomDomain) {
+        const startIndex = displayPredsRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
+        const endIndex = displayPredsRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
+        if (startIndex !== -1 && endIndex !== -1) {
+            let s = startIndex, e = endIndex;
+            if (s > e) { s = endIndex; e = startIndex; }
+            sliced = displayPredsRaw.slice(s, e + 1);
+        }
+    }
+    
+    if (sliced.length > 2500) {
+        const step = Math.ceil(sliced.length / 2500);
+        return sliced.filter((_, i) => i % step === 0);
+    }
+    return sliced;
   }, [displayPredsRaw, zoomDomain]);
 
   const moonEvents = useMemo(() => getMoonEvents(displayPreds), [displayPreds]);
@@ -3137,7 +3256,14 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#0ea5e9" fillOpacity={0.15} />
               ) : null}
 
-              <Brush dataKey="timeMs" height={30} stroke="#cbd5e1" travellerWidth={10} fill="#f8fafc" />
+              <Brush 
+                dataKey="timeMs" 
+                tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
+                height={30} 
+                stroke="#cbd5e1" 
+                travellerWidth={10} 
+                fill="#f8fafc" 
+              />
             </AreaChart>
             </ResponsiveContainer>
           </div>
