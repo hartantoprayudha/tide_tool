@@ -2241,11 +2241,11 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         let s = startIndex, e = endIndex;
         if (s > e) { s = endIndex; e = startIndex; }
 
-        startMs = displayDataRaw[s].timestamp.getTime();
-        endMs = displayDataRaw[e].timestamp.getTime();
+        startMs = displayDataRaw[s].timeMs;
+        endMs = displayDataRaw[e].timeMs;
     } else {
-        startMs = displayDataRaw[0].timestamp.getTime();
-        endMs = displayDataRaw[displayDataRaw.length - 1].timestamp.getTime();
+        startMs = displayDataRaw[0].timeMs;
+        endMs = displayDataRaw[displayDataRaw.length - 1].timeMs;
     }
 
     const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: localOffset, scale: 1 }];
@@ -2268,12 +2268,12 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         let s = startIndex, e = endIndex;
         if (s > e) { s = endIndex; e = startIndex; }
         
-        startMs = displayDataRaw[s].timestamp.getTime();
-        endMs = displayDataRaw[e].timestamp.getTime();
+        startMs = displayDataRaw[s].timeMs;
+        endMs = displayDataRaw[e].timeMs;
     } else {
         // Apply globally if no zoom domain is selected
-        startMs = displayDataRaw[0].timestamp.getTime();
-        endMs = displayDataRaw[displayDataRaw.length - 1].timestamp.getTime();
+        startMs = displayDataRaw[0].timeMs;
+        endMs = displayDataRaw[displayDataRaw.length - 1].timeMs;
     }
 
     const newMods = [...modifiers, { startMs, endMs, sensor: scaleTarget, offset: 0, scale: scaleFactor, referenceSensor: scaleReference }];
