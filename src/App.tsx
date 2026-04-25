@@ -2696,7 +2696,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                       dataKey={`allSamples.${sensor}`}
                       stroke={color}
                       strokeWidth={1.5}
-                      dot={false}
+                      dot={displayData.length <= 720 ? { r: 1.5, strokeWidth: 0, fill: color } : false}
                       activeDot={{ r: 3, fill: color }}
                       type="monotone"
                       name={sensor} 
@@ -2705,7 +2705,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     />
                   );
               })}
-              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#f59e0b" strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
+              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#f59e0b" strokeOpacity={0.65} strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
               
               <Brush 
