@@ -190,6 +190,7 @@ interface PartialModifier {
   offset: number;
   scale: number;
   referenceSensor?: string;
+  action?: 'modify' | 'delete';
 }
 
 export default function App() {
@@ -415,7 +416,11 @@ export default function App() {
                   for (let mIdx = 0; mIdx < activeMods.length; mIdx++) {
                       const mod = activeMods[mIdx];
                       if (mod.sensor === s && unmodifiedDateMs >= mod.startMs && unmodifiedDateMs <= mod.endMs) {
-                          sValRaw = (sValRaw * mod.scale) + mod.offset;
+                          if (mod.action === 'delete') {
+                              sValRaw = NaN;
+                          } else {
+                              sValRaw = (sValRaw * mod.scale) + mod.offset;
+                          }
                       }
                   }
                   allSamples[s] = parseFloat(sValRaw.toFixed(3));
@@ -431,7 +436,11 @@ export default function App() {
               for (let mIdx = 0; mIdx < activeMods.length; mIdx++) {
                   const mod = activeMods[mIdx];
                   if (mod.sensor === currentSensor && unmodifiedDateMs >= mod.startMs && unmodifiedDateMs <= mod.endMs) {
-                      valRaw = (valRaw * mod.scale) + mod.offset;
+                      if (mod.action === 'delete') {
+                          valRaw = NaN;
+                      } else {
+                          valRaw = (valRaw * mod.scale) + mod.offset;
+                      }
                   }
               }
           }
@@ -2051,6 +2060,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
   const [refAreaRight, setRefAreaRight] = useState<string>('');
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
+  const [dragAction, setDragAction] = useState<'zoom' | 'delete'>('zoom');
 
   const outliers = useMemo(() => records.filter((r:any) => r.isOutlier).length, [records]);
 
@@ -2075,24 +2085,24 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const displayDataRaw = useMemo(() => {
     if (!chartData.length) return [];
     
-    // 1. If data is too large, decimate it to maintain responsiveness
-    const maxPoints = 4000; 
+    // Always do hourly sampling for Dashboard Chart visualization
     let sampled = [];
-    
-    if (chartData.length > maxPoints) {
-      const step = Math.ceil(chartData.length / maxPoints);
-      for (let i = 0; i < chartData.length; i += step) {
-        sampled.push(chartData[i]);
-      }
-    } else {
-      sampled = chartData;
+    let lastHourMs = -1;
+
+    for (let i = 0; i < chartData.length; i++) {
+        const timeMs = chartData[i].timestamp.getTime();
+        // Snap to hour by setting minutes, seconds and ms to 0
+        const hourMs = new Date(timeMs).setMinutes(0, 0, 0);
+        if (hourMs !== lastHourMs) {
+            sampled.push({
+                ...chartData[i],
+                timeMs
+            });
+            lastHourMs = hourMs;
+        }
     }
 
-    // 2. Add timeMs only for the sampled points to save memory
-    return sampled.map(r => ({
-        ...r,
-        timeMs: r.timestamp.getTime()
-    }));
+    return sampled;
   }, [chartData]);
   
   const displayData = useMemo(() => {
@@ -2105,13 +2115,29 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     return displayDataRaw.slice(s, e + 1);
   }, [displayDataRaw, zoomDomain]);
 
-  const zoom = () => {
+  const handleDragAction = () => {
     if (refAreaLeft === refAreaRight || refAreaRight === '') {
       setRefAreaLeft('');
       setRefAreaRight('');
       return;
     }
-    setZoomDomain({ start: Number(refAreaLeft), end: Number(refAreaRight) });
+
+    let startMs = Number(refAreaLeft);
+    let endMs = Number(refAreaRight);
+    if (startMs > endMs) {
+      const temp = startMs;
+      startMs = endMs;
+      endMs = temp;
+    }
+
+    if (dragAction === 'zoom') {
+      setZoomDomain({ start: startMs, end: endMs });
+    } else if (dragAction === 'delete') {
+      const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: 0, scale: 1, action: 'delete' as const }];
+      setModifiers(newMods);
+      runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
+    }
+    
     setRefAreaLeft('');
     setRefAreaRight('');
   };
@@ -2425,6 +2451,18 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             {zoomDomain && (
               <button onClick={zoomOut} className="px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors mr-4 shadow-sm border border-sky-200"><ZoomOut size={14} /> Reset Zoom X</button>
             )}
+            
+            <div className="flex bg-slate-100 p-1 rounded-lg mr-4 border border-slate-200">
+              <button onClick={() => setDragAction('zoom')} className={`px-3 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'zoom' ? 'bg-white shadow-sm text-sky-700' : 'text-slate-500'}`}>Zoom</button>
+              <button onClick={() => setDragAction('delete')} className={`px-3 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'delete' ? 'bg-rose-500 shadow-sm text-white' : 'text-slate-500'}`}>Delete</button>
+            </div>
+
+            {modifiers.length > 0 && (
+              <button onClick={undoModifier} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors mr-4 shadow-sm border border-amber-200">
+                Undo Delete/Mod
+              </button>
+            )}
+            
             <button onClick={() => handleDownload('png')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
             <button onClick={() => handleDownload('jpeg')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
             <button onClick={() => handleDownload('pdf')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
@@ -2449,7 +2487,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 style={{ cursor: 'crosshair', userSelect: 'none' }}
                 onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
                 onMouseMove={(e: any) => refAreaLeft && e && e.activeLabel && setRefAreaRight(e.activeLabel)}
-                onMouseUp={zoom}
+                onMouseUp={handleDragAction}
             >
               <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
               <XAxis 
