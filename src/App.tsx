@@ -1255,20 +1255,15 @@ export default function App() {
         });
     }
 
-    let headerStr = "";
+    const lines: string[] = [];
     if (withHydrasHeader) {
-        headerStr = `Station: ${title}\n` +
-                    `Type: WATERLEVEL\n` +
-                    `Datum: MSL\n` +
-                    `Reference: ${isNaN(z0) ? '0.000' : z0.toFixed(3)}\n` +
-                    `Date Format: DD.MM.YYYY hh:mm:ss\n` +
-                    `Data Start\n`;
+        lines.push(`Station: ${chartTitle}`);
+        lines.push(`Type: WATERLEVEL`);
+        lines.push(`Datum: MSL`);
+        lines.push(`Reference: ${isNaN(z0) ? '0.000' : z0.toFixed(3)}`);
+        lines.push(`Date Format: DD.MM.YYYY hh:mm:ss`);
+        lines.push(`Data Start`);
     }
-
-    let header = "Timestamp";
-    selectedKeys.forEach(k => { header += `\t${k.replace('(cm)', '').trim()}`; });
-
-    const lines: string[] = [headerStr + header];
 
     // Build Fast UTC Formatter for dd/MM/yyyy HH:mm:ss
     const formatTimestamp = (date: Date) => {
@@ -1280,15 +1275,20 @@ export default function App() {
     exportRecords.forEach(r => {
         let rowStr = formatTimestamp(r.timestamp);
         selectedKeys.forEach(k => {
+            const getStrVal = (num: number | undefined | null) => {
+                if (typeof num !== 'number' || isNaN(num) || num === 999 || num === -999) return '999';
+                return Math.round(num * 100).toString();
+            };
+
             if (k.endsWith('(Valid)')) {
                 const sensorName = k.replace(' (Valid)', '');
                 if (sensorName === selectedSensor) {
-                    rowStr += `\t${typeof r.filtered === 'number' && !isNaN(r.filtered) ? r.filtered.toFixed(3) : 'NaN'}`;
+                    rowStr += `\t${getStrVal(r.filtered)}`;
                 } else {
-                    rowStr += `\t${typeof r.allSamples?.[sensorName] === 'number' && !isNaN(r.allSamples?.[sensorName]) ? r.allSamples[sensorName].toFixed(3) : 'NaN'}`;
+                    rowStr += `\t${getStrVal(r.allSamples?.[sensorName])}`;
                 }
             } else {
-                rowStr += `\t${typeof r.allSamples?.[k] === 'number' && !isNaN(r.allSamples?.[k]) ? r.allSamples[k].toFixed(3) : 'NaN'}`;
+                rowStr += `\t${getStrVal(r.allSamples?.[k])}`;
             }
         });
         lines.push(rowStr);
