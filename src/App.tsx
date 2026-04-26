@@ -1189,7 +1189,6 @@ export default function App() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportSelections, setExportSelections] = useState<Record<string, boolean>>({});
   const [exportIntervalMode, setExportIntervalMode] = useState<'1_minute' | 'hourly_sampling' | 'hourly_average'>('1_minute');
-  const [withHydrasHeader, setWithHydrasHeader] = useState(true);
 
   const toggleExportSelection = (key: string) => {
       setExportSelections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1255,15 +1254,10 @@ export default function App() {
         });
     }
 
-    const lines: string[] = [];
-    if (withHydrasHeader) {
-        lines.push(`Station: ${chartTitle}`);
-        lines.push(`Type: WATERLEVEL`);
-        lines.push(`Datum: MSL`);
-        lines.push(`Reference: ${isNaN(z0) ? '0.000' : z0.toFixed(3)}`);
-        lines.push(`Date Format: DD.MM.YYYY hh:mm:ss`);
-        lines.push(`Data Start`);
-    }
+    let header = "Timestamp";
+    selectedKeys.forEach(k => { header += `\t${k.replace('(cm)', '').trim()}`; });
+
+    const lines: string[] = [header];
 
     // Build Fast UTC Formatter for dd/MM/yyyy HH:mm:ss
     const formatTimestamp = (date: Date) => {
@@ -1275,20 +1269,15 @@ export default function App() {
     exportRecords.forEach(r => {
         let rowStr = formatTimestamp(r.timestamp);
         selectedKeys.forEach(k => {
-            const getStrVal = (num: number | undefined | null) => {
-                if (typeof num !== 'number' || isNaN(num) || num === 999 || num === -999) return '999';
-                return Math.round(num * 100).toString();
-            };
-
-            if (k.endsWith('(Valid)')) {
-                const sensorName = k.replace(' (Valid)', '');
+            if (k.endsWith('(Analyzed)')) {
+                const sensorName = k.replace(' (Analyzed)', '');
                 if (sensorName === selectedSensor) {
-                    rowStr += `\t${getStrVal(r.filtered)}`;
+                    rowStr += `\t${typeof r.filtered === 'number' && !isNaN(r.filtered) ? r.filtered.toFixed(3) : 'NaN'}`;
                 } else {
-                    rowStr += `\t${getStrVal(r.allSamples?.[sensorName])}`;
+                    rowStr += `\t${typeof r.allSamples?.[sensorName] === 'number' && !isNaN(r.allSamples?.[sensorName]) ? r.allSamples[sensorName].toFixed(3) : 'NaN'}`;
                 }
             } else {
-                rowStr += `\t${getStrVal(r.allSamples?.[k])}`;
+                rowStr += `\t${typeof r.allSamples?.[k] === 'number' && !isNaN(r.allSamples?.[k]) ? r.allSamples[k].toFixed(3) : 'NaN'}`;
             }
         });
         lines.push(rowStr);
@@ -2052,21 +2041,6 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                                </div>
                             </div>
                           )}
-                          <div className="space-y-2 mb-4">
-                            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Opsi Header</div>
-                            <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
-                                <input 
-                                    type="checkbox" 
-                                    checked={withHydrasHeader} 
-                                    onChange={(e) => setWithHydrasHeader(e.target.checked)}
-                                    className="w-4 h-4 rounded text-sky-500 border-slate-300 focus:ring-sky-500"
-                                />
-                                <div className="flex flex-col">
-                                    <span className="text-sm font-bold text-slate-700">Cantumkan Header HYDRAS3</span>
-                                    <span className="text-[10px] text-slate-500 font-medium">Beri centang untuk menambah Station, Type, Datum, dsb.</span>
-                                </div>
-                            </label>
-                          </div>
                           <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
                               <input 
                                   type="checkbox" 
@@ -2097,13 +2071,13 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                           </div>
                           
                           <div className="space-y-2">
-                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Valid Sensor Data</div>
+                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Analyzed Sensor Data</div>
                              {availableSensors.map(s => (
-                                 <label key={`${s} (Valid)`} className="flex items-center gap-3 p-3 rounded-xl border border-sky-200 bg-sky-50/30 cursor-pointer hover:bg-sky-50 transition-colors">
+                                 <label key={`${s} (Analyzed)`} className="flex items-center gap-3 p-3 rounded-xl border border-sky-200 bg-sky-50/30 cursor-pointer hover:bg-sky-50 transition-colors">
                                      <input 
                                          type="checkbox" 
-                                         checked={exportSelections[`${s} (Valid)`] || false} 
-                                         onChange={() => toggleExportSelection(`${s} (Valid)`)}
+                                         checked={exportSelections[`${s} (Analyzed)`] || false} 
+                                         onChange={() => toggleExportSelection(`${s} (Analyzed)`)}
                                          className="w-4 h-4 rounded text-sky-600 border-sky-300 focus:ring-sky-600"
                                      />
                                      <div className="flex flex-col">
@@ -2159,13 +2133,12 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const [refAreaRight, setRefAreaRight] = useState<string>('');
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
   const [dragAction, setDragAction] = useState<'zoom' | 'delete'>('zoom');
-  const [showDifferences, setShowDifferences] = useState<boolean>(false);
 
   const outliers = useMemo(() => records.filter((r:any) => r.isOutlier).length, [records]);
 
   const handleLegendClick = (e: any) => {
     let key = e.dataKey;
-    if (e.value === "Valid") key = "filtered";
+    if (e.value === "Analyzed Level") key = "filtered";
     else if (e.value === "Sea Level Trend") key = "trendline";
     else if (availableSensors.includes(e.value)) key = e.value;
     
@@ -2563,21 +2536,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     })}
                 </div>
              </div>
-             {availableSensors.length > 1 && (
-                 <div className="space-y-1.5 pt-3 border-t border-slate-100">
-                    <label className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
-                       <input 
-                          type="checkbox" 
-                          checked={showDifferences} 
-                          onChange={(e) => setShowDifferences(e.target.checked)}
-                          className="w-3.5 h-3.5 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
-                       />
-                       <div className="flex flex-col">
-                          <span className="text-[10px] font-bold text-slate-700 uppercase">Tampilkan Grafik Beda Sensor</span>
-                       </div>
-                    </label>
-                 </div>
-             )}
           </div>
       </div>
 
@@ -2665,7 +2623,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                           <div className="flex items-center justify-between gap-6 text-[11px]">
                             <div className="flex items-center gap-2">
                               <div className="w-2.5 h-2.5 rounded-sm bg-[#f59e0b]" />
-                              <span className="font-semibold text-slate-600">Valid</span>
+                              <span className="font-semibold text-slate-600">Analyzed Level</span>
                             </div>
                             <span className="font-bold text-slate-800 font-mono">
                               {typeof data.filtered === 'number' ? data.filtered.toFixed(3) : 'NaN'} m
@@ -2747,7 +2705,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     />
                   );
               })}
-              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#f59e0b" strokeOpacity={0.65} strokeWidth={2.5} dot={false} name="Valid" animationDuration={800} />
+              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#f59e0b" strokeOpacity={0.65} strokeWidth={2.5} dot={false} name="Analyzed Level" animationDuration={800} />
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
               
               <Brush 
@@ -2761,70 +2719,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             </ComposedChart>
           </ResponsiveContainer>
         </div>
-        
-        {showDifferences && availableSensors.length > 1 && (
-            <div className="mt-6 border-t border-slate-100 pt-6">
-                <h4 className="text-sm font-black text-slate-700 uppercase tracking-widest text-center mb-4">Grafik Selisih Sensor (m)</h4>
-                <div className="relative h-[250px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <ComposedChart data={displayData}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                            <XAxis 
-                                dataKey="timeMs" 
-                                type="number" 
-                                domain={['dataMin', 'dataMax']} 
-                                tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM HH:mm')} 
-                                stroke="#94a3b8" 
-                                fontSize={10} 
-                            />
-                            <YAxis stroke="#94a3b8" fontSize={10} width={45} tickFormatter={(val) => val.toFixed(2)} />
-                            <Tooltip
-                                labelFormatter={(label: number) => formatUTC(new Date(label), 'dd MMM yyyy HH:mm:ss')}
-                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
-                                formatter={(val: number) => [val.toFixed(3) + ' m', 'Diff']}
-                            />
-                            <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '10px' }} />
-                            {(() => {
-                                const diffLines = [];
-                                const palette = ['#dc2626', '#d97706', '#65a30d', '#0891b2', '#4f46e5', '#db2777'];
-                                let colorIdx = 0;
-                                for (let i = 0; i < availableSensors.length; i++) {
-                                    for (let j = i + 1; j < availableSensors.length; j++) {
-                                        const s1 = availableSensors[i];
-                                        const s2 = availableSensors[j];
-                                        const color = palette[colorIdx % palette.length];
-                                        colorIdx++;
-                                        diffLines.push(
-                                            <Line 
-                                                key={`diff_${s1}_${s2}`}
-                                                type="monotone" 
-                                                dataKey={(d: any) => {
-                                                    if (!d.allSamples) return null;
-                                                    const v1 = d.allSamples[s1];
-                                                    const v2 = d.allSamples[s2];
-                                                    if (typeof v1 === 'number' && !isNaN(v1) && typeof v2 === 'number' && !isNaN(v2)) {
-                                                        return v1 - v2;
-                                                    }
-                                                    return null;
-                                                }}
-                                                name={`${s1} - ${s2}`}
-                                                stroke={color}
-                                                strokeWidth={1.5}
-                                                dot={false}
-                                                isAnimationActive={false}
-                                            />
-                                        );
-                                    }
-                                }
-                                return diffLines;
-                            })()}
-                        </ComposedChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
-        )}
-
         <div className="mt-4 flex items-center gap-2 justify-center">
              <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest">Visual Optimization: Hourly Sampling Active</div>
         </div>
