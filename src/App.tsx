@@ -1257,7 +1257,12 @@ export default function App() {
 
     const lines: string[] = [];
     if (withHydrasHeader) {
-        lines.push(`Station: ${chartTitle}`);
+        const activeStation = stationNameRef.current || chartTitle;
+        lines.push(`Station: ${activeStation}`);
+        if (stationLatRef.current || stationLonRef.current) {
+            lines.push(`Latitude: ${stationLatRef.current || '-'}`);
+            lines.push(`Longitude: ${stationLonRef.current || '-'}`);
+        }
         lines.push(`Type: WATERLEVEL`);
         lines.push(`Datum: MSL`);
         lines.push(`Reference: ${isNaN(z0) ? '0.000' : z0.toFixed(3)}`);
@@ -1294,7 +1299,7 @@ export default function App() {
         lines.push(rowStr);
     });
 
-    const content = lines.join('\n');
+    const content = lines.join('\r\n');
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1345,7 +1350,7 @@ export default function App() {
     logContent += `5. Time Resampling  : otomatis berdasarkan interval data data\n`;
     logContent += `6. Deteksi Outlier  : Z-Score Threshold: ${zThreshold} / Manual Range: [${manualMin === "" ? "none" : manualMin}, ${manualMax === "" ? "none" : manualMax}]\n`;
     logContent += `7. Set Konstanta    : ${constituentSet}\n`;
-    logContent += `8. De-Tiding Trend  : ${useDeTiding ? 'Aktif' : 'Tidak Aktif'}\n`;
+    logContent += `8. De-Tiding Trend  : ${isDeTiding ? 'Aktif' : 'Tidak Aktif'}\n`;
     logContent += `9. Smoothing Filter : ${filterType} (Window: ${filterType === 'ma' ? filterWindow : filterType === 'median' ? medianWindow : 'N/A'})\n\n`;
     
     const outlierCount = records.filter(r => r.isOutlier).length;
