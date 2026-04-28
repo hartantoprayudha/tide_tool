@@ -640,7 +640,7 @@ export default function App() {
         
         for (let i = 0; i < processed.length; i++) {
             validUnfiltered[i] = processed[i].isOutlier ? NaN : processed[i].raw;
-            interpolatedStream[i] = validUnfiltered[i];
+            interpolatedStream[i] = processed[i].combined;
         }
 
         // 2. Interpolated Stream: Fill gaps <= 15 mins (or settings)
@@ -665,9 +665,11 @@ export default function App() {
             
             if (!isNaN(prevVal) && !isNaN(nextVal) && gapDurationMins <= interpolationSettings.maxGapMinutes) {
                 for (let j = startGap; j < endGap; j++) {
-                    const fraction = (j - startGap + 1) / (gapLength + 1);
-                    // Linear interpolation
-                    const interp = prevVal + (nextVal - prevVal) * fraction;
+                    // Nearest Neighbor interpolation
+                    const distPrev = j - (startGap - 1);
+                    const distNext = endGap - j;
+                    const interp = distPrev <= distNext ? prevVal : nextVal;
+                    
                     interpolatedStream[j] = parseFloat(interp.toFixed(3));
                     processed[j].interpolated = interpolatedStream[j];
                 }
@@ -1458,7 +1460,13 @@ export default function App() {
     logContent += `6. Deteksi Outlier  : Z-Score Threshold: ${zThreshold} / Manual Range: [${manualMin === "" ? "none" : manualMin}, ${manualMax === "" ? "none" : manualMax}]\n`;
     logContent += `7. Set Konstanta    : ${constituentSet}\n`;
     logContent += `8. De-Tiding Trend  : ${isDeTiding ? 'Aktif' : 'Tidak Aktif'}\n`;
-    logContent += `9. Smoothing Filter : ${filterType} (Window: ${filterType === 'ma' ? filterWindow : filterType === 'median' ? medianWindow : 'N/A'})\n\n`;
+    logContent += `9. Smoothing Filter : ${filterType} (Window: ${filterType === 'ma' ? filterWindow : filterType === 'median' ? medianWindow : 'N/A'})\n`;
+    logContent += `10. Combine Sensors  : ${combinationSettings.enabled ? 'Aktif' : 'Tidak Aktif'}\n`;
+    if (combinationSettings.enabled) {
+        logContent += `    - Sensor Referensi: ${combinationSettings.referenceSensor}\n`;
+        logContent += `    - Sensor Sumber   : ${combinationSettings.sourceSensors.join(', ')}\n`;
+    }
+    logContent += `11. Interpolasi Gaps: ${interpolationSettings.enabled ? 'Aktif' : 'Tidak Aktif'} (Maks Gap: ${interpolationSettings.maxGapMinutes} menit)\n\n`;
     
     const outlierCount = records.filter(r => r.isOutlier).length;
     const validCount = records.length - outlierCount;
