@@ -219,7 +219,8 @@ export default function App() {
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
   const [visibleSensors, setVisibleSensors] = useState<string[]>([]);
-  const [constituentSet, setConstituentSet] = useState<'4' | '9' | 'IHO23' | 'FES2014' | 'UTIDE' | 'AUTO'>('9');
+  const [constituentSet, setConstituentSet] = useState<'4' | '9' | 'IHO23' | 'FES2014' | 'UTIDE' | 'UKHOTotalTidePlus' | 'AUTO'>('9');
+  const [harmonicMethod, setHarmonicMethod] = useState<'LeastSquares' | 'FFT'>('LeastSquares');
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
@@ -272,10 +273,39 @@ export default function App() {
 
   // --- CORE ANALYTICS ENGINE (Client-side) ---
 
-  const solveLeastSquares = (t: number[], y: number[], comps: string[]) => {
-    // Solve y = Z0 + sum(Ai cos(wi t) + Bi sin(wi t))
+  const solveLeastSquares = (t: number[], y: number[], comps: string[], method: 'LeastSquares' | 'FFT' = 'LeastSquares') => {
+    // method can be 'LeastSquares' or 'FFT' (Fourier Transform Approximation)
     const numRows = t.length;
     const numComps = comps.length;
+    
+    // Z0 calculation is average of y
+    let sumY = 0;
+    for (let i = 0; i < numRows; i++) sumY += y[i];
+    const avgY = sumY / numRows;
+
+    if (method === 'FFT') {
+        const numParams = 1 + 2 * numComps;
+        const x = new Array(numParams).fill(0);
+        x[0] = avgY;
+        const f_list = new Float64Array(comps.map(c => 2 * Math.PI * HARMONIC_FREQS[c].f));
+        for (let j = 0; j < numComps; j++) {
+            let sumCos = 0;
+            let sumSin = 0;
+            const w = f_list[j];
+            for (let i = 0; i < numRows; i++) {
+                const angle = w * t[i];
+                // Subtract mean to prevent DC leakage
+                const yCentered = y[i] - avgY;
+                sumCos += yCentered * Math.cos(angle);
+                sumSin += yCentered * Math.sin(angle);
+            }
+            x[1 + 2 * j] = sumCos * (2 / numRows);
+            x[1 + 2 * j + 1] = sumSin * (2 / numRows);
+        }
+        return x;
+    }
+
+    // Solve y = Z0 + sum(Ai cos(wi t) + Bi sin(wi t))
     const numParams = 1 + 2 * numComps;
 
     // Construct Matrix A and vector b using Typed Arrays for performance
@@ -512,6 +542,10 @@ export default function App() {
         else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
         else if (constituentSet === 'IHO23') compsToFit = ['Sa', 'Ssa', 'Mm', 'Mf', 'Q1', 'O1', 'P1', 'K1', 'J1', '2N2', 'MU2', 'N2', 'NU2', 'M2', 'L2', 'T2', 'S2', 'R2', 'K2', 'MN4', 'M4', 'MS4', 'M6'];
         else if (constituentSet === 'FES2014') compsToFit = ['2N2', 'E2', 'J1', 'K1', 'K2', 'L2', 'La2', 'M2', 'M3', 'M4', 'M6', 'M8', 'Mf', 'MKS2', 'Mm', 'MN4', 'MS4', 'MSf', 'MSqm', 'Mtm', 'Mu2', 'N2', 'N4', 'Nu2', 'O1', 'P1', 'Q1', 'R2', 'S1', 'S2', 'S4', 'Sa', 'Ssa', 'T2'];
+        else if (constituentSet === 'UKHOTotalTidePlus') {
+            const ukhoNames = ["Sa", "Ssa", "Mnum", "Mm", "Msf", "Mf", "2Q1", "sig1", "Q1", "rho1", "O1", "MS1", "MP1", "NO1", "chi1", "pi1", "P1", "S1", "K1", "psi1", "phi1", "th1", "J1", "2PO1", "SO1", "OO1", "KQ1", "2MN2S2", "3M(SK)2", "2NS2", "3M2S2", "MNK2", "MNS2", "MnuS2", "MNK2S2", "2MS2K2", "2MK2", "2N2", "mu2", "SNK2", "NA2", "N2", "NB2", "nu2", "2KN2S2", "MSK2", "MPS2", "M2", "MSP2", "MKS2", "M2(KS)2", "lambda2", "L2", "2SK2", "T2", "S2", "R2", "K2", "MSnu2", "MSN2", "KJ2", "2KM(SN)2", "2SM2", "2MS2N2", "SKM2", "3(SM)N2", "SKN2", "MQ3", "MO3", "2NKM3", "2MS3", "2MP3", "M3", "NK3", "MP3", "MS3", "MK3", "2MQ3", "SP3", "S3", "SK3", "K3", "4MS4", "2MNS4", "3MK4", "2N4", "2NKS4", "MSNK4", "MN4", "Mnu4", "MNKS4", "2MSK4", "MA4", "M4", "2MRS4", "2MKS4", "SN4", "3MN4", "NK4", "M2SK4", "MT4", "MS4", "MR4", "MK4", "2SNM4", "2MSN4", "S4", "SK4", "3SM4", "2SKM4", "MNO5", "2NKMS5", "3MK5", "2NK5", "3MS5", "3MP5", "M5", "MNK5", "MB5", "MSO5", "2MS5", "3MO5", "3MQ5", "2(MN)S6", "3MNS6", "4MK6", "M2N6", "4MS6", "2NMKS6", "2MSNK6", "2MN6", "2Mnu6", "2MNKS6", "3MSK6", "MA6", "M6", "MSN6", "4MN6", "MNK6", "2(MS)K6", "2MT6", "2MS6", "2MK6", "2SN6", "3MSN6", "MKL6", "2SM6", "MSK6", "S6", "2MNO7", "4MK7", "2NMK7", "M7", "2MNK7", "2MSO7", "MSKO7", "5MK8", "2(MN)8", "5MS8", "2(MN)KS8", "3MN8", "3Mnu8", "3MNKS8", "4MSK8", "MA8", "M8", "2MSN8", "2MNK8", "3MS8", "3MK8", "2SNM8", "MSNK8", "2(MS)8", "2MSK8", "3SM8", "2SMK8", "S8", "3MN09", "2(MN)K9", "MA9", "3MNK9", "4MK9", "3MSK9", "3M2N10", "6MS10", "3M2NKS10", "4MSNK10", "4MN10", "4Mnu10", "5MSK10", "M10", "3MSN10", "6MN10", "3MNK10", "4MK10", "2MNSK10", "3M2S10", "4MSK11", "4M2N12", "4M2NKS12", "5MSNK12", "5MN12", "5Mnu12", "6MSK12", "MA12", "M12", "4MSN12", "5MS12", "5MK12", "3MNKS12", "4M2S12", "5MSN14", "5MNK14", "6MS14"];
+            compsToFit = ukhoNames.filter(c => HARMONIC_FREQS[c] !== undefined);
+        }
         else if (constituentSet === 'AUTO') {
             const rayleighCriterionFreq = 1.0 / durationHoursCheck;
             const priorityList = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 'Mm', 'Ssa', 'Sa', 'E2', 'La2', 'M3', 'M8', 'MKS2', 'MSqm', 'Mtm', 'N4', 'R2', 'S1'];
@@ -553,7 +587,7 @@ export default function App() {
         let roughLAT = meanRaw - 3 * stdRaw; // fallback
 
         if (!_isInsufficient) {
-            const roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, compsToFit);
+            const roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, compsToFit, harmonicMethod);
             roughZ0 = roughSolution[0] || meanRaw;
             let roughHatAmpSum = 0;
             for (let i = 0; i < compsToFit.length; i++) {
@@ -741,7 +775,7 @@ export default function App() {
             // Detrend the data
             const y_detrended = y_vals.map((y, i) => y - (unifiedSlope * t_hours[i]));
 
-            const solution = solveLeastSquares(t_hours, y_detrended, compsToFit);
+            const solution = solveLeastSquares(t_hours, y_detrended, compsToFit, harmonicMethod);
             fittedZ0 = solution[0] || meanRaw;
             
             // Calculate residuals for ANOVA/SNR
@@ -1637,13 +1671,14 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                 // Trigger re-analysis when set changes
                 runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset);
               }}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer mb-2"
             >
               <option value="4">4 Constants (Basic)</option>
               <option value="9">9 Constants (Standard)</option>
               <option value="IHO23">IHO 23 Constants (GeoTide)</option>
               <option value="FES2014">FES2014 (34 Constants)</option>
               <option value="UTIDE">UTide Standard (67)</option>
+              <option value="UKHOTotalTidePlus">UKHO Total Tide Plus (231)</option>
               <option value="AUTO">Auto (Rayleigh & SNR)</option>
             </select>
             {constituentSet === 'AUTO' && autoDiagnostics && (
@@ -1653,6 +1688,20 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                    <div className="flex justify-between"><span>Significant Signal (SNR &gt; 2):</span> <span className="font-bold">{autoDiagnostics.snrPassed}</span></div>
                </div>
             )}
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display mt-2 block">Metode Harmonik</label>
+            <select 
+              value={harmonicMethod}
+              onChange={(e) => {
+                const val = e.target.value as any;
+                setHarmonicMethod(val);
+                // Trigger re-analysis when set changes
+                runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset);
+              }}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
+            >
+              <option value="LeastSquares">Least Squares Fit</option>
+              <option value="FFT">Fast Fourier Transform</option>
+            </select>
           </div>
 
           <div className="space-y-1.5 pt-4 border-t border-slate-100">
@@ -3409,11 +3458,13 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
 
 function StatCard({ label, value, trend, trendColor }: { label: string, value: string, trend: string, trendColor?: string }) {
   return (
-    <div className="relative h-full overflow-hidden bg-white p-5 lg:p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-lg transition-all flex flex-col gap-1.5 group">
-      <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-sky-100/50 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
-      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-display z-10">{label}</div>
-      <div className="text-3xl xl:text-[2rem] leading-tight font-black text-transparent bg-clip-text bg-gradient-to-br from-sky-600 to-indigo-600 font-display tracking-tighter drop-shadow-sm z-10 break-words">{value}</div>
-      <div className={cn("text-[10px] mt-auto pt-1 font-bold z-10", trendColor || "text-slate-400")}>{trend}</div>
+    <div className="relative h-full min-h-[140px] overflow-hidden bg-white p-5 lg:p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-lg transition-all flex flex-col items-center justify-center gap-1 group text-center">
+      <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-sky-100/50 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
+      <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-indigo-50/40 to-transparent rounded-tr-full -ml-4 -mb-4 transition-transform group-hover:scale-110" />
+      
+      <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest font-display z-10 mb-1">{label}</div>
+      <div className="text-4xl xl:text-[2.5rem] 2xl:text-5xl leading-tight font-black text-transparent bg-clip-text bg-gradient-to-br from-sky-600 to-indigo-600 font-display tracking-tighter drop-shadow-sm z-10 break-words">{value}</div>
+      <div className={cn("text-[11px] font-bold z-10 mt-3 bg-slate-50/80 px-3 py-1 rounded-full border border-slate-100 whitespace-nowrap", trendColor || "text-slate-400")}>{trend}</div>
     </div>
   );
 }
