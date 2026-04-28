@@ -2617,6 +2617,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                   value={`${trend ? ((trend.stlTrend ? trend.stlTrend.rateYear : trend.rateYear) * 1000).toFixed(2) : "0.00"} mm/y`} 
                   trend={trend?.stlTrend ? "STL Decomposition" : (isDeTiding ? "De-tided Regr" : "Linear Regr")} 
                   trendColor={trend ? ((trend.stlTrend ? trend.stlTrend.rateYear : trend.rateYear) > 0 ? "text-red-500" : "text-emerald-500") : "text-slate-500"} 
+                  valueClassName="pl-[3px] pr-[6px]"
                 />
                 <div className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <div className="bg-white shadow-xl border border-slate-200 p-2 rounded-lg text-[9px] font-bold text-slate-500 min-w-[120px]">
@@ -2638,7 +2639,12 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     </div>
                 </div>
             </div>
-            <StatCard label="HAT / LAT" value={`${datums ? datums.hat.toFixed(2) : '--'} / ${datums ? datums.lat.toFixed(2) : '--'}`} trend="Highest/Lowest" />
+            <StatCard 
+              label="HAT / LAT" 
+              value={`${datums ? datums.hat.toFixed(2) : '--'} / ${datums ? datums.lat.toFixed(2) : '--'}`} 
+              trend="Highest/Lowest" 
+              valueClassName="pl-[3px] pr-[4px]"
+            />
             <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
           </div>
 
@@ -3739,14 +3745,14 @@ function CombinationModal({ availableSensors, onApply, onCancel, currentSettings
     );
 }
 
-function StatCard({ label, value, trend, trendColor }: { label: string, value: string, trend: string, trendColor?: string }) {
+function StatCard({ label, value, trend, trendColor, valueClassName }: { label: string, value: string, trend: string, trendColor?: string, valueClassName?: string }) {
   return (
     <div className="relative h-full min-h-[140px] overflow-hidden bg-white p-5 lg:p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-lg transition-all flex flex-col items-center justify-center gap-1 group text-center">
       <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-sky-100/50 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
       <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-indigo-50/40 to-transparent rounded-tr-full -ml-4 -mb-4 transition-transform group-hover:scale-110" />
       
       <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest font-display z-10 mb-1">{label}</div>
-      <div className="text-4xl xl:text-[2.5rem] 2xl:text-5xl leading-tight font-black text-transparent bg-clip-text bg-gradient-to-br from-sky-600 to-indigo-600 font-display tracking-tighter drop-shadow-sm z-10 break-words">{value}</div>
+      <div className={cn("text-4xl xl:text-[2.5rem] 2xl:text-5xl leading-tight font-black text-transparent bg-clip-text bg-gradient-to-br from-sky-600 to-indigo-600 font-display tracking-tighter drop-shadow-sm z-10 break-words", valueClassName)}>{value}</div>
       <div className={cn("text-[11px] font-bold z-10 mt-3 bg-slate-50/80 px-3 py-1 rounded-full border border-slate-100 whitespace-nowrap", trendColor || "text-slate-400")}>{trend}</div>
     </div>
   );
