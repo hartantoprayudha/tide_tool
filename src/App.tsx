@@ -21,6 +21,7 @@ import {
   ZoomOut,
   Maximize,
   X,
+  Layers,
   Info,
   ClipboardList,
   BookOpen,
@@ -65,6 +66,7 @@ const formatUTC = (date: Date, fmt: string) => {
 interface TideRecord {
   timestamp: Date;
   raw: number;
+  combined: number;
   filtered: number;
   isOutlier: boolean;
   allSamples?: Record<string, number>;
@@ -249,6 +251,14 @@ export default function App() {
   const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
   
+  // Combination State
+  const [combinationSettings, setCombinationSettings] = useState({
+    enabled: false,
+    referenceSensor: '',
+    sourceSensors: [] as string[]
+  });
+  const [showCombinationModal, setShowCombinationModal] = useState(false);
+  
   // Prediction State
   const [predStartDate, setPredStartDate] = useState(formatUTC(new Date(), 'yyyy-MM-dd'));
   const [predEndDate, setPredEndDate] = useState(formatUTC(addDays(new Date(), 7), 'yyyy-MM-dd'));
@@ -362,7 +372,7 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings) => {
     if (!rawRows.length) return;
     const currentSensor = sensorToUse || selectedSensor;
     if (!currentSensor) return;
@@ -438,6 +448,7 @@ export default function App() {
 
           let valRaw = parseFloat(valStr.replace(',', '.'));
           if (valRaw === 999 || valRaw === -999 || valRaw < -200 || valRaw > 900) valRaw = NaN;
+          
           if (isCurrentCm && !isNaN(valRaw)) valRaw = valRaw / 100;
           valRaw += vOffset;
           
@@ -454,9 +465,27 @@ export default function App() {
               }
           }
 
+          let combinedVal = valRaw;
+
+          // Combination Logic: If target sensor is empty, try to fill from source sensors
+          if (isNaN(combinedVal) && combSettings.enabled && (combSettings.referenceSensor === currentSensor || combSettings.referenceSensor === '')) {
+              for (const source of combSettings.sourceSensors) {
+                  const sValStr = (row[source] || "").trim();
+                  let sValRaw = parseFloat(sValStr.replace(',', '.'));
+                  if (sValRaw === 999 || sValRaw === -999 || sValRaw < -200 || sValRaw > 900) sValRaw = NaN;
+                  if (!isNaN(sValRaw)) {
+                      const isSourceCm = source.toLowerCase().includes('(cm)');
+                      if (isSourceCm) sValRaw = sValRaw / 100;
+                      combinedVal = sValRaw;
+                      break;
+                  }
+              }
+          }
+
           processed.push({
             timestamp: dateObj,
             raw: isNaN(valRaw) ? NaN : parseFloat(valRaw.toFixed(3)),
+            combined: isNaN(combinedVal) ? NaN : parseFloat(combinedVal.toFixed(3)),
             allSamples,
             filtered: 0,
             isOutlier: false
@@ -495,6 +524,7 @@ export default function App() {
                 regularized.push({
                     timestamp: new Date(t),
                     raw: NaN,
+                    combined: NaN,
                     filtered: 0,
                     isOutlier: false
                 });
@@ -1226,13 +1256,20 @@ export default function App() {
             
             let filteredSum = 0;
             let filteredCount = 0;
+            let combinedSum = 0;
+            let combinedCount = 0;
             group.forEach(r => {
                 if (typeof r.filtered === 'number' && !isNaN(r.filtered)) {
                     filteredSum += r.filtered;
                     filteredCount++;
                 }
+                if (typeof r.combined === 'number' && !isNaN(r.combined)) {
+                    combinedSum += r.combined;
+                    combinedCount++;
+                }
             });
             avgRecord.filtered = filteredCount > 0 ? filteredSum / filteredCount : NaN;
+            avgRecord.combined = combinedCount > 0 ? combinedSum / combinedCount : NaN;
 
             const avgSamples: Record<string, number> = {};
             if (group[0].allSamples) {
@@ -1291,6 +1328,13 @@ export default function App() {
                     rowStr += `\t${getStrVal(r.filtered)}`;
                 } else {
                     rowStr += `\t${getStrVal(r.allSamples?.[sensorName])}`;
+                }
+            } else if (k.endsWith('(Combined)')) {
+                const sensorName = k.replace(' (Combined)', '');
+                if (sensorName === selectedSensor) {
+                    rowStr += `\t${getStrVal(r.combined)}`;
+                } else {
+                     rowStr += `\t${getStrVal(r.allSamples?.[sensorName])}`;
                 }
             } else {
                 rowStr += `\t${getStrVal(r.allSamples?.[k])}`;
@@ -1921,11 +1965,28 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     timeOffset={timeOffset}
                     isDeTiding={isDeTiding}
                     setIsDeTiding={setIsDeTiding}
+                    combinationSettings={combinationSettings}
+                    setCombinationSettings={setCombinationSettings}
+                    setShowCombinationModal={setShowCombinationModal}
                     onReset={() => {
                         setVerticalOffset(0);
                         setTimeOffset(0);
                         setModifiers([]);
-                        runAnalysis(rawData, selectedSensor, 0, 0, []);
+                        setCombinationSettings({ enabled: false, referenceSensor: '', sourceSensors: [] });
+                        runAnalysis(rawData, selectedSensor, 0, 0, [], isDeTiding, { enabled: false, referenceSensor: '', sourceSensors: [] });
+                    }}
+                />
+            )}
+            
+            {showCombinationModal && (
+                <CombinationModal 
+                    availableSensors={availableSensors}
+                    currentSettings={combinationSettings}
+                    onCancel={() => setShowCombinationModal(false)}
+                    onApply={(settings: any) => {
+                        setCombinationSettings(settings);
+                        setShowCombinationModal(false);
+                        runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, settings);
                     }}
                 />
             )}
@@ -2140,6 +2201,26 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                                  </label>
                              ))}
                           </div>
+
+                          {combinationSettings.enabled && (
+                            <div className="space-y-2">
+                               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Combined Sensor Data</div>
+                               {availableSensors.map(s => (
+                                   <label key={`${s} (Combined)`} className="flex items-center gap-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/30 cursor-pointer hover:bg-emerald-50 transition-colors">
+                                       <input 
+                                           type="checkbox" 
+                                           checked={exportSelections[`${s} (Combined)`] || false} 
+                                           onChange={() => toggleExportSelection(`${s} (Combined)`)}
+                                           className="w-4 h-4 rounded text-emerald-600 border-emerald-300 focus:ring-emerald-600"
+                                       />
+                                       <div className="flex flex-col">
+                                           <span className="text-sm font-bold text-emerald-900">{s} (Combined)</span>
+                                           <span className="text-[10px] text-emerald-600 font-medium">Data gabungan dari sensor lain (Gap-filling)</span>
+                                       </div>
+                                   </label>
+                               ))}
+                            </div>
+                          )}
                       </div>
                       <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
                           <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">Batal</button>
@@ -2170,7 +2251,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -2259,6 +2340,14 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const handleDragAction = () => {
     if (refAreaLeft === refAreaRight || refAreaRight === '') {
+      if (dragAction === 'delete' && refAreaLeft) {
+        const ts = Number(refAreaLeft);
+        if (!isNaN(ts)) {
+            const newMods = [...modifiers, { startMs: ts, endMs: ts, sensor: selectedSensor, offset: 0, scale: 1, action: 'delete' as const }];
+            setModifiers(newMods);
+            runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods, isDeTiding);
+        }
+      }
       setRefAreaLeft('');
       setRefAreaRight('');
       return;
@@ -2277,7 +2366,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     } else if (dragAction === 'delete') {
       const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: 0, scale: 1, action: 'delete' as const }];
       setModifiers(newMods);
-      runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
+      runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods, isDeTiding);
     }
     
     setRefAreaLeft('');
@@ -2553,7 +2642,21 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
              {/* Trend Analysis Settings */}
              <div className="space-y-1.5 pt-3 border-t border-slate-100">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Trend Analysis</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Trend & Sync Analysis</label>
+                
+                <button 
+                    onClick={() => setShowCombinationModal(true)}
+                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl border transition-all ${combinationSettings.enabled ? 'bg-sky-50 border-sky-200 text-sky-600 shadow-sm' : 'bg-slate-50 border-slate-100 text-slate-500 hover:bg-slate-100'}`}
+                >
+                    <div className={`p-1.5 rounded-lg ${combinationSettings.enabled ? 'bg-sky-500 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                        <Layers size={14} />
+                    </div>
+                    <div className="flex flex-col items-start text-left">
+                        <span className="text-[10px] font-black uppercase tracking-tight">Sensor Combination</span>
+                        <span className="text-[9px] font-bold opacity-70 leading-none">{combinationSettings.enabled ? 'Active (Gap Filling)' : 'Click to combine sensors'}</span>
+                    </div>
+                </button>
+
                 <label className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
                    <input 
                       type="checkbox" 
@@ -2645,6 +2748,12 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
           </div>
         </div>
         <div className="relative h-[580px] w-full group bg-white pt-2 pb-4">
+          {dragAction === 'delete' && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-rose-50 border border-rose-200 px-4 py-2 rounded-full shadow-lg z-20 flex items-center gap-2 animate-in slide-in-from-top duration-300">
+               <Trash2 size={16} className="text-rose-600" />
+               <span className="text-[10px] font-black text-rose-700 uppercase tracking-widest">Delete Mode Aktif: Klik atau Drag untuk menghapus data</span>
+            </div>
+          )}
           <div className="export-exclude absolute right-2 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
             <button onClick={() => setVZoom(z => z * 1.25)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom In Vertical">
               <ZoomIn size={14} />
@@ -2660,10 +2769,20 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <ComposedChart 
                 data={displayData} 
                 margin={{ bottom: 40, left: 30, right: 20, top: 40 }} 
-                style={{ cursor: 'crosshair', userSelect: 'none' }}
+                style={{ cursor: dragAction === 'delete' ? 'copy' : 'crosshair', userSelect: 'none' }}
                 onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
                 onMouseMove={(e: any) => refAreaLeft && e && e.activeLabel && setRefAreaRight(e.activeLabel)}
                 onMouseUp={handleDragAction}
+                onClick={(e: any) => {
+                    if (dragAction === 'delete' && e && e.activeLabel) {
+                        const ts = Number(e.activeLabel);
+                        if (!isNaN(ts)) {
+                            const newMods = [...modifiers, { startMs: ts, endMs: ts, sensor: selectedSensor, offset: 0, scale: 1, action: 'delete' as const }];
+                            setModifiers(newMods);
+                            runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods, isDeTiding);
+                        }
+                    }
+                }}
             >
               <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
               <XAxis 
@@ -2702,6 +2821,18 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                               {typeof data.filtered === 'number' ? data.filtered.toFixed(3) : 'NaN'} m
                             </span>
                           </div>
+
+                          {data.combined !== undefined && (
+                            <div className="flex items-center justify-between gap-6 text-[11px]">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 rounded-sm bg-[#22c55e]" />
+                                <span className="font-semibold text-slate-600">Combined</span>
+                              </div>
+                              <span className="font-bold text-slate-800 font-mono">
+                                {typeof data.combined === 'number' ? data.combined.toFixed(3) : 'NaN'} m
+                              </span>
+                            </div>
+                          )}
                           
                           {visibleSensors.map((s, idx) => {
                              const palette = ['#2563eb', '#059669', '#ff00ff', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
@@ -2778,7 +2909,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     />
                   );
               })}
-              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#f59e0b" strokeOpacity={0.65} strokeWidth={2.5} dot={false} name="Valid" animationDuration={800} />
+              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.65} strokeWidth={2.5} dot={false} name="Valid" animationDuration={800} />
+              <Line hide={hiddenLines.combined} type="monotone" dataKey="combined" stroke="#22c55e" strokeWidth={2} dot={false} name="Combined" animationDuration={900} connectNulls={false} />
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
               
               <Brush 
@@ -3427,6 +3559,84 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
       )}
     </div>
   );
+}
+
+function CombinationModal({ availableSensors, onApply, onCancel, currentSettings }: any) {
+    const [enabled, setEnabled] = useState(currentSettings.enabled);
+    const [referenceSensor, setReferenceSensor] = useState(currentSettings.referenceSensor || availableSensors[0] || '');
+    const [sourceSensors, setSourceSensors] = useState<string[]>(currentSettings.sourceSensors || []);
+
+    const toggleSource = (s: string) => {
+        setSourceSensors(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-200">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight flex items-center gap-2">
+                        <Layers size={20} className="text-sky-500" />
+                        Sensor Combination
+                    </h3>
+                    <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition-colors">
+                        <X size={24} />
+                    </button>
+                </div>
+                <div className="p-6 space-y-6">
+                    <div className="flex items-center justify-between p-4 bg-sky-50 rounded-2xl border border-sky-100">
+                        <div className="flex flex-col">
+                            <span className="text-sm font-black text-sky-900">Aktifkan Kombinasi</span>
+                            <span className="text-[10px] text-sky-600 font-bold uppercase tracking-wider">Isi data kosong (NaN) otomatis</span>
+                        </div>
+                        <input 
+                            type="checkbox" 
+                            checked={enabled} 
+                            onChange={(e) => setEnabled(e.target.checked)}
+                            className="w-5 h-5 rounded text-sky-600 border-sky-300 focus:ring-sky-500"
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Sensor Utama (Lead)</label>
+                        <select 
+                            value={referenceSensor}
+                            onChange={(e) => setReferenceSensor(e.target.value)}
+                            className="w-full p-3 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 focus:ring-2 focus:ring-sky-500 outline-none"
+                        >
+                            <option value="">Semua Sensor (Gunakan urutan dibawah)</option>
+                            {availableSensors.map((s: string) => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Sensor Sumber untuk Mengisi Gap</label>
+                        <div className="grid grid-cols-1 gap-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
+                            {availableSensors.map((s: string) => (
+                                <label key={s} className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${sourceSensors.includes(s) ? 'bg-sky-50 border-sky-200 outline-2 outline-sky-500/20' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+                                    <input 
+                                        type="checkbox" 
+                                        checked={sourceSensors.includes(s)}
+                                        onChange={() => toggleSource(s)}
+                                        className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
+                                    />
+                                    <span className={`text-sm font-bold ${s === referenceSensor ? 'text-sky-700 underline' : 'text-slate-700'}`}>{s} {s === referenceSensor && '(Lead)'}</span>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+                <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
+                    <button onClick={onCancel} className="flex-1 py-3 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors">Batal</button>
+                    <button 
+                        onClick={() => onApply({ enabled, referenceSensor, sourceSensors })}
+                        className="flex-1 py-3 bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold rounded-xl shadow-lg shadow-sky-200 transition-all active:scale-[0.98]"
+                    >
+                        Terapkan
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 function StatCard({ label, value, trend, trendColor }: { label: string, value: string, trend: string, trendColor?: string }) {
