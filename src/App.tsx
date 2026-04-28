@@ -1554,7 +1554,29 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
           content += `Latitude\t${sLat ? Number(sLat).toFixed(6) : '-'}\n`;
           content += `Longitude\t${sLon ? Number(sLon).toFixed(6) : '-'}\n`;
       }
-      content += `Generated\t${new Date().toLocaleString()}\n\n`;
+      content += `Generated\t${new Date().toLocaleString()}\n`;
+
+      const tend = records[records.length - 1].timestamp.getTime();
+      const durationDays = (tend - t0) / 86400000;
+      content += `Durasi Data\t${durationDays.toFixed(1)} Hari\n`;
+
+      let f = 0;
+      let typeName = "Tidak Teridentifikasi";
+      if (harmonicResults && harmonicResults.length > 0) {
+          const k1 = harmonicResults.find(r => r.comp === 'K1')?.amp || 0;
+          const o1 = harmonicResults.find(r => r.comp === 'O1')?.amp || 0;
+          const m2 = harmonicResults.find(r => r.comp === 'M2')?.amp || 0;
+          const s2 = harmonicResults.find(r => r.comp === 'S2')?.amp || 0;
+          
+          if (m2 + s2 > 0) {
+              f = (k1 + o1) / (m2 + s2);
+              if (f <= 0.25) typeName = "Pasang Surut Harian Ganda (Semidiurnal)";
+              else if (f <= 1.5) typeName = "Pasang Surut Campuran Condong Harian Ganda";
+              else if (f <= 3.0) typeName = "Pasang Surut Campuran Condong Harian Tunggal";
+              else typeName = "Pasang Surut Harian Tunggal (Diurnal)";
+          }
+      }
+      content += `Jenis Pasut (Formzahl)\t${typeName} (F = ${f.toFixed(2)})\n\n`;
 
       content += `--- CHART DATUMS & TIDAL RANGES ---\n`;
       content += `Parameter\tValue\tUnit\n`;
@@ -1948,6 +1970,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     timeOffset={timeOffset}
                     isDeTiding={isDeTiding}
                     setIsDeTiding={setIsDeTiding}
+                    harmonicResults={harmonicResults}
                     onReset={() => {
                         setVerticalOffset(0);
                         setTimeOffset(0);
@@ -2197,7 +2220,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, harmonicResults }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -2476,10 +2499,32 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     ];
   }, [displayData, datums, vZoom]);
 
+  const tideTypeInfo = useMemo(() => {
+    let f = 0;
+    let typeName = "Tidak Teridentifikasi";
+    let valid = false;
+    if (harmonicResults && harmonicResults.length > 0) {
+        const k1 = harmonicResults.find((r: any) => r.comp === 'K1')?.amp || 0;
+        const o1 = harmonicResults.find((r: any) => r.comp === 'O1')?.amp || 0;
+        const m2 = harmonicResults.find((r: any) => r.comp === 'M2')?.amp || 0;
+        const s2 = harmonicResults.find((r: any) => r.comp === 'S2')?.amp || 0;
+        
+        if (m2 + s2 > 0) {
+            f = (k1 + o1) / (m2 + s2);
+            valid = true;
+            if (f <= 0.25) typeName = "Harian Ganda";
+            else if (f > 0.25 && f <= 1.5) typeName = "Campuran Harian Ganda";
+            else if (f > 1.5 && f <= 3.0) typeName = "Campuran Harian Tunggal";
+            else if (f > 3.0) typeName = "Harian Tunggal";
+        }
+    }
+    return { valid, f, typeName };
+  }, [harmonicResults]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col xl:flex-row gap-6">
-          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3 gap-5">
             <StatCard label="Z0 (MSL)" value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} trend="Least Squares Fit" />
             <div className="relative group h-full">
                 <StatCard 
@@ -2510,6 +2555,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             </div>
             <StatCard label="HAT / LAT" value={`${datums ? datums.hat.toFixed(2) : '--'} / ${datums ? datums.lat.toFixed(2) : '--'}`} trend="Highest/Lowest" />
             <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
+            <StatCard label="Jenis Pasut" value={tideTypeInfo.valid ? tideTypeInfo.typeName : "--"} trend={`Formzahl (F) = ${tideTypeInfo.valid ? tideTypeInfo.f.toFixed(2) : '--'}`} />
           </div>
 
           <div className="w-full xl:w-80 space-y-4 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
