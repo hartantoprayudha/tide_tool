@@ -68,6 +68,7 @@ interface TideRecord {
   raw: number;
   combined: number;
   filtered: number;
+  interpolated: number;
   isOutlier: boolean;
   allSamples?: Record<string, number>;
 }
@@ -247,6 +248,7 @@ export default function App() {
   const [butterCutoff, setButterCutoff] = useState(0.5);
   const [harmonicResults, setHarmonicResults] = useState<ConstituentResult[]>([]);
   const [rmseVal, setRmseVal] = useState<number | null>(null);
+  const isProcessing = useRef(false);
   const [z0, setZ0] = useState(0);
   const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
@@ -258,6 +260,12 @@ export default function App() {
     sourceSensors: [] as string[]
   });
   const [showCombinationModal, setShowCombinationModal] = useState(false);
+
+  // Interpolation State
+  const [interpolationSettings, setInterpolationSettings] = useState({
+    enabled: false,
+    maxGapMinutes: 15
+  });
   
   // Prediction State
   const [predStartDate, setPredStartDate] = useState(formatUTC(new Date(), 'yyyy-MM-dd'));
@@ -372,11 +380,13 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings) => {
     if (!rawRows.length) return;
+    if (isProcessing.current) return;
     const currentSensor = sensorToUse || selectedSensor;
     if (!currentSensor) return;
 
+    isProcessing.current = true;
     setIsLoading(true);
 
     // Simulate async for loading state
@@ -488,6 +498,7 @@ export default function App() {
             combined: isNaN(combinedVal) ? NaN : parseFloat(combinedVal.toFixed(3)),
             allSamples,
             filtered: 0,
+            interpolated: NaN,
             isOutlier: false
           });
         }
@@ -526,6 +537,7 @@ export default function App() {
                     raw: NaN,
                     combined: NaN,
                     filtered: 0,
+                    interpolated: NaN,
                     isOutlier: false
                 });
             }
@@ -621,45 +633,82 @@ export default function App() {
             };
         });
 
-        // C. Interpolate Outliers to create a Cleaned Continuous Input Array for Low Pass Filter
-        const cleanedInput = new Array(processed.length);
+        // C. Prepare Data Streams
+        // 1. Valid (Filtered) Stream: No interpolation, keeping NaNs for gaps/outliers
+        const validUnfiltered = new Array(processed.length);
+        const interpolatedStream = new Array(processed.length);
+        
         for (let i = 0; i < processed.length; i++) {
-            cleanedInput[i] = processed[i].raw;
+            validUnfiltered[i] = processed[i].isOutlier ? NaN : processed[i].raw;
+            interpolatedStream[i] = validUnfiltered[i];
         }
 
+        // 2. Interpolated Stream: Fill gaps <= 15 mins (or settings)
         let i = 0;
         while (i < processed.length) {
-            if (processed[i].isOutlier || isNaN(processed[i].raw)) {
+            if (!isNaN(interpolatedStream[i])) {
+                processed[i].interpolated = interpolatedStream[i];
+                i++;
+                continue;
+            }
+
+            let startGap = i;
+            let endGap = i;
+            while (endGap < processed.length && isNaN(interpolatedStream[endGap])) {
+                endGap++;
+            }
+            const gapLength = endGap - startGap;
+            const gapDurationMins = (gapLength * dt) / 60000;
+
+            const prevVal = startGap > 0 ? interpolatedStream[startGap - 1] : NaN;
+            const nextVal = endGap < processed.length ? interpolatedStream[endGap] : NaN;
+            
+            if (!isNaN(prevVal) && !isNaN(nextVal) && gapDurationMins <= interpolationSettings.maxGapMinutes) {
+                for (let j = startGap; j < endGap; j++) {
+                    const fraction = (j - startGap + 1) / (gapLength + 1);
+                    // Linear interpolation
+                    const interp = prevVal + (nextVal - prevVal) * fraction;
+                    interpolatedStream[j] = parseFloat(interp.toFixed(3));
+                    processed[j].interpolated = interpolatedStream[j];
+                }
+            } else {
+                // If gap is too large to interpolate, it remains NaN in 'interpolated' field
+                for (let j = startGap; j < endGap; j++) {
+                    processed[j].interpolated = NaN;
+                }
+            }
+            i = endGap;
+        }
+
+        // C. Cleaned Input for Filtering (Still needs continuous data to avoid filter artifacts)
+        // We'll use the interpolated stream if available, but "Valid" output line will be masked by NaNs later.
+        const cleanedInput = new Array(processed.length);
+        for (let idx = 0; idx < processed.length; idx++) {
+            // Internal use for filtering: temporary interpolation for long gaps to maintain filter state
+            // but we won't show these in the final 'filtered' (Valid) results where raw was NaN.
+            if (!isNaN(validUnfiltered[idx])) {
+                cleanedInput[idx] = validUnfiltered[idx];
+            } else {
+                // Temporary fill for filter stability - using linear trend or roughZ0
+                cleanedInput[idx] = roughZ0; 
+            }
+        }
+        
+        // Refine cleanedInput for filtering near gaps
+        i = 0;
+        while (i < processed.length) {
+            if (isNaN(validUnfiltered[i])) {
                 let startGap = i;
                 let endGap = i;
-                while (endGap < processed.length && (processed[endGap].isOutlier || isNaN(processed[endGap].raw))) {
+                while (endGap < processed.length && isNaN(validUnfiltered[endGap])) {
                     endGap++;
                 }
                 const gapLength = endGap - startGap;
-                const gapDurationMins = (gapLength * dt) / 60000;
-
-                let prevVal = startGap > 0 ? cleanedInput[startGap - 1] : roughZ0;
-                let nextVal = endGap < processed.length ? (isNaN(processed[endGap]?.raw) ? roughZ0 : processed[endGap].raw) : roughZ0;
-                
-                if (isNaN(prevVal)) prevVal = roughZ0;
-                if (isNaN(nextVal)) nextVal = roughZ0;
-
-                if (gapDurationMins <= 15) {
-                    for (let j = startGap; j < endGap; j++) {
-                        const fraction = (j - startGap + 1) / (gapLength + 1);
-                        const mu2 = (1 - Math.cos(fraction * Math.PI)) / 2;
-                        const interp = prevVal * (1 - mu2) + nextVal * mu2;
-                        
-                        cleanedInput[j] = parseFloat(interp.toFixed(3));
-                        processed[j].raw = cleanedInput[j];
-                        processed[j].isOutlier = false;
-                    }
-                } else {
-                    for (let j = startGap; j < endGap; j++) {
-                        const fraction = (j - startGap + 1) / (gapLength + 1);
-                        cleanedInput[j] = prevVal + fraction * (nextVal - prevVal);
-                        (processed[j] as any)._longGap = true;
-                    }
+                const prevVal = startGap > 0 ? validUnfiltered[startGap - 1] : roughZ0;
+                const nextVal = endGap < processed.length ? validUnfiltered[endGap] : roughZ0;
+                for (let j = startGap; j < endGap; j++) {
+                    const fraction = (j - startGap + 1) / (gapLength + 1);
+                    cleanedInput[j] = prevVal + (nextVal - (isNaN(prevVal) ? roughZ0 : prevVal)) * fraction;
                 }
                 i = endGap;
             } else {
@@ -699,7 +748,7 @@ export default function App() {
           }
 
           for(let i = 0; i < n; i++) {
-            processed[i].filtered = parseFloat(filteredArr[i].toFixed(3));
+            processed[i].filtered = isNaN(validUnfiltered[i]) ? NaN : parseFloat(filteredArr[i].toFixed(3));
           }
         } else if (filterType === 'median') {
           processed = processed.map((r, i) => {
@@ -708,7 +757,8 @@ export default function App() {
             const windowVals = cleanedInput.slice(start, end);
             windowVals.sort((a, b) => a - b);
             const median = windowVals[Math.floor(windowVals.length / 2)];
-            return { ...r, filtered: parseFloat(median.toFixed(3)) };
+            const filteredVal = isNaN(validUnfiltered[i]) ? NaN : parseFloat(median.toFixed(3));
+            return { ...r, filtered: filteredVal };
           });
         } else if (filterType === 'butterworth') {
             const wc = Math.tan(Math.PI * butterCutoff);
@@ -732,16 +782,19 @@ export default function App() {
             
             processed = processed.map((r, i) => ({
                 ...r,
-                filtered: parseFloat(output[i].toFixed(3))
+                filtered: isNaN(validUnfiltered[i]) ? NaN : parseFloat(output[i].toFixed(3))
             }));
         }
 
-        // D. Apply Long Gap NaNs to filtered output
-        processed = processed.map(r => {
-            if ((r as any)._longGap) {
-                return { ...r, filtered: NaN };
-            }
-            return r;
+        // D. Final Output Assignment
+        processed = processed.map((r, idx) => {
+            // Mask filtering results where original data was missing or outlier
+            // As requested: "Hilangkan fungsi interpolasi untuk mengisi gap pada penghitungan nilai 'Valid'"
+            const filteredValue = isNaN(validUnfiltered[idx]) ? NaN : r.filtered;
+            return {
+                ...r,
+                filtered: filteredValue
+            };
         });
 
         // 4. Final Precise Harmonic Analysis (on the mathematically cleaned and filtered data)
@@ -959,11 +1012,14 @@ export default function App() {
             setRmseVal(rVal);
         }
 
-        setRecords(processed);
+        requestAnimationFrame(() => {
+          setRecords(processed);
+        });
       } catch (err) {
         console.error("Analysis error", err);
       } finally {
         setIsLoading(false);
+        isProcessing.current = false;
       }
     }, 500);
   };
@@ -1333,6 +1389,13 @@ export default function App() {
                 const sensorName = k.replace(' (Combined)', '');
                 if (sensorName === selectedSensor) {
                     rowStr += `\t${getStrVal(r.combined)}`;
+                } else {
+                     rowStr += `\t${getStrVal(r.allSamples?.[sensorName])}`;
+                }
+            } else if (k.endsWith('(Interpolated)')) {
+                const sensorName = k.replace(' (Interpolated)', '');
+                if (sensorName === selectedSensor) {
+                    rowStr += `\t${getStrVal(r.interpolated)}`;
                 } else {
                      rowStr += `\t${getStrVal(r.allSamples?.[sensorName])}`;
                 }
@@ -1968,12 +2031,15 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     combinationSettings={combinationSettings}
                     setCombinationSettings={setCombinationSettings}
                     setShowCombinationModal={setShowCombinationModal}
+                    interpolationSettings={interpolationSettings}
+                    setInterpolationSettings={setInterpolationSettings}
                     onReset={() => {
                         setVerticalOffset(0);
                         setTimeOffset(0);
                         setModifiers([]);
                         setCombinationSettings({ enabled: false, referenceSensor: '', sourceSensors: [] });
-                        runAnalysis(rawData, selectedSensor, 0, 0, [], isDeTiding, { enabled: false, referenceSensor: '', sourceSensors: [] });
+                        setInterpolationSettings({ enabled: false, maxGapMinutes: 15 });
+                        runAnalysis(rawData, selectedSensor, 0, 0, [], isDeTiding, { enabled: false, referenceSensor: '', sourceSensors: [] }, { enabled: false, maxGapMinutes: 15 });
                     }}
                 />
             )}
@@ -2221,6 +2287,24 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                                ))}
                             </div>
                           )}
+
+                          <div className="space-y-2">
+                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Interpolated Data</div>
+                             {availableSensors.map(s => (
+                                 <label key={`${s} (Interpolated)`} className="flex items-center gap-3 p-3 rounded-xl border border-rose-200 bg-rose-50/30 cursor-pointer hover:bg-rose-50 transition-colors">
+                                     <input 
+                                         type="checkbox" 
+                                         checked={exportSelections[`${s} (Interpolated)`] || false} 
+                                         onChange={() => toggleExportSelection(`${s} (Interpolated)`)}
+                                         className="w-4 h-4 rounded text-rose-600 border-rose-300 focus:ring-rose-600"
+                                     />
+                                     <div className="flex flex-col">
+                                         <span className="text-sm font-bold text-rose-900">{s} (Interpolated)</span>
+                                         <span className="text-[10px] text-rose-600 font-medium">Gap filling (&le;15 menit)</span>
+                                     </div>
+                                 </label>
+                             ))}
+                          </div>
                       </div>
                       <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
                           <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">Batal</button>
@@ -2251,7 +2335,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -2284,59 +2368,47 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     setHiddenLines(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const chartData = useMemo(() => {
-    if (!trend || !records.length) return records;
-    const t0 = records[0].timestamp.getTime();
-    return records.map((r: any) => ({
-      ...r,
-      trendline: trend.slope * ((r.timestamp.getTime() - t0) / 3600000) + trend.intercept
-    }));
-  }, [records, trend]);
-
-  const displayDataRaw = useMemo(() => {
-    if (!chartData.length) return [];
-    
-    // Always do hourly sampling for Dashboard Chart visualization
-    let sampled = [];
-    let lastHourMs = -1;
-
-    for (let i = 0; i < chartData.length; i++) {
-        const timeMs = chartData[i].timestamp.getTime();
-        // Snap to hour by setting minutes, seconds and ms to 0
-        const hourMs = new Date(timeMs).setMinutes(0, 0, 0);
-        if (hourMs !== lastHourMs) {
-            const { timestamp, ...restProps } = chartData[i];
-            sampled.push({
-                ...restProps,
-                timeMs
-            });
-            lastHourMs = hourMs;
-        }
-    }
-
-    return sampled;
-  }, [chartData]);
-  
+  // Consolidate data processing for the chart to avoid multiple full-array mappings
   const displayData = useMemo(() => {
-    let sliced = displayDataRaw;
+    if (!records.length) return [];
+    
+    // 1. Determine the domain to sample from
+    const domainSearch = zoomDomain || { start: records[0].timestamp.getTime(), end: records[records.length - 1].timestamp.getTime() };
+    const domainBuffer = zoomDomain ? (zoomDomain.end - zoomDomain.start) * 0.05 : 0;
+    const startMs = domainSearch.start - domainBuffer;
+    const endMs = domainSearch.end + domainBuffer;
+
+    // 2. Filter data by domain (if zoomed)
+    let filteredRecords = records;
     if (zoomDomain) {
-        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-        if (startIndex !== -1 && endIndex !== -1) {
-            let s = startIndex, e = endIndex;
-            if (s > e) { s = endIndex; e = startIndex; }
-            sliced = displayDataRaw.slice(s, e + 1);
-        }
+      filteredRecords = records.filter(r => {
+        const t = r.timestamp.getTime();
+        return t >= startMs && t <= endMs;
+      });
     }
 
-    // Dynamic decimation to prevent lag on huge datasets (> 1 year)
-    // Ensures rendering is fast, while preserving exactly hourly view when users zoom in.
-    if (sliced.length > 2500) {
-        const step = Math.ceil(sliced.length / 2500);
-        return sliced.filter((_, i) => i % step === 0);
+    // 3. Sample the filtered data
+    // Targeted resolution: ~2000 points for smoothness without lag
+    const maxPoints = 2000;
+    let sampled;
+    if (filteredRecords.length > maxPoints) {
+      const step = Math.ceil(filteredRecords.length / maxPoints);
+      sampled = filteredRecords.filter((_, i) => i % step === 0);
+    } else {
+      sampled = filteredRecords;
     }
-    return sliced;
-  }, [displayDataRaw, zoomDomain]);
+
+    // 4. Map only the sampled records to add necessary chart properties (trendline, timeMs)
+    const t0 = records[0].timestamp.getTime();
+    return sampled.map(r => {
+      const timeMs = r.timestamp.getTime();
+      return {
+        ...r,
+        timeMs,
+        trendline: trend ? (trend.slope * ((timeMs - t0) / 3600000) + trend.intercept) : undefined
+      };
+    });
+  }, [records, trend, zoomDomain]);
 
   const handleDragAction = () => {
     if (refAreaLeft === refAreaRight || refAreaRight === '') {
@@ -2377,22 +2449,16 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const applyPartialOffset = () => {
     if (localOffset === 0) return;
-    if (displayDataRaw.length === 0) return;
+    if (records.length === 0) return;
 
     let startMs, endMs;
 
     if (zoomDomain) {
-        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-        if (startIndex === -1 || endIndex === -1) return;
-        let s = startIndex, e = endIndex;
-        if (s > e) { s = endIndex; e = startIndex; }
-
-        startMs = displayDataRaw[s].timeMs;
-        endMs = displayDataRaw[e].timeMs;
+        startMs = zoomDomain.start;
+        endMs = zoomDomain.end;
     } else {
-        startMs = displayDataRaw[0].timeMs;
-        endMs = displayDataRaw[displayDataRaw.length - 1].timeMs;
+        startMs = records[0].timestamp.getTime();
+        endMs = records[records.length - 1].timestamp.getTime();
     }
 
     const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: localOffset, scale: 1 }];
@@ -2404,23 +2470,17 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const applyScaling = () => {
     if (!scaleReference || !scaleTarget || !scaleFactor) return;
-    if (displayDataRaw.length === 0) return;
+    if (records.length === 0) return;
     
     let startMs, endMs;
     
     if (zoomDomain) {
-        const startIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-        const endIndex = displayDataRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-        if (startIndex === -1 || endIndex === -1) return;
-        let s = startIndex, e = endIndex;
-        if (s > e) { s = endIndex; e = startIndex; }
-        
-        startMs = displayDataRaw[s].timeMs;
-        endMs = displayDataRaw[e].timeMs;
+        startMs = zoomDomain.start;
+        endMs = zoomDomain.end;
     } else {
         // Apply globally if no zoom domain is selected
-        startMs = displayDataRaw[0].timeMs;
-        endMs = displayDataRaw[displayDataRaw.length - 1].timeMs;
+        startMs = records[0].timestamp.getTime();
+        endMs = records[records.length - 1].timestamp.getTime();
     }
 
     const newMods = [...modifiers, { startMs, endMs, sensor: scaleTarget, offset: 0, scale: scaleFactor, referenceSensor: scaleReference }];
@@ -2657,6 +2717,25 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     </div>
                 </button>
 
+                <div className="flex flex-col gap-2 mt-2">
+                    <label className="flex items-center gap-2 px-2 py-2 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+                        <input 
+                            type="checkbox" 
+                            checked={interpolationSettings.enabled} 
+                            onChange={(e) => {
+                                const newVal = { ...interpolationSettings, enabled: e.target.checked };
+                                setInterpolationSettings(newVal);
+                                runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, newVal);
+                            }} 
+                            className="rounded text-rose-900 focus:ring-rose-900 w-3.5 h-3.5"
+                        />
+                        <div className="flex flex-col">
+                            <span className="text-[10px] font-bold text-slate-700 leading-tight">Enable Interpolate</span>
+                            <span className="text-[8px] text-rose-800 opacity-60 font-medium tracking-tight">Gap Filling (&le; 15m)</span>
+                        </div>
+                    </label>
+                </div>
+
                 <label className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
                    <input 
                       type="checkbox" 
@@ -2825,11 +2904,23 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                           {data.combined !== undefined && (
                             <div className="flex items-center justify-between gap-6 text-[11px]">
                               <div className="flex items-center gap-2">
-                                <div className="w-2.5 h-2.5 rounded-sm bg-[#22c55e]" />
+                                <div className="w-2.5 h-2.5 rounded-sm bg-[#F5BF03]" />
                                 <span className="font-semibold text-slate-600">Combined</span>
                               </div>
                               <span className="font-bold text-slate-800 font-mono">
                                 {typeof data.combined === 'number' ? data.combined.toFixed(3) : 'NaN'} m
+                              </span>
+                            </div>
+                          )}
+
+                          {data.interpolated !== undefined && !isNaN(data.interpolated) && (
+                            <div className="flex items-center justify-between gap-6 text-[11px]">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 rounded-sm bg-[#800000]" />
+                                <span className="font-semibold text-slate-600">Interpolated</span>
+                              </div>
+                              <span className="font-bold text-slate-800 font-mono">
+                                {typeof data.interpolated === 'number' ? data.interpolated.toFixed(3) : 'NaN'} m
                               </span>
                             </div>
                           )}
@@ -2909,9 +3000,10 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     />
                   );
               })}
-              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.65} strokeWidth={2.5} dot={false} name="Valid" animationDuration={800} />
-              <Line hide={hiddenLines.combined} type="monotone" dataKey="combined" stroke="#22c55e" strokeWidth={2} dot={false} name="Combined" animationDuration={900} connectNulls={false} />
-              <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" animationDuration={1000} />
+              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.65} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
+              <Line hide={hiddenLines.combined} type="monotone" dataKey="combined" stroke="#F5BF03" strokeWidth={2} dot={false} name="Combined" isAnimationActive={false} connectNulls={false} />
+              <Line hide={hiddenLines.interpolated} type="monotone" dataKey="interpolated" stroke="#800000" strokeWidth={2} dot={false} name="Interpolated" isAnimationActive={false} connectNulls={false} />
+              <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" isAnimationActive={false} />
               
               <Brush 
                 dataKey="timeMs" 
