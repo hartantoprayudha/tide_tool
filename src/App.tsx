@@ -219,8 +219,7 @@ export default function App() {
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
   const [visibleSensors, setVisibleSensors] = useState<string[]>([]);
-  const [constituentSet, setConstituentSet] = useState<'4' | '9' | 'IHO23' | 'FES2014' | 'UTIDE' | 'UKHOTotalTidePlus' | 'AUTO'>('9');
-  const [harmonicMethod, setHarmonicMethod] = useState<'LeastSquares' | 'FFT'>('LeastSquares');
+  const [constituentSet, setConstituentSet] = useState<'4' | '9' | 'IHO23' | 'FES2014' | 'UTIDE' | 'AUTO'>('9');
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
@@ -273,39 +272,10 @@ export default function App() {
 
   // --- CORE ANALYTICS ENGINE (Client-side) ---
 
-  const solveLeastSquares = (t: number[], y: number[], comps: string[], method: 'LeastSquares' | 'FFT' = 'LeastSquares') => {
-    // method can be 'LeastSquares' or 'FFT' (Fourier Transform Approximation)
+  const solveLeastSquares = (t: number[], y: number[], comps: string[]) => {
+    // Solve y = Z0 + sum(Ai cos(wi t) + Bi sin(wi t))
     const numRows = t.length;
     const numComps = comps.length;
-    
-    // Z0 calculation is average of y
-    let sumY = 0;
-    for (let i = 0; i < numRows; i++) sumY += y[i];
-    const avgY = sumY / numRows;
-
-    if (method === 'FFT') {
-        const numParams = 1 + 2 * numComps;
-        const x = new Array(numParams).fill(0);
-        x[0] = avgY;
-        const f_list = new Float64Array(comps.map(c => 2 * Math.PI * HARMONIC_FREQS[c].f));
-        for (let j = 0; j < numComps; j++) {
-            let sumCos = 0;
-            let sumSin = 0;
-            const w = f_list[j];
-            for (let i = 0; i < numRows; i++) {
-                const angle = w * t[i];
-                // Subtract mean to prevent DC leakage
-                const yCentered = y[i] - avgY;
-                sumCos += yCentered * Math.cos(angle);
-                sumSin += yCentered * Math.sin(angle);
-            }
-            x[1 + 2 * j] = sumCos * (2 / numRows);
-            x[1 + 2 * j + 1] = sumSin * (2 / numRows);
-        }
-        return x;
-    }
-
-    // Solve y = Z0 + sum(Ai cos(wi t) + Bi sin(wi t))
     const numParams = 1 + 2 * numComps;
 
     // Construct Matrix A and vector b using Typed Arrays for performance
@@ -542,10 +512,6 @@ export default function App() {
         else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
         else if (constituentSet === 'IHO23') compsToFit = ['Sa', 'Ssa', 'Mm', 'Mf', 'Q1', 'O1', 'P1', 'K1', 'J1', '2N2', 'MU2', 'N2', 'NU2', 'M2', 'L2', 'T2', 'S2', 'R2', 'K2', 'MN4', 'M4', 'MS4', 'M6'];
         else if (constituentSet === 'FES2014') compsToFit = ['2N2', 'E2', 'J1', 'K1', 'K2', 'L2', 'La2', 'M2', 'M3', 'M4', 'M6', 'M8', 'Mf', 'MKS2', 'Mm', 'MN4', 'MS4', 'MSf', 'MSqm', 'Mtm', 'Mu2', 'N2', 'N4', 'Nu2', 'O1', 'P1', 'Q1', 'R2', 'S1', 'S2', 'S4', 'Sa', 'Ssa', 'T2'];
-        else if (constituentSet === 'UKHOTotalTidePlus') {
-            const ukhoNames = ["Sa", "Ssa", "Mnum", "Mm", "Msf", "Mf", "2Q1", "sig1", "Q1", "rho1", "O1", "MS1", "MP1", "NO1", "chi1", "pi1", "P1", "S1", "K1", "psi1", "phi1", "th1", "J1", "2PO1", "SO1", "OO1", "KQ1", "2MN2S2", "3M(SK)2", "2NS2", "3M2S2", "MNK2", "MNS2", "MnuS2", "MNK2S2", "2MS2K2", "2MK2", "2N2", "mu2", "SNK2", "NA2", "N2", "NB2", "nu2", "2KN2S2", "MSK2", "MPS2", "M2", "MSP2", "MKS2", "M2(KS)2", "lambda2", "L2", "2SK2", "T2", "S2", "R2", "K2", "MSnu2", "MSN2", "KJ2", "2KM(SN)2", "2SM2", "2MS2N2", "SKM2", "3(SM)N2", "SKN2", "MQ3", "MO3", "2NKM3", "2MS3", "2MP3", "M3", "NK3", "MP3", "MS3", "MK3", "2MQ3", "SP3", "S3", "SK3", "K3", "4MS4", "2MNS4", "3MK4", "2N4", "2NKS4", "MSNK4", "MN4", "Mnu4", "MNKS4", "2MSK4", "MA4", "M4", "2MRS4", "2MKS4", "SN4", "3MN4", "NK4", "M2SK4", "MT4", "MS4", "MR4", "MK4", "2SNM4", "2MSN4", "S4", "SK4", "3SM4", "2SKM4", "MNO5", "2NKMS5", "3MK5", "2NK5", "3MS5", "3MP5", "M5", "MNK5", "MB5", "MSO5", "2MS5", "3MO5", "3MQ5", "2(MN)S6", "3MNS6", "4MK6", "M2N6", "4MS6", "2NMKS6", "2MSNK6", "2MN6", "2Mnu6", "2MNKS6", "3MSK6", "MA6", "M6", "MSN6", "4MN6", "MNK6", "2(MS)K6", "2MT6", "2MS6", "2MK6", "2SN6", "3MSN6", "MKL6", "2SM6", "MSK6", "S6", "2MNO7", "4MK7", "2NMK7", "M7", "2MNK7", "2MSO7", "MSKO7", "5MK8", "2(MN)8", "5MS8", "2(MN)KS8", "3MN8", "3Mnu8", "3MNKS8", "4MSK8", "MA8", "M8", "2MSN8", "2MNK8", "3MS8", "3MK8", "2SNM8", "MSNK8", "2(MS)8", "2MSK8", "3SM8", "2SMK8", "S8", "3MN09", "2(MN)K9", "MA9", "3MNK9", "4MK9", "3MSK9", "3M2N10", "6MS10", "3M2NKS10", "4MSNK10", "4MN10", "4Mnu10", "5MSK10", "M10", "3MSN10", "6MN10", "3MNK10", "4MK10", "2MNSK10", "3M2S10", "4MSK11", "4M2N12", "4M2NKS12", "5MSNK12", "5MN12", "5Mnu12", "6MSK12", "MA12", "M12", "4MSN12", "5MS12", "5MK12", "3MNKS12", "4M2S12", "5MSN14", "5MNK14", "6MS14"];
-            compsToFit = ukhoNames.filter(c => HARMONIC_FREQS[c] !== undefined);
-        }
         else if (constituentSet === 'AUTO') {
             const rayleighCriterionFreq = 1.0 / durationHoursCheck;
             const priorityList = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 'Mm', 'Ssa', 'Sa', 'E2', 'La2', 'M3', 'M8', 'MKS2', 'MSqm', 'Mtm', 'N4', 'R2', 'S1'];
@@ -587,7 +553,7 @@ export default function App() {
         let roughLAT = meanRaw - 3 * stdRaw; // fallback
 
         if (!_isInsufficient) {
-            const roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, compsToFit, harmonicMethod);
+            const roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, compsToFit);
             roughZ0 = roughSolution[0] || meanRaw;
             let roughHatAmpSum = 0;
             for (let i = 0; i < compsToFit.length; i++) {
@@ -775,7 +741,7 @@ export default function App() {
             // Detrend the data
             const y_detrended = y_vals.map((y, i) => y - (unifiedSlope * t_hours[i]));
 
-            const solution = solveLeastSquares(t_hours, y_detrended, compsToFit, harmonicMethod);
+            const solution = solveLeastSquares(t_hours, y_detrended, compsToFit);
             fittedZ0 = solution[0] || meanRaw;
             
             // Calculate residuals for ANOVA/SNR
@@ -1554,29 +1520,15 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
           content += `Latitude\t${sLat ? Number(sLat).toFixed(6) : '-'}\n`;
           content += `Longitude\t${sLon ? Number(sLon).toFixed(6) : '-'}\n`;
       }
-      content += `Generated\t${new Date().toLocaleString()}\n`;
-
-      const tend = records[records.length - 1].timestamp.getTime();
-      const durationDays = (tend - t0) / 86400000;
-      content += `Durasi Data\t${durationDays.toFixed(1)} Hari\n`;
-
-      let f = 0;
-      let typeName = "Tidak Teridentifikasi";
-      if (harmonicResults && harmonicResults.length > 0) {
-          const k1 = harmonicResults.find(r => r.comp === 'K1')?.amp || 0;
-          const o1 = harmonicResults.find(r => r.comp === 'O1')?.amp || 0;
-          const m2 = harmonicResults.find(r => r.comp === 'M2')?.amp || 0;
-          const s2 = harmonicResults.find(r => r.comp === 'S2')?.amp || 0;
-          
-          if (m2 + s2 > 0) {
-              f = (k1 + o1) / (m2 + s2);
-              if (f <= 0.25) typeName = "Pasang Surut Harian Ganda (Semidiurnal)";
-              else if (f <= 1.5) typeName = "Pasang Surut Campuran Condong Harian Ganda";
-              else if (f <= 3.0) typeName = "Pasang Surut Campuran Condong Harian Tunggal";
-              else typeName = "Pasang Surut Harian Tunggal (Diurnal)";
-          }
+      if (records.length > 0) {
+          const tStart = records[0].timestamp;
+          const tEnd = records[records.length - 1].timestamp;
+          const durationDays = (tEnd.getTime() - tStart.getTime()) / (1000 * 60 * 60 * 24);
+          content += `Data Start\t${tStart.toLocaleString()}\n`;
+          content += `Data End\t${tEnd.toLocaleString()}\n`;
+          content += `Data Duration\t${durationDays.toFixed(2)} days\n`;
       }
-      content += `Jenis Pasut (Formzahl)\t${typeName} (F = ${f.toFixed(2)})\n\n`;
+      content += `Generated\t${new Date().toLocaleString()}\n\n`;
 
       content += `--- CHART DATUMS & TIDAL RANGES ---\n`;
       content += `Parameter\tValue\tUnit\n`;
@@ -1584,6 +1536,19 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
       if (datums) {
           const am2 = harmonicResults.find(r => r.comp === 'M2')?.amp || 0;
           const as2 = harmonicResults.find(r => r.comp === 'S2')?.amp || 0;
+          const ak1 = harmonicResults.find(r => r.comp === 'K1')?.amp || 0;
+          const ao1 = harmonicResults.find(r => r.comp === 'O1')?.amp || 0;
+          
+          let tidalType = "Unknown";
+          const d = am2 + as2;
+          if (d !== 0) {
+              const f = (ak1 + ao1) / d;
+              if (f <= 0.25) tidalType = "Semi-diurnal (Pasang Surut Ganda)";
+              else if (f <= 1.5) tidalType = "Mixed, mainly semi-diurnal (Campuran Condong Ganda)";
+              else if (f <= 3.0) tidalType = "Mixed, mainly diurnal (Campuran Condong Tunggal)";
+              else tidalType = "Diurnal (Pasang Surut Tunggal)";
+          }
+
           const meanSpringTide = 2 * (am2 + as2);
           const meanNeapTide = 2 * Math.abs(am2 - as2);
           const maxAstroRange = datums.hat - datums.lat;
@@ -1595,6 +1560,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
           content += `Mean Spring Tide\t${meanSpringTide.toFixed(3)}\tm\n`;
           content += `Mean Neap Tide\t${meanNeapTide.toFixed(3)}\tm\n`;
           content += `Maximum Astronomical Tidal Range\t${maxAstroRange.toFixed(3)}\tm\n`;
+          content += `Tidal Type (Formzahl)\t${tidalType}\t-\n`;
       }
 
       if (linearTrend) {
@@ -1693,14 +1659,13 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                 // Trigger re-analysis when set changes
                 runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset);
               }}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer mb-2"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
             >
               <option value="4">4 Constants (Basic)</option>
               <option value="9">9 Constants (Standard)</option>
               <option value="IHO23">IHO 23 Constants (GeoTide)</option>
               <option value="FES2014">FES2014 (34 Constants)</option>
               <option value="UTIDE">UTide Standard (67)</option>
-              <option value="UKHOTotalTidePlus">UKHO Total Tide Plus (231)</option>
               <option value="AUTO">Auto (Rayleigh & SNR)</option>
             </select>
             {constituentSet === 'AUTO' && autoDiagnostics && (
@@ -1710,20 +1675,6 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                    <div className="flex justify-between"><span>Significant Signal (SNR &gt; 2):</span> <span className="font-bold">{autoDiagnostics.snrPassed}</span></div>
                </div>
             )}
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display mt-2 block">Metode Harmonik</label>
-            <select 
-              value={harmonicMethod}
-              onChange={(e) => {
-                const val = e.target.value as any;
-                setHarmonicMethod(val);
-                // Trigger re-analysis when set changes
-                runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset);
-              }}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
-            >
-              <option value="LeastSquares">Least Squares Fit</option>
-              <option value="FFT">Fast Fourier Transform</option>
-            </select>
           </div>
 
           <div className="space-y-1.5 pt-4 border-t border-slate-100">
@@ -1970,7 +1921,6 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     timeOffset={timeOffset}
                     isDeTiding={isDeTiding}
                     setIsDeTiding={setIsDeTiding}
-                    harmonicResults={harmonicResults}
                     onReset={() => {
                         setVerticalOffset(0);
                         setTimeOffset(0);
@@ -2220,7 +2170,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, harmonicResults }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -2499,32 +2449,10 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     ];
   }, [displayData, datums, vZoom]);
 
-  const tideTypeInfo = useMemo(() => {
-    let f = 0;
-    let typeName = "Tidak Teridentifikasi";
-    let valid = false;
-    if (harmonicResults && harmonicResults.length > 0) {
-        const k1 = harmonicResults.find((r: any) => r.comp === 'K1')?.amp || 0;
-        const o1 = harmonicResults.find((r: any) => r.comp === 'O1')?.amp || 0;
-        const m2 = harmonicResults.find((r: any) => r.comp === 'M2')?.amp || 0;
-        const s2 = harmonicResults.find((r: any) => r.comp === 'S2')?.amp || 0;
-        
-        if (m2 + s2 > 0) {
-            f = (k1 + o1) / (m2 + s2);
-            valid = true;
-            if (f <= 0.25) typeName = "Harian Ganda";
-            else if (f > 0.25 && f <= 1.5) typeName = "Campuran Harian Ganda";
-            else if (f > 1.5 && f <= 3.0) typeName = "Campuran Harian Tunggal";
-            else if (f > 3.0) typeName = "Harian Tunggal";
-        }
-    }
-    return { valid, f, typeName };
-  }, [harmonicResults]);
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col xl:flex-row gap-6">
-          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3 gap-5">
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-5">
             <StatCard label="Z0 (MSL)" value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} trend="Least Squares Fit" />
             <div className="relative group h-full">
                 <StatCard 
@@ -2555,7 +2483,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             </div>
             <StatCard label="HAT / LAT" value={`${datums ? datums.hat.toFixed(2) : '--'} / ${datums ? datums.lat.toFixed(2) : '--'}`} trend="Highest/Lowest" />
             <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
-            <StatCard label="Jenis Pasut" value={tideTypeInfo.valid ? tideTypeInfo.typeName : "--"} trend={`Formzahl (F) = ${tideTypeInfo.valid ? tideTypeInfo.f.toFixed(2) : '--'}`} />
           </div>
 
           <div className="w-full xl:w-80 space-y-4 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
