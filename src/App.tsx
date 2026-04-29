@@ -373,7 +373,10 @@ export default function App() {
 
       const interpolatedStream = new Array(updated.length);
       for (let i = 0; i < updated.length; i++) {
-          interpolatedStream[i] = updated[i].combined; // Base it off combined
+          // Fall back to filtered (Valid stream) if combined is NaN or disabled
+          let baseVal = updated[i].combined;
+          if (isNaN(baseVal)) baseVal = updated[i].filtered;
+          interpolatedStream[i] = baseVal;
       }
 
       let i = 0;
@@ -710,12 +713,7 @@ export default function App() {
              }
         }
 
-        if (!forceFullAnalysis) {
-             requestAnimationFrame(() => {
-               setRecords(processed);
-             });
-             return; // Stop here!
-        }
+        // Let full processing (outliers, filters) happen, so we just remove the early exit here.
 
         // 2. Harmonic Outlier Detection (Two-Pass Logic)
         let compsToFit: string[] = [];
@@ -815,8 +813,9 @@ export default function App() {
             validUnfiltered[i] = leadValid;
 
             // Retain existing combined and interpolated if they exist (or leave as NaN)
-            processed[i].combined = records[i]?.combined ?? NaN;
-            processed[i].interpolated = records[i]?.interpolated ?? NaN;
+            // If combinationSettings is explicitly disabled during runAnalysis, we drop it.
+            processed[i].combined = combSettings.enabled ? (records[i]?.combined ?? NaN) : NaN;
+            processed[i].interpolated = interpSettings.enabled ? (records[i]?.interpolated ?? NaN) : NaN;
         }
 
         // C. Cleaned Input for Filtering (Still needs continuous data to avoid filter artifacts)  
@@ -942,22 +941,16 @@ export default function App() {
         const updatedCache = { ...validCache, [currentSensor]: finalValid };
         setValidCache(updatedCache);
         
-        for (let i = 0; i < processed.length; i++) {
-            let combinedVal = finalValid[i];
-            
-            if (isNaN(combinedVal) && combSettings.enabled && (combSettings.referenceSensor === currentSensor || combSettings.referenceSensor === '')) {
-                for (const source of combSettings.sourceSensors) {
-                    const srcValid = updatedCache[source]?.[i];
-                    if (srcValid !== undefined && !isNaN(srcValid)) {
-                        combinedVal = srcValid;
-                        break;
-                    }
-                }
-            }
-            processed[i].combined = combinedVal;
+        // As requested: Trigger for Combined and Interpolated are from their respective buttons.
+        // So we do NOT automatically recalculate combination and interpolation here.
+        // We just retain them from records (done above) or let them stay NaN.
+
+        if (!forceFullAnalysis) {
+             requestAnimationFrame(() => {
+               setRecords(processed);
+             });
+             return;
         }
-        
-        processed = doInterpolation(interpSettings, processed);
 
         // 4. Final Precise Harmonic Analysis (on the mathematically cleaned and filtered data)
         const validForFinal = processed.filter(r => !isNaN(r.filtered));
@@ -1192,21 +1185,26 @@ export default function App() {
       const currentSensor = selectedSensor;
       const updatedRecords = [...records];
       
-      for (let i = 0; i < updatedRecords.length; i++) {
-          const r = updatedRecords[i];
-          let combinedVal = validCache[currentSensor]?.[i] ?? NaN;
-          
-          if (isNaN(combinedVal) && settings.enabled && (settings.referenceSensor === currentSensor || settings.referenceSensor === '')) {
-              for (const source of settings.sourceSensors) {
-                  const srcValid = validCache[source]?.[i];
-                  if (srcValid !== undefined && !isNaN(srcValid)) {
-                      combinedVal = srcValid;
-                      break;
-                  }
-              }
-          }
-          updatedRecords[i].combined = combinedVal;
+      if (!settings.enabled) {
+         for (let i = 0; i < updatedRecords.length; i++) {
+             updatedRecords[i].combined = NaN;
+         }
+      } else {
+         for (let i = 0; i < updatedRecords.length; i++) {
+             let combinedVal = validCache[currentSensor]?.[i] ?? NaN;
+             if (isNaN(combinedVal)) {
+                 for (const source of settings.sourceSensors) {
+                     const srcValid = validCache[source]?.[i];
+                     if (srcValid !== undefined && !isNaN(srcValid)) {
+                         combinedVal = srcValid;
+                         break;
+                     }
+                 }
+             }
+             updatedRecords[i].combined = combinedVal;
+         }
       }
+      
       // Every time we update combination, we must re-evaluate interpolation on top of it.
       const finalRecords = doInterpolation(interpolationSettings, updatedRecords);
       setRecords(finalRecords);
@@ -2217,6 +2215,8 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                         setInterpolationSettings({ enabled: false, maxGapMinutes: 15 });
                         setValidCache({});
                         setIsFullAnalysisRun(false);
+                        
+                        // Still run raw analysis without any offsets to recompute raw
                         runAnalysis(rawData, selectedSensor, 0, 0, [], isDeTiding, { enabled: false, referenceSensor: '', sourceSensors: [] }, { enabled: false, maxGapMinutes: 15 }, false);
                     }}
                 />
