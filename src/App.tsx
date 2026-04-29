@@ -193,6 +193,71 @@ const getMoonEvents = (data: any[]) => {
   return events;
 };
 
+function solveCubicSpline(x: number[], y: number[], xi: number[]): number[] {
+    const n = x.length;
+    if (n === 0) return xi.map(() => NaN);
+    if (n === 1) return xi.map(() => y[0]);
+    if (n === 2) {
+        return xi.map(xiVal => {
+            const t = (xiVal - x[0]) / (x[1] - x[0]);
+            return y[0] + t * (y[1] - y[0]);
+        });
+    }
+
+    const a = y.slice();
+    const h = [];
+    for (let i = 0; i < n - 1; i++) {
+        h.push(x[i + 1] - x[i]);
+    }
+
+    const alpha = [0];
+    for (let i = 1; i < n - 1; i++) {
+        alpha.push(3 / h[i] * (a[i + 1] - a[i]) - 3 / h[i - 1] * (a[i] - a[i - 1]));
+    }
+
+    const c = new Array(n).fill(0);
+    const l = new Array(n).fill(1);
+    const mu = new Array(n).fill(0);
+    const z = new Array(n).fill(0);
+
+    for (let i = 1; i < n - 1; i++) {
+        l[i] = 2 * (x[i + 1] - x[i - 1]) - h[i - 1] * mu[i - 1];
+        mu[i] = h[i] / l[i];
+        z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
+    }
+
+    const b = new Array(n).fill(0);
+    const d = new Array(n).fill(0);
+
+    for (let j = n - 2; j >= 0; j--) {
+        c[j] = z[j] - mu[j] * c[j + 1];
+        b[j] = (a[j + 1] - a[j]) / h[j] - h[j] * (c[j + 1] + 2 * c[j]) / 3;
+        d[j] = (c[j + 1] - c[j]) / (3 * h[j]);
+    }
+
+    return xi.map(xiVal => {
+        if (xiVal <= x[0]) return y[0];
+        if (xiVal >= x[n - 1]) return y[n - 1];
+        
+        let i = 0;
+        let j = n - 1;
+        while (i <= j) {
+            const mid = Math.floor((i + j) / 2);
+            if (x[mid] <= xiVal && xiVal < x[mid + 1]) {
+                i = mid;
+                break;
+            } else if (xiVal < x[mid]) {
+                j = mid - 1;
+            } else {
+                i = mid + 1;
+            }
+        }
+        
+        const dx = xiVal - x[i];
+        return a[i] + b[i] * dx + c[i] * dx * dx + d[i] * dx * dx * dx;
+    });
+}
+
 interface PartialModifier {
   startMs: number;
   endMs: number;
@@ -475,27 +540,10 @@ export default function App() {
               }
           }
 
-          let combinedVal = valRaw;
-
-          // Combination Logic: If target sensor is empty, try to fill from source sensors
-          if (isNaN(combinedVal) && combSettings.enabled && (combSettings.referenceSensor === currentSensor || combSettings.referenceSensor === '')) {
-              for (const source of combSettings.sourceSensors) {
-                  const sValStr = (row[source] || "").trim();
-                  let sValRaw = parseFloat(sValStr.replace(',', '.'));
-                  if (sValRaw === 999 || sValRaw === -999 || sValRaw < -200 || sValRaw > 900) sValRaw = NaN;
-                  if (!isNaN(sValRaw)) {
-                      const isSourceCm = source.toLowerCase().includes('(cm)');
-                      if (isSourceCm) sValRaw = sValRaw / 100;
-                      combinedVal = sValRaw;
-                      break;
-                  }
-              }
-          }
-
           processed.push({
             timestamp: dateObj,
             raw: isNaN(valRaw) ? NaN : parseFloat(valRaw.toFixed(3)),
-            combined: isNaN(combinedVal) ? NaN : parseFloat(combinedVal.toFixed(3)),
+            combined: NaN, // will be computed after outlier detection
             allSamples,
             filtered: 0,
             interpolated: NaN,
@@ -637,10 +685,39 @@ export default function App() {
         // 1. Valid (Filtered) Stream: No interpolation, keeping NaNs for gaps/outliers
         const validUnfiltered = new Array(processed.length);
         const interpolatedStream = new Array(processed.length);
+
+        // Helper to check if a value is an outlier
+        const isAnOutlier = (val: number) => {
+             if (isNaN(val)) return true;
+             const isStat = Math.abs(val - meanRaw) > (zThreshold * stdRaw);
+             const isHarm = val > roughHAT || val < roughLAT;
+             let isMan = false;
+             if (manualMin !== "" && val < (manualMin as number)) isMan = true;
+             if (manualMax !== "" && val > (manualMax as number)) isMan = true;
+             return isStat || isHarm || isMan;
+        };
         
         for (let i = 0; i < processed.length; i++) {
-            validUnfiltered[i] = processed[i].isOutlier ? NaN : processed[i].raw;
-            interpolatedStream[i] = processed[i].combined;
+            const r = processed[i];
+            const leadValid = r.isOutlier ? NaN : r.raw;
+            validUnfiltered[i] = leadValid;
+
+            let combinedVal = leadValid;
+            if (isNaN(combinedVal) && combSettings.enabled && (combSettings.referenceSensor === currentSensor || combSettings.referenceSensor === '')) {
+                for (const source of combSettings.sourceSensors) {
+                    let sVal = r.allSamples?.[source];
+                    if (sVal !== undefined && !isNaN(sVal)) {
+                        sVal += vOffset; // Apply global vertical offset
+                        if (!isAnOutlier(sVal)) {
+                             combinedVal = sVal;
+                             break;
+                        }
+                    }
+                }
+            }
+
+            processed[i].combined = combinedVal;
+            interpolatedStream[i] = combinedVal;
         }
 
         // 2. Interpolated Stream: Fill gaps <= 15 mins (or settings)
@@ -664,11 +741,39 @@ export default function App() {
             const nextVal = endGap < processed.length ? interpolatedStream[endGap] : NaN;
             
             if (!isNaN(prevVal) && !isNaN(nextVal) && gapDurationMins <= interpolationSettings.maxGapMinutes) {
+                let xPoints = [];
+                let yPoints = [];
+                let ptsBefore = 0;
+                for (let k = startGap - 1; k >= 0 && ptsBefore < 3; k--) {
+                    if (!isNaN(interpolatedStream[k])) {
+                        xPoints.unshift(k);
+                        yPoints.unshift(interpolatedStream[k]);
+                        ptsBefore++;
+                    } else break;
+                }
+                let ptsAfter = 0;
+                for (let k = endGap; k < processed.length && ptsAfter < 3; k++) {
+                    if (!isNaN(interpolatedStream[k])) {
+                        xPoints.push(k);
+                        yPoints.push(interpolatedStream[k]);
+                        ptsAfter++;
+                    } else break;
+                }
+                
+                let xi = [];
                 for (let j = startGap; j < endGap; j++) {
-                    // Nearest Neighbor interpolation
-                    const distPrev = j - (startGap - 1);
-                    const distNext = endGap - j;
-                    const interp = distPrev <= distNext ? prevVal : nextVal;
+                    xi.push(j);
+                }
+                
+                const yi = solveCubicSpline(xPoints, yPoints, xi);
+                
+                for (let j = startGap; j < endGap; j++) {
+                    // Prevent catastrophic overshoot from cubic spline by clamping to min/max of neighbors
+                    const minBound = Math.min(...yPoints);
+                    const maxBound = Math.max(...yPoints);
+                    let interp = yi[j - startGap];
+                    if (interp < minBound - 0.5) interp = minBound - 0.5; // slight allowance
+                    if (interp > maxBound + 0.5) interp = maxBound + 0.5;
                     
                     interpolatedStream[j] = parseFloat(interp.toFixed(3));
                     processed[j].interpolated = interpolatedStream[j];
@@ -2744,7 +2849,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                             className="rounded text-rose-900 focus:ring-rose-900 w-3.5 h-3.5"
                         />
                         <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-slate-700 leading-tight">Enable Interpolate</span>
+                            <span className="text-[10px] font-bold text-slate-700 leading-tight">Interpolate</span>
                             <span className="text-[8px] text-rose-800 opacity-60 font-medium tracking-tight">Gap Filling (&le; 15m)</span>
                         </div>
                     </label>
