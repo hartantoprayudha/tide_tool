@@ -2532,6 +2532,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const [scaleFactor, setScaleFactor] = useState<number>(1.0);
   const [scaleReference, setScaleReference] = useState<string>('');
   const [scaleTarget, setScaleTarget] = useState<string>('');
+  const [offsetReference, setOffsetReference] = useState<string>('');
+  const [offsetTarget, setOffsetTarget] = useState<string>('');
   const [localOffset, setLocalOffset] = useState<number>(0);
   
   // Zoom States
@@ -2654,6 +2656,35 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
     setLocalOffset(0);
     alert(`Partial offset diterapkan pada ${zoomDomain ? 'area zoom' : 'seluruh data'}.`);
+  };
+
+  const computePartialOffset = () => {
+    if (!offsetReference || !offsetTarget) return;
+
+    let dataToUse = records;
+    if (zoomDomain) {
+        dataToUse = records.filter((r: any) => r.timestamp.getTime() >= zoomDomain.start && r.timestamp.getTime() <= zoomDomain.end);
+    }
+
+    let refSum = 0, targetSum = 0, count = 0;
+    dataToUse.forEach((r: any) => {
+        const rv = r.allSamples?.[offsetReference];
+        const tv = r.allSamples?.[offsetTarget];
+        if (typeof rv === 'number' && !isNaN(rv) && typeof tv === 'number' && !isNaN(tv)) {
+            refSum += rv;
+            targetSum += tv;
+            count++;
+        }
+    });
+
+    if (count > 0) {
+        const refMean = refSum / count;
+        const targetMean = targetSum / count;
+        const diff = refMean - targetMean;
+        setLocalOffset(parseFloat(diff.toFixed(3)));
+    } else {
+        alert("Tidak ada cukup titik data valid dari kedua sensor yang bertumpukan di area ini.");
+    }
   };
 
   const applyScaling = () => {
@@ -2840,14 +2871,35 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     <span>Partial Offset (m)</span>
                     <Clock size={12}/>
                 </label>
+                
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                   <select 
+                       value={offsetReference} 
+                       onChange={(e) => setOffsetReference(e.target.value)}
+                       className="bg-white border border-amber-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-600 outline-none"
+                   >
+                       <option value="">Ref Sensor...</option>
+                       {availableSensors.map((s: string) => <option key={s} value={s}>{s}</option>)}
+                   </select>
+                   <select 
+                       value={offsetTarget} 
+                       onChange={(e) => setOffsetTarget(e.target.value)}
+                       className="bg-white border border-amber-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-600 outline-none"
+                   >
+                       <option value="">Tgt Sensor...</option>
+                       {availableSensors.map((s: string) => <option key={s} value={s}>{s}</option>)}
+                   </select>
+                </div>
                 <div className="flex gap-2">
                     <input 
                         type="number" step="0.001"
                         value={Number.isNaN(localOffset) ? '' : localOffset}
                         onChange={(e) => setLocalOffset(parseFloat(e.target.value))}
-                        className="flex-1 bg-white border border-amber-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-200"
+                        className="w-[140.5px] bg-white border border-amber-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-200"
+                        placeholder="Offset (m)"
                     />
-                    <button onClick={applyPartialOffset} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 transition-colors shadow-sm">Koreksi</button>
+                    <button onClick={computePartialOffset} className="px-2 py-1.5 border border-amber-300 text-amber-700 bg-white rounded-lg text-[10px] font-black hover:bg-amber-100 transition-colors shadow-sm" title="Auto Align Vertical Means">AUTO</button>
+                    <button onClick={applyPartialOffset} className="px-4 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 transition-colors shadow-sm uppercase tracking-tighter">FIX</button>
                 </div>
                 <div className="flex items-center justify-between mt-1">
                     <p className="text-[9px] text-amber-600/70 italic leading-tight">Apply to zoomed area.</p>
