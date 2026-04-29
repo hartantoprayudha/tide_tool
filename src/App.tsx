@@ -711,19 +711,6 @@ export default function App() {
         }
 
         if (!forceFullAnalysis) {
-             for (let i = 0; i < processed.length; i++) {
-                 // Without analysis, Valid line is not computed. We only show the raw data lines.
-                 // So we leave `filtered`, `combined`, `interpolated` as they are (NaN or 0)
-                 processed[i].filtered = NaN; // set to NaN to explicitly hide it when not triggered
-                 processed[i].combined = NaN;
-                 processed[i].interpolated = NaN;
-             }
-             setHarmonicResults([]);
-             setDatums(null);
-             setZ0(0);
-             setLinearTrend(null);
-             setRmseVal(null);
-             
              requestAnimationFrame(() => {
                setRecords(processed);
              });
@@ -1973,34 +1960,6 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
           )}
 
           <div className="space-y-1.5 pt-4 border-t border-slate-100">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Constituent Set</label>
-            <select 
-              value={constituentSet}
-              onChange={(e) => {
-                const val = e.target.value as any;
-                setConstituentSet(val);
-                // Trigger re-analysis when set changes
-                runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, isFullAnalysisRun);
-              }}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
-            >
-              <option value="4">4 Constants (Basic)</option>
-              <option value="9">9 Constants (Standard)</option>
-              <option value="IHO23">IHO 23 Constants (GeoTide)</option>
-              <option value="FES2014">FES2014 (34 Constants)</option>
-              <option value="UTIDE">UTide Standard (67)</option>
-              <option value="AUTO">Auto (Rayleigh & SNR)</option>
-            </select>
-            {constituentSet === 'AUTO' && autoDiagnostics && (
-               <div className="mt-2 p-2 bg-sky-50 rounded text-[10px] text-sky-800 space-y-1">
-                   <div className="flex justify-between"><span>Tested Constituents:</span> <span className="font-bold">{autoDiagnostics.totalTested}</span></div>
-                   <div className="flex justify-between"><span>Passed Rayleigh (Resolved):</span> <span className="font-bold">{autoDiagnostics.rayleighPassed}</span></div>
-                   <div className="flex justify-between"><span>Significant Signal (SNR &gt; 2):</span> <span className="font-bold">{autoDiagnostics.snrPassed}</span></div>
-               </div>
-            )}
-          </div>
-
-          <div className="space-y-1.5 pt-4 border-t border-slate-100">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Custom Chart Title</label>
             <input 
               type="text"
@@ -2275,7 +2234,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                 />
             )}
             {activeTab === 'validate' && records.length > 0 && (
-                <div className="space-y-6">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                     <OutlierView 
                       records={records} 
                       threshold={zThreshold} 
@@ -2284,7 +2243,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                       setManualMin={setManualMin}
                       manualMax={manualMax}
                       setManualMax={setManualMax}
-                      onUpdate={() => { setIsFullAnalysisRun(true); runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); }} 
+                      onUpdate={() => { runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false); }} 
                     />
                     <FilterView 
                        type={filterType}
@@ -2295,13 +2254,24 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                        setMedianWindow={setMedianWindow}
                        cutoff={butterCutoff}
                        setCutoff={setButterCutoff}
-                       onUpdate={() => { setIsFullAnalysisRun(true); runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); }} 
+                       onUpdate={() => { runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false); }} 
                     />
                 </div>
             )}
             {activeTab === 'harmonic' && records.length > 0 && (
               <div className="space-y-6">
-                 <HarmonicView results={harmonicResults} rmse={rmseVal} />
+                 <HarmonicView 
+                    results={harmonicResults} 
+                    rmse={rmseVal} 
+                    constituentSet={constituentSet}
+                    setConstituentSet={setConstituentSet}
+                    onCalculate={() => { 
+                        setIsFullAnalysisRun(true); 
+                        runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); 
+                    }}
+                    isCalculating={isLoading}
+                    autoDiagnostics={autoDiagnostics}
+                 />
               </div>
             )}
             {activeTab === 'predictions' && records.length > 0 && (
@@ -3323,23 +3293,23 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
 function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin, manualMax, setManualMax, onUpdate }: any) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 space-y-8 shadow-sm">
-       <div className="flex items-center gap-5">
-        <div className="p-4 bg-amber-50 rounded-2xl text-amber-500 shadow-inner">
-          <Search size={28} />
+    <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 space-y-6 shadow-sm overflow-hidden">
+       <div className="flex items-center gap-4">
+        <div className="p-3 bg-amber-50 rounded-xl text-amber-500 shadow-inner">
+          <Search size={24} />
         </div>
         <div>
-          <h2 className="text-xl font-black text-slate-800">Spike & Outlier Control</h2>
-          <p className="text-sm text-slate-500">Gunakan Z-Score otomatis atau masukkan rentang manual untuk membuang anomali data.</p>
+          <h2 className="text-lg font-black text-slate-800">Spike & Outlier Control</h2>
+          <p className="text-[11px] text-slate-500 leading-tight">Gunakan Z-Score atau rentang manual untuk membuang anomali data.</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-        <div className="space-y-10">
-          <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6">
+          <div className="space-y-4">
             <div className="flex justify-between items-end">
-              <label className="text-xs font-black text-slate-700 font-display uppercase tracking-wider">Threshold Z-Score (Otomatis)</label>
-              <span className="text-2xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
+              <label className="text-[10px] font-black text-slate-700 font-display uppercase tracking-widest">Threshold Z-Score</label>
+              <span className="text-xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
             </div>
             <input 
               type="range" min="0.5" max="5" step="0.1" 
@@ -3348,66 +3318,65 @@ function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin
                 const val = parseFloat(e.target.value);
                 setThreshold(isNaN(val) ? 3.0 : val);
               }}
-              className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+              className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
             />
-            <p className="text-[10px] text-slate-400 font-medium italic">Catatan: Nilai lebih kecil (misal 1.0) akan menghapus lebih banyak data "spike".</p>
+            <p className="text-[9px] text-slate-400 font-medium italic">Nilai lebih kecil menghapus lebih banyak data.</p>
           </div>
 
-          <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
-             <label className="text-xs font-black text-slate-800 uppercase tracking-widest block font-display">Pembersihan Manual (Min / Max Data)</label>
-             <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Batas Minimal (m)</div>
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+             <label className="text-[10px] font-black text-slate-800 uppercase tracking-widest block font-display">Pembersihan Manual (m)</label>
+             <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                   <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Min</div>
                    <input 
                       type="number" 
                       step="0.001"
                       value={manualMin}
-                      placeholder="Input min (m)..."
+                      placeholder="Min..."
                       onChange={(e) => setManualMin(e.target.value === "" ? "" : parseFloat(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-black text-slate-800 outline-none focus:ring-2 focus:ring-sky-100"
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-sky-100"
                    />
                 </div>
-                <div className="space-y-2">
-                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Batas Maksimal (m)</div>
+                <div className="space-y-1">
+                   <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Max</div>
                    <input 
                       type="number" 
                       step="0.001"
                       value={manualMax}
-                      placeholder="Input max (m)..."
+                      placeholder="Max..."
                       onChange={(e) => setManualMax(e.target.value === "" ? "" : parseFloat(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-black text-slate-800 outline-none focus:ring-2 focus:ring-sky-100"
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-sky-100"
                    />
                 </div>
              </div>
-             <p className="text-[9px] text-slate-500 leading-relaxed">Data yang berada di luar rentang ini akan dianggap sebagai outlier dan akan di-interpolasi.</p>
           </div>
 
           <button 
             onClick={onUpdate}
-            className="w-full py-4 bg-[#1e293b] text-white rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-lg active:scale-95"
+            className="w-full py-3 bg-[#1e293b] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-md active:scale-95 uppercase tracking-wider"
           >
-            <RefreshCw size={20} /> Jalankan Algoritma Pembersihan
+            <RefreshCw size={16} /> Jalankan Pembersihan
           </button>
         </div>
 
-        <div className="flex flex-col gap-4 justify-center">
-            <div className="bg-white p-6 rounded-2xl border-2 border-slate-100 text-center shadow-sm">
-                <div className="text-xs font-black text-slate-400 uppercase mb-4 tracking-widest">Statistik Outlier</div>
+        <div className="flex flex-col gap-3 justify-center">
+            <div className="bg-white p-4 rounded-xl border-2 border-slate-100 text-center shadow-sm">
+                <div className="text-[9px] font-black text-slate-400 uppercase mb-3 tracking-widest font-display">Statistik Outlier</div>
                 <div className="grid grid-cols-2 divide-x divide-slate-100">
                    <div>
-                       <div className="text-4xl font-black text-slate-800">{records.filter((r:any) => r.isOutlier).length}</div>
-                       <div className="text-[10px] font-bold text-amber-600 uppercase mt-2 tracking-tighter">Dibuang (Outliers)</div>
+                       <div className="text-3xl font-black text-slate-800">{records.filter((r:any) => r.isOutlier).length}</div>
+                       <div className="text-[9px] font-bold text-amber-600 uppercase mt-1 tracking-tighter">Dibuang</div>
                    </div>
                    <div>
-                       <div className="text-4xl font-black text-emerald-700">{records.filter((r:any) => !r.isOutlier).length}</div>
-                       <div className="text-[10px] font-bold text-emerald-600 uppercase mt-2 tracking-tighter">Diterima (Verified)</div>
+                       <div className="text-3xl font-black text-emerald-700">{records.filter((r:any) => !r.isOutlier).length}</div>
+                       <div className="text-[9px] font-bold text-emerald-600 uppercase mt-1 tracking-tighter">Verified</div>
                    </div>
                 </div>
             </div>
-            <div className="p-5 bg-[#0284c7]/5 rounded-2xl border border-sky-100 space-y-2">
-               <div className="text-[10px] font-black text-[#0284c7] uppercase">Tips Deteksi</div>
-               <p className="text-[11px] text-slate-600 italic leading-relaxed">
-                  "Gunakan manual range jika Anda mengetahui batas fisik sumur pantau atau dermaga untuk membuang data 'jump' yang tidak terdeteksi oleh Z-Score."
+            <div className="p-3 bg-[#0284c7]/5 rounded-xl border border-sky-100 space-y-1">
+               <div className="text-[9px] font-black text-[#0284c7] uppercase tracking-widest">Tips</div>
+               <p className="text-[10px] text-slate-600 italic leading-snug">
+                  Gunakan manual range untuk membuang data "jump" sensor yang ekstrem.
                </p>
             </div>
         </div>
@@ -3418,118 +3387,108 @@ function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin
 
 function FilterView({ type, setType, window, setWindow, medianWindow, setMedianWindow, cutoff, setCutoff, onUpdate }: any) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e2e8f0] p-8 space-y-10 shadow-sm animate-in fade-in duration-500">
-      <div className="flex items-center gap-5">
-        <div className="p-4 bg-sky-50 rounded-2xl text-[#0284c7] shadow-inner">
-          <Radio size={28} />
+    <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 space-y-6 shadow-sm overflow-hidden animate-in fade-in duration-500">
+      <div className="flex items-center gap-4">
+        <div className="p-3 bg-sky-50 rounded-xl text-[#0284c7] shadow-inner">
+          <Radio size={24} />
         </div>
         <div>
-          <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Signal Analysis & Filtering</h2>
-          <p className="text-sm text-slate-500">Pilih algoritma pembersihan sinyal untuk mengisolasi profil pasut utama.</p>
+          <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">Signal Analysis & Filtering</h2>
+          <p className="text-[11px] text-slate-500 leading-tight">Isolasi profil pasut utama melalui filtering sinyal.</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Method Selection */}
-        <div className="space-y-4">
-          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Pilih Algoritma</label>
-          <div className="flex flex-col gap-2">
+        <div className="space-y-3">
+          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Pilih Algoritma</label>
+          <div className="flex flex-col gap-1.5">
             {[
-              { id: 'ma', name: 'Moving Average', icon: <Clock size={14} />, desc: 'Paling umum, merata-ratakan data dalam rentang waktu.' },
-              { id: 'median', name: 'Median Filter', icon: <Radio size={14} />, desc: 'Sangat efektif untuk menghilangkan spike tajam/error sensor.' },
-              { id: 'butterworth', name: 'Butterworth IIR', icon: <RefreshCw size={14} />, desc: 'Filter elektronik digital untuk memotong frekuensi tinggi.' }
-            ].map(m => (
+              { id: 'ma', name: 'Moving Average', icon: <Clock size={12} /> },
+              { id: 'median', name: 'Median Filter', icon: <Radio size={12} /> },
+              { id: 'butterworth', name: 'Butterworth IIR', icon: <RefreshCw size={12} /> }
+            ].map((m) => (
               <button
                 key={m.id}
-                onClick={() => setType(m.id)}
+                onClick={() => setType(m.id as any)}
                 className={cn(
-                  "flex flex-col items-start gap-1 p-4 rounded-xl border-2 transition-all text-left group",
-                  type === m.id ? "border-[#0284c7] bg-[#eff6ff]" : "border-slate-100 hover:border-slate-200"
+                  "flex items-center gap-2 p-3 rounded-xl border-2 text-left transition-all",
+                  type === m.id ? "bg-sky-50 border-[#0284c7] text-[#0284c7]" : "bg-white border-slate-100 text-slate-500 hover:border-slate-200"
                 )}
               >
-                <div className="flex items-center gap-2">
-                  <span className={cn(type === m.id ? "text-[#0284c7]" : "text-slate-400 group-hover:text-slate-600")}>
-                    {m.icon}
-                  </span>
-                  <span className={cn("text-sm font-black", type === m.id ? "text-[#0284c7]" : "text-slate-600 font-bold")}>{m.name}</span>
+                <div className={cn("p-1.5 rounded-lg", type === m.id ? "bg-[#0284c7] text-white" : "bg-slate-50")}>
+                  {m.icon}
                 </div>
-                <p className="text-[10px] text-slate-400 leading-tight">{m.desc}</p>
+                <div className="font-bold text-xs">{m.name}</div>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Custom Parameters */}
-        <div className="lg:col-span-2 bg-slate-50 rounded-2xl p-8 border border-slate-100 space-y-8">
+        {/* Dynamic Controls */}
+        <div className="lg:col-span-2 bg-slate-50/50 rounded-2xl border border-slate-100 p-5">
           {type === 'ma' && (
-            <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+            <div className="space-y-4">
               <div className="flex justify-between items-end">
-                <div className="space-y-1">
-                  <h4 className="text-sm font-black text-slate-800 uppercase font-display">Window Size (menit)</h4>
-                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai 15-60 menit untuk data frekuensi tinggi, atau 1440 (24 jam) guna mereduksi noise pasut harian.</p>
+                <div>
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Window Size (Menit)</h4>
+                  <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest mt-1">Standar BIG: 15 / 30 Menit</p>
                 </div>
-                <div className="flex items-center gap-3">
-                   <div className="relative">
-                      <input 
-                         type="number" 
-                         min="1" 
-                         max="10080" 
-                         value={window} 
-                         onChange={(e) => setWindow(parseInt(e.target.value) || 0)}
-                         className="w-32 bg-white border border-slate-200 rounded-xl px-4 py-2 text-xl font-black text-[#0284c7] font-mono outline-none focus:ring-2 focus:ring-sky-100"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">min</span>
-                   </div>
-                </div>
+                <span className="text-2xl font-black text-[#0284c7] font-mono">{window}m</span>
               </div>
-              <p className="text-[10px] text-slate-400 italic">Window size menentukan panjang data yang dirata-ratakan. Semakin besar nilai, grafik akan semakin halus (smooth).</p>
+              <input 
+                type="range" min="5" max="120" step="5" 
+                value={window} 
+                onChange={(e) => setWindow(parseInt(e.target.value))}
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+              />
             </div>
           )}
 
           {type === 'median' && (
-            <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+            <div className="space-y-4">
               <div className="flex justify-between items-end">
-                <div className="space-y-1">
-                  <h4 className="text-sm font-black text-slate-800 uppercase font-display">Median Kernel (pts)</h4>
-                  <p className="text-[10px] text-slate-500 max-w-xs">Gunakan nilai ganjil (3, 5, 7). Efektif menjaga tepian sinyal sambil membuang residu spike ekstrim.</p>
+                <div>
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Median Window (Samples)</h4>
+                  <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest mt-1">Efektif membuang spike</p>
                 </div>
-                <span className="text-2xl font-black text-[#0284c7] font-mono">{medianWindow}</span>
+                <span className="text-2xl font-black text-[#0284c7] font-mono">{medianWindow}pt</span>
               </div>
               <input 
-                type="range" min="3" max="51" step="2" 
-                value={Number.isNaN(medianWindow) ? 3 : medianWindow} 
+                type="range" min="3" max="21" step="2" 
+                value={medianWindow} 
                 onChange={(e) => setMedianWindow(parseInt(e.target.value))}
-                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
               />
             </div>
           )}
 
           {type === 'butterworth' && (
-            <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-               <div className="flex justify-between items-end">
-                <div className="space-y-1">
-                  <h4 className="text-sm font-black text-slate-800 uppercase font-display">Cutoff Frequency (Norm)</h4>
-                  <p className="text-[10px] text-slate-500 max-w-xs">0.01 - 0.5. Nilai default (0.5) meminimalkan redaman. Nilai rendah memotong frekuensi tinggi lebih agresif.</p>
+            <div className="space-y-4">
+              <div className="flex justify-between items-end">
+                <div>
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Cutoff Frequency</h4>
+                  <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest mt-1">Butterworth 2nd Order</p>
                 </div>
                 <span className="text-2xl font-black text-[#0284c7] font-mono">{cutoff.toFixed(3)}</span>
               </div>
               <input 
-                type="range" min="0.001" max="0.5" step="0.001" 
-                value={Number.isNaN(cutoff) ? 0.5 : cutoff} 
+                type="range" min="0.01" max="0.5" step="0.01" 
+                value={cutoff} 
                 onChange={(e) => setCutoff(parseFloat(e.target.value))}
-                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
               />
             </div>
           )}
 
-          <div className="pt-4">
+          <div className="mt-6">
             <button 
               onClick={onUpdate}
-              className="w-full py-4 bg-[#1e293b] text-white rounded-2xl font-extrabold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-xl shadow-slate-200 active:scale-95"
+              className="w-full py-3 bg-[#1e293b] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-md active:scale-95 uppercase tracking-wider"
             >
-              <RefreshCw size={20} /> Jalankan Filter Terpilih
+              <RefreshCw size={16} /> Jalankan Filter
             </button>
-            <p className="text-[10px] text-center text-slate-400 mt-4 font-bold uppercase tracking-widest italic">Setiap perubahan parameter memerlukan kalkulasi ulang</p>
+            <p className="text-[8px] text-center text-slate-400 mt-2 font-bold uppercase tracking-widest text-[9px]">Setiap perubahan parameter harus dikalkulasi ulang</p>
           </div>
         </div>
       </div>
@@ -3537,12 +3496,11 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
   );
 }
 
-function HarmonicView({ results, rmse }: { results: ConstituentResult[], rmse?: number | null }) {
-  if (!results.length) return null;
-  
+function HarmonicView({ results, rmse, constituentSet, setConstituentSet, onCalculate, isCalculating, autoDiagnostics }: any) {
   const handleDownloadCSV = () => {
+    if (!results || results.length === 0) return;
     let csv = "Component,Definition,Frequency (cph),Amplitude (m),Phase (deg)\n";
-    results.forEach(r => {
+    results.forEach((r: any) => {
       csv += `${r.comp},${r.desc},${r.freq.toFixed(8)},${r.amp.toFixed(3)},${r.phase.toFixed(3)}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -3550,45 +3508,105 @@ function HarmonicView({ results, rmse }: { results: ConstituentResult[], rmse?: 
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm overflow-hidden">
-      <div className="flex justify-between items-start mb-6">
-        <div>
-            <h3 className="text-lg font-black text-slate-800 px-2 font-display">Konstanta Harmonik (Least Squares Fit)</h3>
-            {rmse !== undefined && rmse !== null && (
-                <div className="px-2 mt-1">
-                    <span className="text-xs font-semibold text-slate-500">Root Mean Square Error (RMSE): </span>
-                    <span className="text-[13px] font-black text-sky-600">{rmse.toFixed(4)} m</span>
-                </div>
-            )}
-        </div>
-        <button onClick={handleDownloadCSV} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors">
-          <Download size={14} /> CSV
-        </button>
-      </div>
-      <div className="overflow-x-auto rounded-xl border border-slate-100">
-        <table className="w-full text-sm text-left">
-          <thead className="text-slate-500 bg-slate-50 uppercase text-[10px] font-black tracking-widest font-display">
-            <tr>
-              <th className="py-4 px-6">Component</th>
-              <th className="py-4 px-6">Definition</th>
-              <th className="py-4 px-6">Frequency (cph)</th>
-              <th className="py-4 px-6">Amplitude (m)</th>
-              <th className="py-4 px-6">Phase (deg)</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {results.map((r) => (
-               <tr key={r.comp} className="hover:bg-slate-50/50 transition-colors">
-                <td className="py-4 px-6 font-black text-[#0284c7]">{r.comp}</td>
-                <td className="py-4 px-6 text-slate-500 text-xs">{r.desc}</td>
-                <td className="py-4 px-6 font-mono text-[11px] text-slate-400">{r.freq.toFixed(8)}</td>
-                <td className="py-4 px-6 font-bold text-slate-800 font-mono">{r.amp.toFixed(3)}</td>
-                <td className="py-4 px-6 font-bold text-slate-800 font-mono">{r.phase.toFixed(3)}°</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm overflow-hidden flex flex-col gap-6">
+       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end gap-6">
+          <div className="flex-1">
+              <h3 className="text-lg font-black text-slate-800 px-2 font-display">Analisis Konstanta Harmonik</h3>
+              {rmse !== undefined && rmse !== null && results.length > 0 && (
+                  <div className="px-2 mt-1">
+                      <span className="text-xs font-semibold text-slate-500">Root Mean Square Error (RMSE): </span>
+                      <span className="text-[13px] font-black text-sky-600">{rmse.toFixed(4)} m</span>
+                  </div>
+              )}
+          </div>
+          
+          <div className="flex flex-wrap items-end gap-3 w-full xl:w-auto">
+             <div className="flex flex-col gap-1.5 min-w-[200px]">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Constituent Set</label>
+                <select 
+                  value={constituentSet}
+                  onChange={(e) => setConstituentSet(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
+                >
+                  <option value="4">4 Constants (Basic)</option>
+                  <option value="9">9 Constants (Standard)</option>
+                  <option value="IHO23">IHO 23 Constants (GeoTide)</option>
+                  <option value="FES2014">FES2014 (34 Constants)</option>
+                  <option value="UTIDE">UTide Standard (67)</option>
+                  <option value="AUTO">Auto (Rayleigh & SNR)</option>
+                </select>
+             </div>
+             
+             <button 
+                onClick={onCalculate}
+                disabled={isCalculating}
+                className="flex flex-1 xl:flex-none items-center justify-center gap-2 px-6 h-11 bg-[#1e293b] text-white rounded-xl text-xs font-black tracking-widest hover:bg-black transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed group uppercase"
+             >
+                {isCalculating ? <RefreshCw size={14} className="animate-spin" /> : <Piano size={16} className="group-hover:rotate-12 transition-transform" />}
+                Hitung Konstanta Harmonik
+             </button>
+
+             {results.length > 0 && (
+               <button onClick={handleDownloadCSV} className="px-4 h-11 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors">
+                 <Download size={14} /> CSV
+               </button>
+             )}
+          </div>
+       </div>
+
+       {constituentSet === 'AUTO' && autoDiagnostics && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-sky-50/70 rounded-xl border border-sky-100 animate-in fade-in slide-in-from-top-1">
+             <div className="flex justify-between items-center px-2">
+                <span className="text-[9px] uppercase font-black text-slate-400 tracking-wider">Tested:</span>
+                <span className="text-xs font-black text-sky-800">{autoDiagnostics.totalTested}</span>
+             </div>
+             <div className="flex justify-between items-center px-2 border-l border-sky-200/30">
+                <span className="text-[9px] uppercase font-black text-slate-400 tracking-wider">Rayleigh Passed:</span>
+                <span className="text-xs font-black text-sky-800">{autoDiagnostics.rayleighPassed}</span>
+             </div>
+             <div className="flex justify-between items-center px-2 border-l border-sky-200/30">
+                <span className="text-[9px] uppercase font-black text-slate-400 tracking-wider">Significant Signal:</span>
+                <span className="text-xs font-black text-[#0284c7]">{autoDiagnostics.snrPassed}</span>
+             </div>
+          </div>
+       )}
+
+       {results.length > 0 ? (
+          <div className="overflow-x-auto rounded-xl border border-slate-100">
+            <table className="w-full text-sm text-left">
+              <thead className="text-slate-500 bg-slate-50 uppercase text-[10px] font-black tracking-widest font-display">
+                <tr>
+                  <th className="py-4 px-6 font-display">Component</th>
+                  <th className="py-4 px-6 font-display">Definition</th>
+                  <th className="py-4 px-6 font-display text-center">Frequency (cph)</th>
+                  <th className="py-4 px-6 font-display text-center">Amplitude (m)</th>
+                  <th className="py-4 px-6 font-display text-center">Phase (deg)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {results.map((r: any) => (
+                   <tr key={r.comp} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="py-4 px-6 font-black text-[#0284c7]">{r.comp}</td>
+                    <td className="py-4 px-6 text-slate-500 text-xs leading-snug">{r.desc}</td>
+                    <td className="py-4 px-6 font-mono text-[10px] text-slate-400 text-center">{r.freq.toFixed(8)}</td>
+                    <td className="py-4 px-6 font-black text-slate-800 font-mono text-center">{r.amp.toFixed(3)}</td>
+                    <td className="py-4 px-6 font-black text-slate-800 font-mono text-center">{r.phase.toFixed(3)}°</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+       ) : (
+          <div className="flex-1 flex flex-col items-center justify-center py-24 bg-slate-50/50 rounded-2xl border-2 border-dashed border-slate-200 text-center gap-6">
+             <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center text-slate-300 ring-1 ring-slate-100">
+                <Piano size={32} />
+             </div>
+             <div className="max-w-[320px]">
+                <h4 className="text-md font-black text-slate-800 uppercase tracking-tight">Menunggu Analisis Harmoni</h4>
+                <p className="text-[11px] text-slate-500 mt-2 font-medium leading-relaxed">Pilih constituent set yang diinginkan, kemudian klik tombol <span className="font-bold text-slate-800 italic underline decoration-sky-300">"Hitung Konstanta Harmonik"</span> di atas untuk memulai kalkulasi least squares.</p>
+             </div>
+          </div>
+       )}
     </div>
   );
 }
