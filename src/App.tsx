@@ -317,6 +317,7 @@ export default function App() {
   const [z0, setZ0] = useState(0);
   const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
+  const [isFullAnalysisRun, setIsFullAnalysisRun] = useState(false);
   
   // Combination State
   const [combinationSettings, setCombinationSettings] = useState({
@@ -445,7 +446,7 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings, forceFullAnalysis: boolean = isFullAnalysisRun) => {
     if (!rawRows.length) return;
     if (isProcessing.current) return;
     const currentSensor = sensorToUse || selectedSensor;
@@ -592,6 +593,54 @@ export default function App() {
         }
         processed = regularized;
         // -----------------------------------------------------------------
+
+        // Phase 1.5: Gross error removal (flat value > 60 mins check)
+        for (const s of availableSensors) {
+             let flatCount = 1;
+             let flatStartIndex = 0;
+             let lastVal = s === currentSensor ? processed[0]?.raw : processed[0]?.allSamples?.[s];
+             
+             for (let i = 1; i < processed.length; i++) {
+                  const currentVal = s === currentSensor ? processed[i].raw : processed[i].allSamples?.[s];
+                  if (!isNaN(currentVal as number) && !isNaN(lastVal as number) && currentVal === lastVal) {
+                      flatCount++;
+                  } else {
+                      if (flatCount * dt > 3600000) {
+                          for (let j = flatStartIndex; j < i; j++) {
+                              if (s === currentSensor) processed[j].raw = NaN;
+                              if (processed[j].allSamples) processed[j].allSamples[s] = NaN;
+                          }
+                      }
+                      flatCount = 1;
+                      lastVal = currentVal;
+                      flatStartIndex = i;
+                  }
+             }
+             if (flatCount * dt > 3600000) {
+                  for (let j = flatStartIndex; j < processed.length; j++) {
+                       if (s === currentSensor) processed[j].raw = NaN;
+                       if (processed[j].allSamples) processed[j].allSamples[s] = NaN;
+                  }
+             }
+        }
+
+        if (!forceFullAnalysis) {
+             for (let i = 0; i < processed.length; i++) {
+                 // Without analysis, Valid line is not computed. We only show the raw data lines.
+                 // So we leave `filtered`, `combined`, `interpolated` as they are (NaN or 0)
+                 processed[i].filtered = NaN; // set to NaN to explicitly hide it when not triggered
+             }
+             setHarmonicResults([]);
+             setDatums(null);
+             setZ0(0);
+             setLinearTrend(null);
+             setRmseVal(null);
+             
+             requestAnimationFrame(() => {
+               setRecords(processed);
+             });
+             return; // Stop here!
+        }
 
         // 2. Harmonic Outlier Detection (Two-Pass Logic)
         let compsToFit: string[] = [];
@@ -1254,7 +1303,8 @@ export default function App() {
         setSelectedSensor(initialSensor);
         setRawData(mergedData);
         setModifiers([]); // Reset modifiers on new file load
-        runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, []);
+        setIsFullAnalysisRun(false);
+        runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, [], isDeTiding, combinationSettings, interpolationSettings, false);
         setActiveTab('dashboard');
         setShowMetadataModal(true);
       } catch (err) {
@@ -1858,7 +1908,8 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                 value={selectedSensor}
                 onChange={(e) => {
                   setSelectedSensor(e.target.value);
-                  runAnalysis(rawData, e.target.value);
+                  setIsFullAnalysisRun(false);
+                  runAnalysis(rawData, e.target.value, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false);
                 }}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer hover:border-sky-300 transition-colors"
               >
@@ -1877,7 +1928,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                 const val = e.target.value as any;
                 setConstituentSet(val);
                 // Trigger re-analysis when set changes
-                runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset);
+                runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, isFullAnalysisRun);
               }}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
             >
@@ -1921,7 +1972,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                       const val = parseFloat(vOffsetStr) || 0;
                       if (val !== verticalOffset) {
                           setVerticalOffset(val);
-                          runAnalysis(rawData, selectedSensor, val, timeOffset);
+                          runAnalysis(rawData, selectedSensor, val, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, isFullAnalysisRun);
                       }
                   }}
                   onKeyDown={(e) => {
@@ -1944,7 +1995,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                       const val = parseFloat(tOffsetStr) || 0;
                       if (val !== timeOffset) {
                           setTimeOffset(val);
-                          runAnalysis(rawData, selectedSensor, verticalOffset, val);
+                          runAnalysis(rawData, selectedSensor, verticalOffset, val, modifiers, isDeTiding, combinationSettings, interpolationSettings, isFullAnalysisRun);
                       }
                   }}
                   onKeyDown={(e) => {
@@ -2178,7 +2229,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                   setManualMin={setManualMin}
                   manualMax={manualMax}
                   setManualMax={setManualMax}
-                  onUpdate={() => runAnalysis(rawData)} 
+                  onUpdate={() => { setIsFullAnalysisRun(true); runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); }} 
                 />
             )}
             {activeTab === 'filter' && records.length > 0 && (
@@ -2191,7 +2242,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                    setMedianWindow={setMedianWindow}
                    cutoff={butterCutoff}
                    setCutoff={setButterCutoff}
-                   onUpdate={() => runAnalysis(rawData)} 
+                   onUpdate={() => { setIsFullAnalysisRun(true); runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); }} 
                 />
             )}
             {activeTab === 'harmonic' && records.length > 0 && (
@@ -3010,17 +3061,19 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                       <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5 pointer-events-none min-w-[200px]">
                         <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">Waktu: {formatUTC(new Date(Number(label)), 'dd/MM/yyyy HH:mm:ss')}</p>
                         <div className="space-y-2 w-full">
-                          <div className="flex items-center justify-between gap-6 text-[11px]">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2.5 h-2.5 rounded-sm bg-[#f59e0b]" />
-                              <span className="font-semibold text-slate-600">Valid</span>
-                            </div>
-                            <span className="font-bold text-slate-800 font-mono">
-                              {typeof data.filtered === 'number' ? data.filtered.toFixed(3) : 'NaN'} m
-                            </span>
-                          </div>
+                          {data.filtered !== undefined && !isNaN(data.filtered) && (
+                              <div className="flex items-center justify-between gap-6 text-[11px]">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 rounded-sm bg-[#ec7017]" />
+                                  <span className="font-semibold text-slate-600">Valid</span>
+                                </div>
+                                <span className="font-bold text-slate-800 font-mono">
+                                  {data.filtered.toFixed(3)} m
+                                </span>
+                              </div>
+                          )}
 
-                          {data.combined !== undefined && (
+                          {data.combined !== undefined && !isNaN(data.combined) && (
                             <div className="flex items-center justify-between gap-6 text-[11px]">
                               <div className="flex items-center gap-2">
                                 <div className="w-2.5 h-2.5 rounded-sm bg-[#F5BF03]" />
@@ -3060,15 +3113,17 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                              );
                           })}
 
-                          <div className="flex items-center justify-between gap-6 text-[11px]">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2.5 h-2.5 rounded-sm bg-[#ef4444]" />
-                              <span className="font-semibold text-slate-600">Sea Level Trend</span>
-                            </div>
-                            <span className="font-bold text-slate-800 font-mono">
-                              {typeof data.trendline === 'number' ? data.trendline.toFixed(3) : 'NaN'} m
-                            </span>
-                          </div>
+                          {data.trendline !== undefined && !isNaN(data.trendline) && (
+                              <div className="flex items-center justify-between gap-6 text-[11px]">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 rounded-sm bg-[#ef4444]" />
+                                  <span className="font-semibold text-slate-600">Sea Level Trend</span>
+                                </div>
+                                <span className="font-bold text-slate-800 font-mono">
+                                  {data.trendline.toFixed(3)} m
+                                </span>
+                              </div>
+                          )}
                         </div>
                       </div>
                     );
