@@ -3414,14 +3414,14 @@ function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin
         <div className="flex flex-col gap-3 justify-center">
             <div className="bg-white p-4 rounded-xl border-2 border-slate-100 text-center shadow-sm">
                 <div className="text-[9px] font-black text-slate-400 uppercase mb-3 tracking-widest font-display">Statistik Outlier</div>
-                <div className="grid grid-cols-2 divide-x divide-slate-100">
-                   <div>
-                       <div className="text-3xl font-black text-slate-800">{records.filter((r:any) => r.isOutlier).length}</div>
-                       <div className="text-[9px] font-bold text-amber-600 uppercase mt-1 tracking-tighter">Dibuang</div>
+                <div className="flex flex-col divide-y divide-slate-100">
+                   <div className="pb-4">
+                       <div className="text-3xl font-mono font-black text-slate-800 leading-none">{records.filter((r:any) => r.isOutlier).length}</div>
+                       <div className="text-[10px] font-black text-amber-500 uppercase mt-2 tracking-widest">Data Dibuang</div>
                    </div>
-                   <div>
-                       <div className="text-3xl font-black text-emerald-700">{records.filter((r:any) => !r.isOutlier).length}</div>
-                       <div className="text-[9px] font-bold text-emerald-600 uppercase mt-1 tracking-tighter">Verified</div>
+                   <div className="pt-4">
+                       <div className="text-3xl font-mono font-black text-emerald-700 leading-none">{records.filter((r:any) => !r.isOutlier).length}</div>
+                       <div className="text-[10px] font-black text-emerald-600 uppercase mt-2 tracking-widest">Data Terverifikasi</div>
                    </div>
                 </div>
             </div>
