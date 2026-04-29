@@ -318,6 +318,7 @@ export default function App() {
   const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
   const [isFullAnalysisRun, setIsFullAnalysisRun] = useState(false);
+  const [validCache, setValidCache] = useState<Record<string, number[]>>({});
   
   // Combination State
   const [combinationSettings, setCombinationSettings] = useState({
@@ -355,6 +356,91 @@ export default function App() {
   }, []);
 
   // --- CORE ANALYTICS ENGINE (Client-side) ---
+
+  const doInterpolation = (settings: typeof interpolationSettings, recordsToInterpolate: any[]) => {
+      const updated = [...recordsToInterpolate];
+      if (!settings.enabled) {
+          for (let i = 0; i < updated.length; i++) {
+              updated[i].interpolated = NaN;
+          }
+          return updated;
+      }
+      
+      let dt = 60000;
+      if (updated.length > 1) {
+          dt = updated[1].timestamp.getTime() - updated[0].timestamp.getTime();
+      }
+
+      const interpolatedStream = new Array(updated.length);
+      for (let i = 0; i < updated.length; i++) {
+          interpolatedStream[i] = updated[i].combined; // Base it off combined
+      }
+
+      let i = 0;
+      while (i < updated.length) {
+          if (!isNaN(interpolatedStream[i])) {
+              updated[i].interpolated = interpolatedStream[i];
+              i++;
+              continue;
+          }
+
+          let startGap = i;
+          let endGap = i;
+          while (endGap < updated.length && isNaN(interpolatedStream[endGap])) {
+              endGap++;
+          }
+          const gapLength = endGap - startGap;
+          const gapDurationMins = (gapLength * dt) / 60000;
+
+          const prevVal = startGap > 0 ? interpolatedStream[startGap - 1] : NaN;
+          const nextVal = endGap < updated.length ? interpolatedStream[endGap] : NaN;
+          
+          if (!isNaN(prevVal) && !isNaN(nextVal) && gapDurationMins <= settings.maxGapMinutes) {
+              let xPoints = [];
+              let yPoints = [];
+              let ptsBefore = 0;
+              for (let k = startGap - 1; k >= 0 && ptsBefore < 3; k--) {
+                  if (!isNaN(interpolatedStream[k])) {
+                      xPoints.unshift(k);
+                      yPoints.unshift(interpolatedStream[k]);
+                      ptsBefore++;
+                  } else break;
+              }
+              let ptsAfter = 0;
+              for (let k = endGap; k < updated.length && ptsAfter < 3; k++) {
+                  if (!isNaN(interpolatedStream[k])) {
+                      xPoints.push(k);
+                      yPoints.push(interpolatedStream[k]);
+                      ptsAfter++;
+                  } else break;
+              }
+              
+              let xi = [];
+              for (let j = startGap; j < endGap; j++) {
+                  xi.push(j);
+              }
+              
+              const yi = solveCubicSpline(xPoints, yPoints, xi);
+              
+              for (let j = startGap; j < endGap; j++) {
+                  const minBound = Math.min(...yPoints);
+                  const maxBound = Math.max(...yPoints);
+                  let interp = yi[j - startGap];
+                  if (interp < minBound - 0.5) interp = minBound - 0.5; 
+                  if (interp > maxBound + 0.5) interp = maxBound + 0.5;
+                  
+                  interpolatedStream[j] = parseFloat(interp.toFixed(3));
+                  updated[j].interpolated = interpolatedStream[j];
+              }
+          } else {
+              for (let j = startGap; j < endGap; j++) {
+                  updated[j].interpolated = NaN;
+              }
+          }
+          i = endGap;
+      }
+      return updated;
+  };
 
   const solveLeastSquares = (t: number[], y: number[], comps: string[]) => {
     // Solve y = Z0 + sum(Ai cos(wi t) + Bi sin(wi t))
@@ -629,6 +715,8 @@ export default function App() {
                  // Without analysis, Valid line is not computed. We only show the raw data lines.
                  // So we leave `filtered`, `combined`, `interpolated` as they are (NaN or 0)
                  processed[i].filtered = NaN; // set to NaN to explicitly hide it when not triggered
+                 processed[i].combined = NaN;
+                 processed[i].interpolated = NaN;
              }
              setHarmonicResults([]);
              setDatums(null);
@@ -733,110 +821,18 @@ export default function App() {
         // C. Prepare Data Streams
         // 1. Valid (Filtered) Stream: No interpolation, keeping NaNs for gaps/outliers
         const validUnfiltered = new Array(processed.length);
-        const interpolatedStream = new Array(processed.length);
 
-        // Helper to check if a value is an outlier
-        const isAnOutlier = (val: number) => {
-             if (isNaN(val)) return true;
-             const isStat = Math.abs(val - meanRaw) > (zThreshold * stdRaw);
-             const isHarm = val > roughHAT || val < roughLAT;
-             let isMan = false;
-             if (manualMin !== "" && val < (manualMin as number)) isMan = true;
-             if (manualMax !== "" && val > (manualMax as number)) isMan = true;
-             return isStat || isHarm || isMan;
-        };
-        
         for (let i = 0; i < processed.length; i++) {
             const r = processed[i];
             const leadValid = r.isOutlier ? NaN : r.raw;
             validUnfiltered[i] = leadValid;
 
-            let combinedVal = leadValid;
-            if (isNaN(combinedVal) && combSettings.enabled && (combSettings.referenceSensor === currentSensor || combSettings.referenceSensor === '')) {
-                for (const source of combSettings.sourceSensors) {
-                    let sVal = r.allSamples?.[source];
-                    if (sVal !== undefined && !isNaN(sVal)) {
-                        sVal += vOffset; // Apply global vertical offset
-                        if (!isAnOutlier(sVal)) {
-                             combinedVal = sVal;
-                             break;
-                        }
-                    }
-                }
-            }
-
-            processed[i].combined = combinedVal;
-            interpolatedStream[i] = combinedVal;
+            // Retain existing combined and interpolated if they exist (or leave as NaN)
+            processed[i].combined = records[i]?.combined ?? NaN;
+            processed[i].interpolated = records[i]?.interpolated ?? NaN;
         }
 
-        // 2. Interpolated Stream: Fill gaps <= 15 mins (or settings)
-        let i = 0;
-        while (i < processed.length) {
-            if (!isNaN(interpolatedStream[i])) {
-                processed[i].interpolated = interpolatedStream[i];
-                i++;
-                continue;
-            }
-
-            let startGap = i;
-            let endGap = i;
-            while (endGap < processed.length && isNaN(interpolatedStream[endGap])) {
-                endGap++;
-            }
-            const gapLength = endGap - startGap;
-            const gapDurationMins = (gapLength * dt) / 60000;
-
-            const prevVal = startGap > 0 ? interpolatedStream[startGap - 1] : NaN;
-            const nextVal = endGap < processed.length ? interpolatedStream[endGap] : NaN;
-            
-            if (!isNaN(prevVal) && !isNaN(nextVal) && gapDurationMins <= interpolationSettings.maxGapMinutes) {
-                let xPoints = [];
-                let yPoints = [];
-                let ptsBefore = 0;
-                for (let k = startGap - 1; k >= 0 && ptsBefore < 3; k--) {
-                    if (!isNaN(interpolatedStream[k])) {
-                        xPoints.unshift(k);
-                        yPoints.unshift(interpolatedStream[k]);
-                        ptsBefore++;
-                    } else break;
-                }
-                let ptsAfter = 0;
-                for (let k = endGap; k < processed.length && ptsAfter < 3; k++) {
-                    if (!isNaN(interpolatedStream[k])) {
-                        xPoints.push(k);
-                        yPoints.push(interpolatedStream[k]);
-                        ptsAfter++;
-                    } else break;
-                }
-                
-                let xi = [];
-                for (let j = startGap; j < endGap; j++) {
-                    xi.push(j);
-                }
-                
-                const yi = solveCubicSpline(xPoints, yPoints, xi);
-                
-                for (let j = startGap; j < endGap; j++) {
-                    // Prevent catastrophic overshoot from cubic spline by clamping to min/max of neighbors
-                    const minBound = Math.min(...yPoints);
-                    const maxBound = Math.max(...yPoints);
-                    let interp = yi[j - startGap];
-                    if (interp < minBound - 0.5) interp = minBound - 0.5; // slight allowance
-                    if (interp > maxBound + 0.5) interp = maxBound + 0.5;
-                    
-                    interpolatedStream[j] = parseFloat(interp.toFixed(3));
-                    processed[j].interpolated = interpolatedStream[j];
-                }
-            } else {
-                // If gap is too large to interpolate, it remains NaN in 'interpolated' field
-                for (let j = startGap; j < endGap; j++) {
-                    processed[j].interpolated = NaN;
-                }
-            }
-            i = endGap;
-        }
-
-        // C. Cleaned Input for Filtering (Still needs continuous data to avoid filter artifacts)
+        // C. Cleaned Input for Filtering (Still needs continuous data to avoid filter artifacts)  
         // We'll use the interpolated stream if available, but "Valid" output line will be masked by NaNs later.
         const cleanedInput = new Array(processed.length);
         for (let idx = 0; idx < processed.length; idx++) {
@@ -847,11 +843,12 @@ export default function App() {
             } else {
                 // Temporary fill for filter stability - using linear trend or roughZ0
                 cleanedInput[idx] = roughZ0; 
+
             }
         }
         
         // Refine cleanedInput for filtering near gaps
-        i = 0;
+        let i = 0;
         while (i < processed.length) {
             if (isNaN(validUnfiltered[i])) {
                 let startGap = i;
@@ -952,6 +949,28 @@ export default function App() {
                 filtered: filteredValue
             };
         });
+
+        // Store the final Valid data in our cache
+        const finalValid = processed.map(r => r.filtered);
+        const updatedCache = { ...validCache, [currentSensor]: finalValid };
+        setValidCache(updatedCache);
+        
+        for (let i = 0; i < processed.length; i++) {
+            let combinedVal = finalValid[i];
+            
+            if (isNaN(combinedVal) && combSettings.enabled && (combSettings.referenceSensor === currentSensor || combSettings.referenceSensor === '')) {
+                for (const source of combSettings.sourceSensors) {
+                    const srcValid = updatedCache[source]?.[i];
+                    if (srcValid !== undefined && !isNaN(srcValid)) {
+                        combinedVal = srcValid;
+                        break;
+                    }
+                }
+            }
+            processed[i].combined = combinedVal;
+        }
+        
+        processed = doInterpolation(interpSettings, processed);
 
         // 4. Final Precise Harmonic Analysis (on the mathematically cleaned and filtered data)
         const validForFinal = processed.filter(r => !isNaN(r.filtered));
@@ -1180,6 +1199,40 @@ export default function App() {
     }, 500);
   };
 
+  const runCombination = (settings: typeof combinationSettings) => {
+      setCombinationSettings(settings);
+      if (!records.length) return;
+      const currentSensor = selectedSensor;
+      const updatedRecords = [...records];
+      
+      for (let i = 0; i < updatedRecords.length; i++) {
+          const r = updatedRecords[i];
+          let combinedVal = validCache[currentSensor]?.[i] ?? NaN;
+          
+          if (isNaN(combinedVal) && settings.enabled && (settings.referenceSensor === currentSensor || settings.referenceSensor === '')) {
+              for (const source of settings.sourceSensors) {
+                  const srcValid = validCache[source]?.[i];
+                  if (srcValid !== undefined && !isNaN(srcValid)) {
+                      combinedVal = srcValid;
+                      break;
+                  }
+              }
+          }
+          updatedRecords[i].combined = combinedVal;
+      }
+      // Every time we update combination, we must re-evaluate interpolation on top of it.
+      const finalRecords = doInterpolation(interpolationSettings, updatedRecords);
+      setRecords(finalRecords);
+  };
+
+  const runInterpolation = (settings: typeof interpolationSettings) => {
+      setInterpolationSettings(settings);
+      if (!records.length) return;
+      
+      const updatedRecords = doInterpolation(settings, records);
+      setRecords(updatedRecords);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
@@ -1298,7 +1351,7 @@ export default function App() {
            return lowerF.includes('(m)') || lowerF.includes('(cm)') || lowerF.startsWith('sensor');
         });
         setAvailableSensors(detectedSensors);
-        setVisibleSensors(detectedSensors.length > 3 ? detectedSensors.slice(0, 3) : detectedSensors);
+        setVisibleSensors(detectedSensors);
         const initialSensor = detectedSensors.length > 0 ? detectedSensors[0] : '';
         setSelectedSensor(initialSensor);
         setRawData(mergedData);
@@ -1877,7 +1930,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
         </button>
         
         <nav className="flex-1 space-y-1">
-          {['dashboard', 'outlier', 'filter', 'harmonic', 'predictions', 'summarize', 'about'].map((tab) => (
+          {['dashboard', 'validate', 'harmonic', 'predictions', 'summarize', 'about'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1889,8 +1942,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
               )}
             >
               {tab === 'dashboard' && <LayoutDashboard size={18} />}
-              {tab === 'outlier' && <Search size={18} />}
-              {tab === 'filter' && <Radio size={18} />}
+              {tab === 'validate' && <Search size={18} />}
               {tab === 'harmonic' && <Piano size={18} />}
               {tab === 'predictions' && <TrendingUp size={18} />}
               {tab === 'summarize' && <MapIcon size={18} />}
@@ -2197,13 +2249,16 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     setShowCombinationModal={setShowCombinationModal}
                     interpolationSettings={interpolationSettings}
                     setInterpolationSettings={setInterpolationSettings}
+                    runInterpolation={runInterpolation}
                     onReset={() => {
                         setVerticalOffset(0);
                         setTimeOffset(0);
                         setModifiers([]);
                         setCombinationSettings({ enabled: false, referenceSensor: '', sourceSensors: [] });
                         setInterpolationSettings({ enabled: false, maxGapMinutes: 15 });
-                        runAnalysis(rawData, selectedSensor, 0, 0, [], isDeTiding, { enabled: false, referenceSensor: '', sourceSensors: [] }, { enabled: false, maxGapMinutes: 15 });
+                        setValidCache({});
+                        setIsFullAnalysisRun(false);
+                        runAnalysis(rawData, selectedSensor, 0, 0, [], isDeTiding, { enabled: false, referenceSensor: '', sourceSensors: [] }, { enabled: false, maxGapMinutes: 15 }, false);
                     }}
                 />
             )}
@@ -2214,36 +2269,35 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     currentSettings={combinationSettings}
                     onCancel={() => setShowCombinationModal(false)}
                     onApply={(settings: any) => {
-                        setCombinationSettings(settings);
                         setShowCombinationModal(false);
-                        runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, settings);
+                        runCombination(settings);
                     }}
                 />
             )}
-            {activeTab === 'outlier' && records.length > 0 && (
-                <OutlierView 
-                  records={records} 
-                  threshold={zThreshold} 
-                  setThreshold={setZThreshold}
-                  manualMin={manualMin}
-                  setManualMin={setManualMin}
-                  manualMax={manualMax}
-                  setManualMax={setManualMax}
-                  onUpdate={() => { setIsFullAnalysisRun(true); runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); }} 
-                />
-            )}
-            {activeTab === 'filter' && records.length > 0 && (
-                <FilterView 
-                   type={filterType}
-                   setType={setFilterType}
-                   window={filterWindow} 
-                   setWindow={setFilterWindow} 
-                   medianWindow={medianWindow}
-                   setMedianWindow={setMedianWindow}
-                   cutoff={butterCutoff}
-                   setCutoff={setButterCutoff}
-                   onUpdate={() => { setIsFullAnalysisRun(true); runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); }} 
-                />
+            {activeTab === 'validate' && records.length > 0 && (
+                <div className="space-y-6">
+                    <OutlierView 
+                      records={records} 
+                      threshold={zThreshold} 
+                      setThreshold={setZThreshold}
+                      manualMin={manualMin}
+                      setManualMin={setManualMin}
+                      manualMax={manualMax}
+                      setManualMax={setManualMax}
+                      onUpdate={() => { setIsFullAnalysisRun(true); runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); }} 
+                    />
+                    <FilterView 
+                       type={filterType}
+                       setType={setFilterType}
+                       window={filterWindow} 
+                       setWindow={setFilterWindow} 
+                       medianWindow={medianWindow}
+                       setMedianWindow={setMedianWindow}
+                       cutoff={butterCutoff}
+                       setCutoff={setButterCutoff}
+                       onUpdate={() => { setIsFullAnalysisRun(true); runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); }} 
+                    />
+                </div>
             )}
             {activeTab === 'harmonic' && records.length > 0 && (
               <div className="space-y-6">
@@ -2499,7 +2553,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -2895,7 +2949,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                             onChange={(e) => {
                                 const newVal = { ...interpolationSettings, enabled: e.target.checked };
                                 setInterpolationSettings(newVal);
-                                runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, newVal);
+                                runInterpolation(newVal);
                             }} 
                             className="rounded text-rose-900 focus:ring-rose-900 w-3.5 h-3.5"
                         />
@@ -3174,7 +3228,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     />
                   );
               })}
-              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.65} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
+              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.90} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
               <Line hide={hiddenLines.combined} type="monotone" dataKey="combined" stroke="#F5BF03" strokeWidth={2} dot={false} name="Combined" isAnimationActive={false} connectNulls={false} />
               <Line hide={hiddenLines.interpolated} type="monotone" dataKey="interpolated" stroke="#800000" strokeWidth={2} dot={false} name="Interpolated" isAnimationActive={false} connectNulls={false} />
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" isAnimationActive={false} />
