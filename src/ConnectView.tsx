@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download } from 'lucide-react';
+import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download, ChevronDown, Search } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onDataLoaded: (data: any[], selectedSensorName?: string) => void, onStationMetaLoaded: (name: string, lat: string, lon: string) => void }) {
@@ -12,6 +12,9 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
   const [selectedTable, setSelectedTable] = useState('data_vsat5');
   const [limit, setLimit] = useState(1000);
   const [stationQuery, setStationQuery] = useState('');
+  const [stationSearch, setStationSearch] = useState('');
+  const [isStationDropdownOpen, setIsStationDropdownOpen] = useState(false);
+  const [stations, setStations] = useState<{id: string, name: string}[]>([]);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   
@@ -55,6 +58,24 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
       const data = await res.json();
       if (data.success) {
         setConnStatus('success');
+        
+        try {
+          const stationRes = await fetch('/api/db/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host, port, user, password, database, table: 'stationlist', limit: 1000 })
+          });
+          const stationData = await stationRes.json();
+          if (stationData.success && stationData.data) {
+            const loadedStations = stationData.data.map((st: any) => ({
+              id: st.StationID,
+              name: st.StationName || st.StationID
+            })).filter((st: any) => st.id);
+            setStations(loadedStations);
+          }
+        } catch (e) {
+          console.warn("Could not fetch station list:", e);
+        }
       } else {
         setConnStatus('error');
       }
@@ -272,12 +293,62 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
               <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Limit data yang ditarik per query</p>
             </div>
             
-            <div className="md:col-span-2">
+            <div className="md:col-span-2 relative">
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filter Nama/ID Stasiun <span className="text-slate-400 font-normal lowercase tracking-normal">(Opsional)</span></label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input type="text" value={stationQuery} onChange={e => setStationQuery(e.target.value)} placeholder="Misal: SBY01" className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+              
+              <div 
+                className="relative cursor-pointer" 
+                onClick={() => setIsStationDropdownOpen(!isStationDropdownOpen)}
+              >
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 flex items-center h-full">
+                   <MapPin size={16} />
+                </div>
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-10 py-2.5 text-sm text-slate-700 min-h-[42px] flex items-center">
+                   {stationQuery ? stations.find(s => s.id === stationQuery)?.name || stationQuery : "Semua Stasiun"}
+                </div>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 flex items-center h-full pointer-events-none">
+                   <ChevronDown size={16} />
+                </div>
               </div>
+
+              {isStationDropdownOpen && (
+                <div className="absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                   <div className="p-2 border-b border-slate-100 bg-slate-50 relative">
+                     <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                     <input 
+                       type="text" 
+                       autoFocus
+                       className="w-full bg-white border border-slate-200 rounded px-3 py-1.5 pl-8 text-sm outline-none focus:ring-2 focus:ring-sky-500" 
+                       placeholder="Cari stasiun..."
+                       value={stationSearch}
+                       onChange={e => setStationSearch(e.target.value)}
+                       onClick={e => e.stopPropagation()}
+                     />
+                   </div>
+                   <div className="max-h-60 overflow-y-auto">
+                     <div 
+                       className={`px-3 py-2 text-sm cursor-pointer hover:bg-sky-50 ${!stationQuery ? 'bg-sky-50 font-bold text-sky-700' : 'text-slate-700'}`}
+                       onClick={() => { setStationQuery(''); setIsStationDropdownOpen(false); setStationSearch(''); }}
+                     >
+                        Semua Stasiun
+                     </div>
+                     {stations.filter(s => s.name.toLowerCase().includes(stationSearch.toLowerCase()) || s.id.toLowerCase().includes(stationSearch.toLowerCase())).map(st => (
+                       <div 
+                         key={st.id} 
+                         className={`px-3 py-2 text-sm cursor-pointer hover:bg-sky-50 ${stationQuery === st.id ? 'bg-sky-50 font-bold text-sky-700' : 'text-slate-700'}`}
+                         onClick={() => { setStationQuery(st.id); setIsStationDropdownOpen(false); setStationSearch(''); }}
+                       >
+                         {st.name} <span className="text-slate-400 text-xs ml-1">({st.id})</span>
+                       </div>
+                     ))}
+                     {stations.filter(s => s.name.toLowerCase().includes(stationSearch.toLowerCase()) || s.id.toLowerCase().includes(stationSearch.toLowerCase())).length === 0 && (
+                       <div className="px-3 py-4 text-sm text-center text-slate-500 italic">
+                         Stasiun tidak ditemukan. Pastikan Anda telah melakukan Test Connection.
+                       </div>
+                     )}
+                   </div>
+                </div>
+              )}
             </div>
 
             <div>
