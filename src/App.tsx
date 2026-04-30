@@ -3829,7 +3829,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
           </div>
           <div>
             <h2 className="text-xl font-black text-slate-800">{title}</h2>
-            <p className="text-sm text-slate-500">Estimasi ketinggian air laut berdasarkan parameter harmonik yang ditemukan.</p>
+            <p className="text-sm text-slate-500">Buat prediksi tinggi muka laut berdasarkan konstanta harmonik yang dihitung.</p>
           </div>
         </div>
 
@@ -3987,7 +3987,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <span className="text-[10px] font-bold uppercase tracking-widest">Catatan Penting</span>
              </div>
              <p className="text-xs text-slate-500 leading-relaxed px-2">
-                Prediksi dihitung menggunakan konstanta harmonik yang ditemukan dari data input. Akurasi sangat bergantung pada panjang data input (ideal minimal 15-30 hari) dan kualitas pembersihan data awal.
+                Prediksi dihitung menggunakan konstanta harmonik yang dihitung dari data input. Akurasi sangat bergantung pada panjang data input (ideal minimal 15-30 hari) dan kualitas pembersihan data awal.
              </p>
           </div>
         </div>
