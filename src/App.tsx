@@ -3173,9 +3173,9 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
           </div>
       </div>
 
-      <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] p-6 pt-10 shadow-sm relative">
-        <div className="relative mb-8 flex justify-center items-center">
-          <h3 className="text-2xl font-black text-slate-800 px-2 font-display text-center">{title}</h3>
+      <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] pb-[10px] pt-[40px] mt-0 p-6 shadow-sm relative">
+        <div className="relative mb-[30px] pl-0 flex justify-center items-center">
+          <h3 className="text-2xl font-black text-slate-800 px-2 font-display text-center ml-0 mt-[29px] pl-2 mb-[22px]">{title}</h3>
           <div className="absolute right-0 -top-4 flex gap-2 export-exclude">
             <button 
                 onClick={onReset}
@@ -3205,7 +3205,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <button onClick={() => handleDownload('pdf')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
           </div>
         </div>
-        <div className="relative h-[580px] w-full group bg-white pt-2 pb-4">
+        <div className="relative h-[530px] w-full mt-[-5px] group bg-white pt-2 pb-4">
           {dragAction === 'delete' && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-rose-50 border border-rose-200 px-4 py-2 rounded-full shadow-lg z-20 flex items-center gap-2 animate-in slide-in-from-top duration-300">
                <Trash2 size={16} className="text-rose-600" />
@@ -3225,6 +3225,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
           </div>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart 
+                className="ml-0 mt-[-42px] pl-0 pt-0"
                 data={displayData} 
                 margin={{ bottom: 40, left: 30, right: 20, top: 40 }} 
                 style={{ cursor: dragAction === 'delete' ? 'copy' : 'crosshair', userSelect: 'none' }}
@@ -3472,7 +3473,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         )}
 
         <div className="mt-4 flex items-center gap-2 justify-center">
-             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest">Visual Optimization: Hourly Sampling Active</div>
+             <div style={{ paddingTop: '-11px' }} className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest mt-[-11px]">Visual Optimization: Hourly Sampling Active</div>
         </div>
       </div>
     </div>
