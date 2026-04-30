@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon } from 'lucide-react';
+import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download } from 'lucide-react';
+import { format } from 'date-fns';
 
 export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onDataLoaded: (data: any[], selectedSensorName?: string) => void, onStationMetaLoaded: (name: string, lat: string, lon: string) => void }) {
   const [host, setHost] = useState('10.10.140.19');
@@ -10,10 +11,15 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
   
   const [selectedTable, setSelectedTable] = useState('data_vsat5');
   const [limit, setLimit] = useState(1000);
+  const [stationQuery, setStationQuery] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   
   const [isLoading, setIsLoading] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [connStatus, setConnStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   // Load saved credentials on mount
   useEffect(() => {
@@ -34,11 +40,48 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
     localStorage.setItem('tide_db_credentials', JSON.stringify({ host, port, user, password, database }));
   };
 
-  const handleConnect = async () => {
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    setConnStatus('idle');
+    setError('');
+    saveCredentials();
+
+    try {
+      const res = await fetch('/api/db/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host, port, user, password, database })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setConnStatus('success');
+      } else {
+        setConnStatus('error');
+      }
+    } catch (e) {
+      setConnStatus('error');
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleFetchData = async () => {
     setIsLoading(true);
     setError('');
     setSuccessMsg('');
     saveCredentials();
+
+    let formattedStart = undefined;
+    let formattedEnd = undefined;
+
+    if (startDate) {
+        formattedStart = format(new Date(startDate), 'yyyy-MM-dd HH:mm:ss');
+    }
+    if (endDate) {
+        const endD = new Date(endDate);
+        endD.setHours(23, 59, 59, 999);
+        formattedEnd = format(endD, 'yyyy-MM-dd HH:mm:ss');
+    }
 
     try {
       // First, get station list if we can
@@ -65,14 +108,20 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
       const res = await fetch('/api/db/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host, port, user, password, database, table: selectedTable, limit })
+        body: JSON.stringify({ 
+            host, port, user, password, database, 
+            table: selectedTable, limit,
+            station: stationQuery,
+            startDate: formattedStart,
+            endDate: formattedEnd
+        })
       });
       
       const data = await res.json();
       
       if (data.success) {
         if (!data.data || data.data.length === 0) {
-          setError('Tabel kosong atau tidak ditemukan.');
+          setError('Tabel kosong atau tidak ditemukan data yang sesuai kriteria.');
           setIsLoading(false);
           return;
         }
@@ -151,12 +200,27 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
           </div>
           <div>
             <h1 className="text-2xl font-black text-slate-800 tracking-tight font-display">Koneksi Database MySQL</h1>
-            <p className="text-slate-500 font-medium">Hubungkan aplikasi ke database MySQL untuk menarik data pasang surut secara langsung.</p>
+            <p className="text-slate-500 font-medium">Hubungkan aplikasi ke database MySQL lokal atau cloud untuk menarik data pasang surut.</p>
           </div>
         </div>
 
+        {/* Credentials Section */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-          <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4">Credentials & Server</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest">Credentials & Server</h2>
+            <button 
+              onClick={handleTestConnection}
+              disabled={isTesting}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold tracking-wider uppercase transition-colors ${
+                connStatus === 'success' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' :
+                connStatus === 'error' ? 'bg-red-100 text-red-700 hover:bg-red-200' :
+                'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              {isTesting ? <RotateCw className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
+              {isTesting ? 'Testing...' : connStatus === 'success' ? 'Connected' : connStatus === 'error' ? 'Failed' : 'Connect'}
+            </button>
+          </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -182,8 +246,9 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
           </div>
         </div>
 
+        {/* Query Target Section */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-          <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4">Query Target</h2>
+          <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4">Query to Database</h2>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -202,17 +267,42 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
             </div>
             
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Jumlah Data (Limit)</label>
-              <input type="number" min="10" max="50000" value={limit} onChange={e => setLimit(parseInt(e.target.value) || 1000)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
-              <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Data akan diambil secara Descendant (terbaru)</p>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Jumlah Baris Maksimal (Limit)</label>
+              <input type="number" min="10" max="100000" value={limit} onChange={e => setLimit(parseInt(e.target.value) || 1000)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+              <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Limit data yang ditarik per query</p>
             </div>
+            
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filter Nama/ID Stasiun <span className="text-slate-400 font-normal lowercase tracking-normal">(Opsional)</span></label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input type="text" value={stationQuery} onChange={e => setStationQuery(e.target.value)} placeholder="Misal: SBY01" className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Mulai Tanggal <span className="text-slate-400 font-normal lowercase tracking-normal">(Opsional)</span></label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sampai Tanggal <span className="text-slate-400 font-normal lowercase tracking-normal">(Opsional)</span></label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+              </div>
+            </div>
+
           </div>
           
           {error && (
             <div className="mt-6 p-4 rounded-xl bg-red-50 border border-red-100 flex items-start gap-3">
               <AlertCircle className="text-red-500 mt-0.5" size={18} />
               <div>
-                <h4 className="text-sm font-bold text-red-800">Koneksi Gagal</h4>
+                <h4 className="text-sm font-bold text-red-800">Gagal Mengambil Data</h4>
                 <p className="text-xs text-red-600 mt-1">{error}</p>
               </div>
             </div>
@@ -222,7 +312,7 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
             <div className="mt-6 p-4 rounded-xl bg-emerald-50 border border-emerald-100 flex items-start gap-3">
               <CheckCircle2 className="text-emerald-500 mt-0.5" size={18} />
               <div>
-                <h4 className="text-sm font-bold text-emerald-800">Berhasil Terhubung</h4>
+                <h4 className="text-sm font-bold text-emerald-800">Berhasil Ditarik</h4>
                 <p className="text-xs text-emerald-600 mt-1">{successMsg}</p>
               </div>
             </div>
@@ -230,12 +320,12 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
 
           <div className="mt-6 flex justify-end">
             <button 
-              onClick={handleConnect}
+              onClick={handleFetchData}
               disabled={isLoading}
               className="flex items-center gap-2 px-6 py-3 bg-[#1e293b] hover:bg-black text-white rounded-xl text-sm font-black tracking-widest uppercase transition-colors shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              {isLoading ? <RotateCw className="animate-spin" size={18} /> : <Database size={18} />}
-              {isLoading ? "Menghubungkan..." : "Hubungkan & Tarik Data"}
+              {isLoading ? <RotateCw className="animate-spin" size={18} /> : <Download size={18} />}
+              {isLoading ? "Mengambil Data..." : "Import Data"}
             </button>
           </div>
           

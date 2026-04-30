@@ -13,9 +13,33 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
+  // API POST route to test database connection
+  app.post("/api/db/test", async (req, res) => {
+    const { host, port, user, password, database } = req.body;
+    let connection;
+    try {
+      connection = await mysql.createConnection({
+        host,
+        port: parseInt(port, 10),
+        user,
+        password,
+        database
+      });
+      await connection.execute("SELECT 1");
+      res.json({ success: true, message: "Koneksi berhasil." });
+    } catch (error: any) {
+      console.error("Database test error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  });
+
   // API POST route to fetch data from dynamic connection
   app.post("/api/db/connect", async (req, res) => {
-    const { host, port, user, password, database, table, limit } = req.body;
+    const { host, port, user, password, database, table, limit, station, startDate, endDate } = req.body;
     let connection;
     try {
       connection = await mysql.createConnection({
@@ -27,16 +51,34 @@ async function startServer() {
       });
 
       let query = `SELECT * FROM \`${table}\``;
-      
-      // Let's get the standard table format
+      const params: any[] = [];
+      const conditions: string[] = [];
+
       if (table === 'data_vsat5' || table === 'validdata') {
-          // If requested
-          query += ` ORDER BY TimeStamp DESC LIMIT ${limit || 1000}`;
+          if (station && station.trim() !== '') {
+              const stationCol = table === 'data_vsat5' ? 'StationID' : 'StationId'; // Due to schema inconsistencies
+              conditions.push(`\`${stationCol}\` = ?`);
+              params.push(station);
+          }
+          if (startDate) {
+              conditions.push(`TimeStamp >= ?`);
+              params.push(startDate);
+          }
+          if (endDate) {
+              conditions.push(`TimeStamp <= ?`);
+              params.push(endDate);
+          }
+          
+          if (conditions.length > 0) {
+              query += ` WHERE ${conditions.join(' AND ')}`;
+          }
+          
+          query += ` ORDER BY TimeStamp DESC LIMIT ${parseInt(limit) || 1000}`;
       } else if (table === 'stationlist') {
-          query += ` LIMIT ${limit || 1000}`;
+          query += ` LIMIT ${parseInt(limit) || 1000}`;
       }
       
-      const [rows] = await connection.execute(query);
+      const [rows] = await connection.execute(query, params);
       
       res.json({ success: true, data: rows });
     } catch (error: any) {
