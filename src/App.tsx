@@ -70,6 +70,7 @@ interface TideRecord {
   filtered: number;
   interpolated: number;
   isOutlier: boolean;
+  predictedLevel?: number;
   allSamples?: Record<string, number>;
 }
 
@@ -752,6 +753,9 @@ export default function App() {
         else compsToFit = Object.keys(HARMONIC_FREQS); // UTIDE (All 67)
 
         // A. Quick 1st Pass Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
+        // For outlier detection "Jalankan Pembersihan", we strictly use "9 Constants (Standard)" as requested
+        const roughCompsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4']; 
+        
         const validForRough = processed.filter(r => !isNaN(r.raw));
         const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
         const y_vals_raw = validForRough.map(r => r.raw);
@@ -763,12 +767,13 @@ export default function App() {
         let roughZ0 = meanRaw;
         let roughHAT = meanRaw + 3 * stdRaw; // fallback
         let roughLAT = meanRaw - 3 * stdRaw; // fallback
+        let roughSolution: number[] = [];
 
         if (!_isInsufficient) {
-            const roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, compsToFit);
+            roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, roughCompsToFit);
             roughZ0 = roughSolution[0] || meanRaw;
             let roughHatAmpSum = 0;
-            for (let i = 0; i < compsToFit.length; i++) {
+            for (let i = 0; i < roughCompsToFit.length; i++) {
                 const a = roughSolution[1 + 2 * i] || 0;
                 const b = roughSolution[1 + 2 * i + 1] || 0;
                 roughHatAmpSum += Math.sqrt(a * a + b * b);
@@ -782,15 +787,55 @@ export default function App() {
             setDataLengthWarning("Warning: Panjang data Anda kurang dari 29 piantan (hari). Analisis harmonik dan prediksi pasut tidak dapat dilakukan.");
         }
 
-        // B. Mark Outliers (either via statistical Z-score OR being strictly outside HAT/LAT bounds)
+        // Calculate predicted levels based on rough solution to detect outliers (and store in cache)
+        let residualSumX2 = 0;
+        let residualCount = 0;
         
+        // First pass: compute predicted levels and sum of squared residuals
+        processed.forEach(r => {
+            const tHour = (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
+            let predictedLevel = roughZ0;
+            if (!_isInsufficient && roughSolution.length > 0) {
+                for (let i = 0; i < roughCompsToFit.length; i++) {
+                    const comp = roughCompsToFit[i];
+                    const freq = HARMONIC_FREQS[comp]?.f || 0;
+                    const a = roughSolution[1 + 2 * i] || 0;
+                    const b = roughSolution[1 + 2 * i + 1] || 0;
+                    const arg = 2 * Math.PI * freq * tHour;
+                    predictedLevel += a * Math.cos(arg) + b * Math.sin(arg);
+                }
+            }
+            (r as any).predictedLevel = predictedLevel; // cache the predicted level
+            
+            if (!isNaN(r.raw)) {
+                const res = r.raw - predictedLevel;
+                residualSumX2 += res * res;
+                residualCount++;
+            }
+        });
+        
+        const stdResidual = residualCount > 0 ? Math.sqrt(residualSumX2 / residualCount) : stdRaw;
+
         processed = processed.map(r => {
             if (isNaN(r.raw)) {
                 return { ...r, isOutlier: true };
             }
             // B. Apply Outlier Detection
-            const isStatOutlier = Math.abs(r.raw - meanRaw) > (zThreshold * stdRaw);
-            const isHarmonicOutlier = r.raw > roughHAT || r.raw < roughLAT;
+            const predictedLevel = (r as any).predictedLevel;
+            const residual = Math.abs(r.raw - predictedLevel);
+            let isStatOutlier = false;
+            let isHarmonicOutlier = false;
+            
+            if (!_isInsufficient) {
+                 isHarmonicOutlier = residual > (zThreshold * stdResidual); // use standard deviation of residuals
+            } else {
+                 isStatOutlier = Math.abs(r.raw - meanRaw) > (zThreshold * stdRaw);
+            }
+            
+            // Limit bounds
+            if (r.raw > roughHAT + (zThreshold * stdResidual * 0.5) || r.raw < roughLAT - (zThreshold * stdResidual * 0.5)) {
+                 isHarmonicOutlier = true;
+            }
             
             // Manual Range Check
             let isManualOutlier = false;
