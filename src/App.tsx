@@ -310,6 +310,8 @@ export default function App() {
   const [zThreshold, setZThreshold] = useState(3.0);
   const [manualMin, setManualMin] = useState<number | "">("");
   const [manualMax, setManualMax] = useState<number | "">("");
+  const [isPembersihanActive, setIsPembersihanActive] = useState(false);
+  const [isFilterActive, setIsFilterActive] = useState(false);
   const [filterType, setFilterType] = useState<'ma' | 'median' | 'butterworth'>('ma');
   const [filterWindow, setFilterWindow] = useState(15);
   const [medianWindow, setMedianWindow] = useState(3);
@@ -783,9 +785,27 @@ export default function App() {
         }
         else compsToFit = Object.keys(HARMONIC_FREQS); // UTIDE (All 67)
 
-        // A. Quick 1st Pass Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
-        // For outlier detection "Jalankan Pembersihan", we strictly use "9 Constants (Standard)" as requested
-        const roughCompsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4']; 
+        // A. Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
+        // For outlier detection "Jalankan Pembersihan", we use Auto (Rayleigh & SNR) algorithm to build the cache "predicted"
+        let autoOutlierComps: string[] = [];
+        const rayleighCriterionFreq = 1.0 / durationHoursCheck;
+        const priorityList = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 'Mm', 'Ssa', 'Sa', 'E2', 'La2', 'M3', 'M8', 'MKS2', 'MSqm', 'Mtm', 'N4', 'R2', 'S1'];
+        Object.keys(HARMONIC_FREQS).forEach(k => {
+             if (!priorityList.includes(k)) priorityList.push(k);
+        });
+        priorityList.forEach(c => {
+             if (!HARMONIC_FREQS[c]) return;
+             let canAdd = true;
+             for (let i = 0; i < autoOutlierComps.length; i++) {
+                 if (Math.abs(HARMONIC_FREQS[c].f - HARMONIC_FREQS[autoOutlierComps[i]].f) < rayleighCriterionFreq) {
+                     canAdd = false;
+                     break;
+                 }
+             }
+             if (canAdd) autoOutlierComps.push(c);
+        });
+        
+        const roughCompsToFit = autoOutlierComps; 
         
         const validForRough = processed.filter(r => !isNaN(r.raw));
         const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
@@ -850,6 +870,9 @@ export default function App() {
         processed = processed.map(r => {
             if (isNaN(r.raw)) {
                 return { ...r, isOutlier: true };
+            }
+            if (!isPembersihanActive) {
+                return { ...r, isOutlier: false };
             }
             // B. Apply Outlier Detection
             const predictedLevel = (r as any).predictedLevel;
@@ -932,7 +955,11 @@ export default function App() {
         }
 
         // 3. Low-Pass Filter Logic (Optimized Sliding Window)
-        if (filterType === 'ma') {
+        if (!isFilterActive) {
+            for(let i = 0; i < processed.length; i++) {
+                processed[i].filtered = isNaN(validUnfiltered[i]) ? NaN : parseFloat(cleanedInput[i].toFixed(3));
+            }
+        } else if (filterType === 'ma') {
           const maSamples = Math.max(1, Math.round((useFilterWindow * 60000) / dt));
           const n = cleanedInput.length;
           const filteredArr = new Float64Array(n);
@@ -1429,6 +1456,8 @@ export default function App() {
             }
         }
         setFilterWindow(initialFilterWindow);
+        setIsPembersihanActive(false);
+        setIsFilterActive(false);
 
         runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, [], isDeTiding, combinationSettings, interpolationSettings, false, initialFilterWindow);
         setActiveTab('dashboard');
@@ -2343,6 +2372,8 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                         setInterpolationSettings({ enabled: false, maxGapMinutes: 15 });
                         setValidCache({});
                         setIsFullAnalysisRun(false);
+                        setIsPembersihanActive(false);
+                        setIsFilterActive(false);
                         
                         // Still run raw analysis without any offsets to recompute raw
                         runAnalysis(rawData, selectedSensor, 0, 0, [], isDeTiding, { enabled: false, referenceSensor: '', sourceSensors: [] }, { enabled: false, maxGapMinutes: 15 }, false);
@@ -2371,7 +2402,10 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                       setManualMin={setManualMin}
                       manualMax={manualMax}
                       setManualMax={setManualMax}
-                      onUpdate={() => { runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false); }} 
+                      onUpdate={() => { 
+                          setIsPembersihanActive(true);
+                          runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false); 
+                      }} 
                     />
                     <FilterView 
                        type={filterType}
@@ -2382,7 +2416,10 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                        setMedianWindow={setMedianWindow}
                        cutoff={butterCutoff}
                        setCutoff={setButterCutoff}
-                       onUpdate={() => { runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false); }} 
+                       onUpdate={() => { 
+                          setIsFilterActive(true);
+                          runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false); 
+                       }} 
                     />
                 </div>
             )}
@@ -3097,22 +3134,16 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 </button>
 
                 <div className="flex flex-col gap-2 mt-2">
-                    <label className="flex items-center gap-2 px-2 py-2 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
-                        <input 
-                            type="checkbox" 
-                            checked={interpolationSettings.enabled} 
-                            onChange={(e) => {
-                                const newVal = { ...interpolationSettings, enabled: e.target.checked };
-                                setInterpolationSettings(newVal);
-                                runInterpolation(newVal);
-                            }} 
-                            className="rounded text-rose-900 focus:ring-rose-900 w-3.5 h-3.5"
-                        />
-                        <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-slate-700 leading-tight">Interpolate</span>
-                            <span className="text-[8px] text-rose-800 opacity-60 font-medium tracking-tight">Gap Filling (&le; 15m)</span>
-                        </div>
-                    </label>
+                    <button 
+                        onClick={() => {
+                            const newVal = { ...interpolationSettings, enabled: true };
+                            setInterpolationSettings(newVal);
+                            runInterpolation(newVal);
+                        }}
+                        className="w-full py-2 bg-rose-600 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-rose-700 transition-colors shadow-sm"
+                    >
+                        Hitung Interpolasi
+                    </button>
                 </div>
 
                 <label className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
