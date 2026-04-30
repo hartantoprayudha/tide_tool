@@ -23,7 +23,8 @@ async function startServer() {
         port: parseInt(port, 10),
         user,
         password,
-        database
+        database,
+        dateStrings: true
       });
       await connection.execute("SELECT 1");
       res.json({ success: true, message: "Koneksi berhasil." });
@@ -47,7 +48,8 @@ async function startServer() {
         port: parseInt(port, 10),
         user,
         password,
-        database
+        database,
+        dateStrings: true
       });
 
       let query = `SELECT * FROM \`${table}\``;
@@ -98,7 +100,8 @@ async function startServer() {
         port: parseInt(port, 10),
         user,
         password,
-        database
+        database,
+        dateStrings: true
       });
 
       const [rows] = await connection.execute(query, params || []);

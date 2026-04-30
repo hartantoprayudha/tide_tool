@@ -155,8 +155,14 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
           if (row.StationID) stationIdFound = row.StationID;
           if (row.StationId) stationIdFound = row.StationId; // Case variation in ValidData table
           
-          // Map TimeStamp
-          newRow['Timestamp'] = row.TimeStamp || row.Timestamp;
+          // Map TimeStamp, format precisely to 'yyyy-MM-dd HH:mm:ss' to make it bulletproof
+          let rawTs = row.TimeStamp || row.Timestamp;
+          if (rawTs) {
+             const tsStr = String(rawTs);
+             // Ensure it has standard SQL datetime format yyyy-MM-dd HH:mm:ss
+             // If it's something like "2024-05-18 12:05:00", don't change
+             newRow['Timestamp'] = tsStr;
+          }
           
           // Determine generic sensor columns from row keys. Exclude RecId, StationID, TimeStamp, ErCd...
           const excludeKeys = ['RecId', 'StationID', 'StationId', 'TimeStamp', 'Timestamp', 'CreateData', 'CreateBy', 'Last_Update', 'UpdateBy', 'Prediction', 'Source', 'Operator', 'Remark', 'Interpolation'];
