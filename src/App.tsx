@@ -3654,7 +3654,7 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, onCalc
                 <Piano size={32} />
              </div>
              <div className="max-w-[320px]">
-                <h4 className="text-md font-black text-slate-800 uppercase tracking-tight">Menunggu Analisis Harmoni</h4>
+                <h4 className="text-md font-black text-slate-800 uppercase tracking-tight">Hitung Konstanta Harmonik</h4>
                 <p className="text-[11px] text-slate-500 mt-2 font-medium leading-relaxed">Pilih constituent set yang diinginkan, kemudian klik tombol <span className="font-bold text-slate-800 italic underline decoration-sky-300">"Hitung Konstanta Harmonik"</span> di atas untuk memulai kalkulasi least squares.</p>
              </div>
           </div>
