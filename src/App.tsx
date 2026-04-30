@@ -538,11 +538,12 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings, forceFullAnalysis: boolean = isFullAnalysisRun) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings, forceFullAnalysis: boolean = isFullAnalysisRun, overrideFilterWindow?: number) => {
     if (!rawRows.length) return;
     if (isProcessing.current) return;
     const currentSensor = sensorToUse || selectedSensor;
     if (!currentSensor) return;
+    const useFilterWindow = overrideFilterWindow ?? filterWindow;
 
     isProcessing.current = true;
     setIsLoading(true);
@@ -932,7 +933,7 @@ export default function App() {
 
         // 3. Low-Pass Filter Logic (Optimized Sliding Window)
         if (filterType === 'ma') {
-          const maSamples = Math.max(1, Math.round((filterWindow * 60000) / dt));
+          const maSamples = Math.max(1, Math.round((useFilterWindow * 60000) / dt));
           const n = cleanedInput.length;
           const filteredArr = new Float64Array(n);
           
@@ -1417,7 +1418,19 @@ export default function App() {
         setRawData(mergedData);
         setModifiers([]); // Reset modifiers on new file load
         setIsFullAnalysisRun(false);
-        runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, [], isDeTiding, combinationSettings, interpolationSettings, false);
+        let initialFilterWindow = 15;
+        if (mergedData.length > 1) {
+            const ts1 = new Date(mergedData[0]['Timestamp'] || mergedData[0][0]).getTime();
+            const ts2 = new Date(mergedData[1]['Timestamp'] || mergedData[1][0]).getTime();
+            if (!isNaN(ts1) && !isNaN(ts2)) {
+                const diffMins = Math.round(Math.abs(ts2 - ts1) / 60000);
+                if (diffMins >= 60) initialFilterWindow = 60;
+                else initialFilterWindow = 15;
+            }
+        }
+        setFilterWindow(initialFilterWindow);
+
+        runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, [], isDeTiding, combinationSettings, interpolationSettings, false, initialFilterWindow);
         setActiveTab('dashboard');
         setShowMetadataModal(true);
       } catch (err) {
@@ -2273,11 +2286,24 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                       setRecords([]);
                       setValidCache({});
                       
-                      runAnalysis(data, selectedSensorName || columns[0] || "", verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false);
+                      let initialFilterWindow = 15;
+                      if (data.length > 1) {
+                          const ts1 = new Date(data[0]['Timestamp'] || data[0][0]).getTime();
+                          const ts2 = new Date(data[1]['Timestamp'] || data[1][0]).getTime();
+                          if (!isNaN(ts1) && !isNaN(ts2)) {
+                              const diffMins = Math.round(Math.abs(ts2 - ts1) / 60000);
+                              if (diffMins >= 60) initialFilterWindow = 60;
+                              else initialFilterWindow = 15;
+                          }
+                      }
+                      setFilterWindow(initialFilterWindow);
+
+                      runAnalysis(data, selectedSensorName || columns[0] || "", verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false, initialFilterWindow);
                       setActiveTab('dashboard');
                   }} 
                   onStationMetaLoaded={(name, lat, lon) => {
                       stationNameRef.current = name;
+                      if (name) setChartTitle(name);
                       stationLatRef.current = lat;
                       stationLonRef.current = lon;
                   }}
@@ -2436,7 +2462,12 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                           </div>
                       </div>
                       <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
-                          <button onClick={() => setShowMetadataModal(false)} className="px-6 py-2 bg-[#0284c7] hover:bg-sky-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors">
+                          <button onClick={() => {
+                              if (stationNameRef.current) {
+                                  setChartTitle(stationNameRef.current);
+                              }
+                              setShowMetadataModal(false);
+                          }} className="px-6 py-2 bg-[#0284c7] hover:bg-sky-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors">
                               Selesai
                           </button>
                       </div>
@@ -3591,13 +3622,12 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
                   <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Window Size (Menit)</h4>
                   <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest mt-1">Standar BIG: 15 / 30 Menit</p>
                 </div>
-                <span className="text-2xl font-black text-[#0284c7] font-mono">{window}m</span>
               </div>
               <input 
-                type="range" min="5" max="120" step="5" 
+                type="number" min="1"
                 value={window} 
-                onChange={(e) => setWindow(parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+                onChange={(e) => setWindow(parseInt(e.target.value) || 0)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
               />
             </div>
           )}
