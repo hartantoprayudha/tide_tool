@@ -39,7 +39,7 @@ async function startServer() {
 
   // API POST route to fetch data from dynamic connection
   app.post("/api/db/connect", async (req, res) => {
-    const { host, port, user, password, database, table, limit, station, startDate, endDate } = req.body;
+    const { host, port, user, password, database, table, station, startDate, endDate } = req.body;
     let connection;
     try {
       connection = await mysql.createConnection({
@@ -73,9 +73,7 @@ async function startServer() {
               query += ` WHERE ${conditions.join(' AND ')}`;
           }
           
-          query += ` ORDER BY TimeStamp DESC LIMIT ${parseInt(limit) || 1000}`;
-      } else if (table === 'stationlist') {
-          query += ` LIMIT ${parseInt(limit) || 1000}`;
+          query += ` ORDER BY TimeStamp DESC`;
       }
       
       const [rows] = await connection.execute(query, params);

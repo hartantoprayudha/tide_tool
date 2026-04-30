@@ -10,7 +10,6 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
   const [database, setDatabase] = useState('bako');
   
   const [selectedTable, setSelectedTable] = useState('data_vsat5');
-  const [limit, setLimit] = useState(1000);
   const [stationQuery, setStationQuery] = useState('');
   const [stationSearch, setStationSearch] = useState('');
   const [isStationDropdownOpen, setIsStationDropdownOpen] = useState(false);
@@ -100,7 +99,6 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
     }
     if (endDate) {
         const endD = new Date(endDate);
-        endD.setHours(23, 59, 59, 999);
         formattedEnd = format(endD, 'yyyy-MM-dd HH:mm:ss');
     }
 
@@ -131,7 +129,7 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
             host, port, user, password, database, 
-            table: selectedTable, limit,
+            table: selectedTable,
             station: stationQuery,
             startDate: formattedStart,
             endDate: formattedEnd
@@ -287,12 +285,6 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
               </div>
             </div>
             
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Jumlah Baris Maksimal (Limit)</label>
-              <input type="number" min="10" max="100000" value={limit} onChange={e => setLimit(parseInt(e.target.value) || 1000)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
-              <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Limit data yang ditarik per query</p>
-            </div>
-            
             <div className="md:col-span-2 relative">
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filter Nama/ID Stasiun <span className="text-slate-400 font-normal lowercase tracking-normal">(Opsional)</span></label>
               
@@ -351,19 +343,19 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
               )}
             </div>
 
-            <div>
+            <div className="md:col-span-1">
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Mulai Tanggal <span className="text-slate-400 font-normal lowercase tracking-normal">(Opsional)</span></label>
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+                <input type="datetime-local" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
               </div>
             </div>
 
-            <div>
+            <div className="md:col-span-1">
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sampai Tanggal <span className="text-slate-400 font-normal lowercase tracking-normal">(Opsional)</span></label>
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+                <input type="datetime-local" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
               </div>
             </div>
 
