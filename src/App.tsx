@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   LayoutDashboard, 
+  Database,
   Search, 
   Radio, 
   Piano, 
@@ -27,6 +28,7 @@ import {
   BookOpen,
   Map as MapIcon
 } from 'lucide-react';
+import ConnectView from './ConnectView';
 import SummarizeView from './SummarizeView';
 
 import { 
@@ -1960,7 +1962,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
         </button>
         
         <nav className="flex-1 space-y-1">
-          {['dashboard', 'validate', 'harmonic', 'predictions', 'summarize', 'about'].map((tab) => (
+          {['dashboard', 'connect', 'validate', 'harmonic', 'predictions', 'summarize', 'about'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1972,6 +1974,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
               )}
             >
               {tab === 'dashboard' && <LayoutDashboard size={18} />}
+              {tab === 'connect' && <Database size={18} />}
               {tab === 'validate' && <Search size={18} />}
               {tab === 'harmonic' && <Piano size={18} />}
               {tab === 'predictions' && <TrendingUp size={18} />}
@@ -2181,7 +2184,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             </div>
         )}
 
-        {!records.length && (activeTab !== 'readme' && activeTab !== 'about' && activeTab !== 'summarize') ? (
+        {!records.length && (activeTab !== 'readme' && activeTab !== 'about' && activeTab !== 'summarize' && activeTab !== 'connect') ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-2xl border border-[#e2e8f0] p-12 text-center gap-6 shadow-sm">
             <div className="w-20 h-20 bg-sky-50 rounded-3xl flex items-center justify-center text-[#0284c7] rotate-3 hover:rotate-0 transition-transform duration-300">
               <Waves size={40} />
@@ -2226,6 +2229,32 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                 </div>
             )}
             {activeTab === 'summarize' && <SummarizeView />}
+            {activeTab === 'connect' && (
+                <ConnectView 
+                  onDataLoaded={(data, selectedSensorName) => {
+                      setRawData(data);
+                      const columns = Object.keys(data[0]).filter(k => k !== 'Timestamp' && k !== 'RecId');
+                      setAvailableSensors(columns);
+                      if (selectedSensorName && columns.includes(selectedSensorName)) {
+                          setSelectedSensor(selectedSensorName);
+                      } else if (columns.length > 0) {
+                          setSelectedSensor(columns[0]);
+                      }
+                      setVisibleSensors(columns);
+                      setIsFullAnalysisRun(false);
+                      setRecords([]);
+                      setValidCache({});
+                      
+                      runAnalysis(data, selectedSensorName || columns[0] || "", verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false);
+                      setActiveTab('dashboard');
+                  }} 
+                  onStationMetaLoaded={(name, lat, lon) => {
+                      stationNameRef.current = name;
+                      stationLatRef.current = lat;
+                      stationLonRef.current = lon;
+                  }}
+                />
+            )}
             {activeTab === 'dashboard' && records.length > 0 && (
                 <DashboardView 
                     records={records} 
