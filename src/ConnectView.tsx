@@ -158,9 +158,13 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
           // Map TimeStamp, format precisely to 'yyyy-MM-dd HH:mm:ss' to make it bulletproof
           let rawTs = row.TimeStamp || row.Timestamp;
           if (rawTs) {
-             const tsStr = String(rawTs);
-             // Ensure it has standard SQL datetime format yyyy-MM-dd HH:mm:ss
-             // If it's something like "2024-05-18 12:05:00", don't change
+             let tsStr = "";
+             if (rawTs instanceof Date) {
+                 // Format manually to standard SQL format
+                 tsStr = format(rawTs, 'yyyy-MM-dd HH:mm:ss');
+             } else {
+                 tsStr = String(rawTs);
+             }
              newRow['Timestamp'] = tsStr;
           }
           
@@ -187,7 +191,11 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
         });
 
         // Ensure sorted chronologically (DB usually descendant for LIMIT if we want latest, but script expects chronological)
-        mappedData.sort((a: any, b: any) => new Date(a.Timestamp).getTime() - new Date(b.Timestamp).getTime());
+        mappedData.sort((a: any, b: any) => {
+            const tsA = typeof a.Timestamp === 'string' ? a.Timestamp : String(a.Timestamp || '');
+            const tsB = typeof b.Timestamp === 'string' ? b.Timestamp : String(b.Timestamp || '');
+            return tsA.localeCompare(tsB);
+        });
 
         // Call station meta loader if we found a station ID and mapping
         if (stationIdFound && stationMap[stationIdFound]) {

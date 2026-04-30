@@ -559,31 +559,46 @@ export default function App() {
         let processed: TideRecord[] = [];
         for (let i = 0; i < rawRows.length; i++) {
           const row = rawRows[i];
-          let tsStr = (row['Timestamp'] || row[0] || "").trim();
-          let valStr = (row[currentSensor] || "").trim();
+          let tsStr = String(row['Timestamp'] || row[0] || "").trim();
+          let valStr = String(row[currentSensor] ?? "").trim();
           tsStr = tsStr.replace(/\s+/g, ' ');
 
           let dateObj: Date = new Date(NaN);
-          for (const fmt of fmts) {
-            const p = parse(tsStr, fmt, new Date());
-            if (isValid(p)) {
-              dateObj = p;
-              break;
-            }
-          }
-
-          if (!isValid(dateObj)) dateObj = new Date(tsStr);
-          if (!isValid(dateObj)) continue;
           
-          // Interpret input components as UTC time directly
-          dateObj = new Date(Date.UTC(
-              dateObj.getFullYear(),
-              dateObj.getMonth(),
-              dateObj.getDate(),
-              dateObj.getHours(),
-              dateObj.getMinutes(),
-              dateObj.getSeconds()
-          ));
+          // FAST PATH: Check SQL-like / ISO timestamps (e.g. 2024-05-18 15:30:00)
+          const sqlMatch = tsStr.match(/^(\d{4})[-\/](\d{2})[-\/](\d{2})(?:T|\s)(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z)?$/);
+          if (sqlMatch) {
+              dateObj = new Date(Date.UTC(
+                  parseInt(sqlMatch[1], 10),
+                  parseInt(sqlMatch[2], 10) - 1,
+                  parseInt(sqlMatch[3], 10),
+                  parseInt(sqlMatch[4], 10),
+                  parseInt(sqlMatch[5], 10),
+                  sqlMatch[6] ? parseInt(sqlMatch[6], 10) : 0
+              ));
+          } else {
+              // SLOW PATH: date-fns parsing
+              for (const fmt of fmts) {
+                const p = parse(tsStr, fmt, new Date());
+                if (isValid(p)) {
+                  dateObj = p;
+                  break;
+                }
+              }
+    
+              if (!isValid(dateObj)) dateObj = new Date(tsStr);
+              if (!isValid(dateObj)) continue;
+              
+              // Interpret input components as UTC time directly
+              dateObj = new Date(Date.UTC(
+                  dateObj.getFullYear(),
+                  dateObj.getMonth(),
+                  dateObj.getDate(),
+                  dateObj.getHours(),
+                  dateObj.getMinutes(),
+                  dateObj.getSeconds()
+              ));
+          }
 
           const unmodifiedDateMs = dateObj.getTime();
           if (tOffset !== 0) {
@@ -593,9 +608,15 @@ export default function App() {
           const allSamples: Record<string, number> = {};
           for (let sIdx = 0; sIdx < availableSensors.length; sIdx++) {
               const s = availableSensors[sIdx];
-              const sValStr = (row[s] || "").trim();
+              const rawS = row[s];
+              let sValRaw: number;
+              if (typeof rawS === 'number') {
+                  sValRaw = rawS;
+              } else {
+                  sValRaw = parseFloat(String(rawS ?? "").trim().replace(',', '.'));
+              }
               const isCm = s.toLowerCase().includes('(cm)');
-              let sValRaw = parseFloat(sValStr.replace(',', '.'));
+
               if (sValRaw === 999 || sValRaw === -999 || sValRaw < -200 || sValRaw > 900) sValRaw = NaN;
               if (isCm && !isNaN(sValRaw)) sValRaw = sValRaw / 100;
               
@@ -614,7 +635,14 @@ export default function App() {
               }
           }
 
-          let valRaw = parseFloat(valStr.replace(',', '.'));
+          const rawVal = row[currentSensor];
+          let valRaw: number;
+          if (typeof rawVal === 'number') {
+              valRaw = rawVal;
+          } else {
+              valRaw = parseFloat(String(rawVal ?? "").trim().replace(',', '.'));
+          }
+
           if (valRaw === 999 || valRaw === -999 || valRaw < -200 || valRaw > 900) valRaw = NaN;
           
           if (isCurrentCm && !isNaN(valRaw)) valRaw = valRaw / 100;
