@@ -3157,9 +3157,12 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
               <XAxis 
                 dataKey="timeMs" 
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM HH:mm')}
                 tick={{fontSize: 9, fill:'#64748b'}} 
-                interval={Math.floor(displayData.length/12)} 
+                minTickGap={30}
                 axisLine={false} 
                 tickMargin={10}
                 height={65}
@@ -3930,9 +3933,12 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis 
                 dataKey="timeMs" 
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
                 tick={{fontSize: 9, fill: '#64748b'}} 
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM/yyyy')}
-                interval={Math.floor(displayPreds.length/12)} 
+                minTickGap={30}
                 axisLine={false} 
               />
               <YAxis 
