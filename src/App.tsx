@@ -2348,6 +2348,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     availableSensors={availableSensors}
                     selectedSensor={selectedSensor}
                     rawData={rawData}
+                    validCache={validCache}
                     runAnalysis={runAnalysis}
                     setRecords={setRecords}
                     visibleSensors={visibleSensors}
@@ -2693,7 +2694,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
   const [vZoom, setVZoom] = useState(1);
@@ -2741,10 +2742,12 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     // 2. Filter data by domain (if zoomed)
     let filteredRecords = records;
     if (zoomDomain) {
-      filteredRecords = records.filter(r => {
+      filteredRecords = records.map((r, i) => ({ ...r, originalIndex: i })).filter((r: any) => {
         const t = r.timestamp.getTime();
         return t >= startMs && t <= endMs;
       });
+    } else {
+      filteredRecords = records.map((r, i) => ({ ...r, originalIndex: i }));
     }
 
     // 3. Sample the filtered data
@@ -3478,9 +3481,10 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                                                 hide={hiddenLines[lineName]}
                                                 type="monotone" 
                                                 dataKey={(d: any) => {
-                                                    if (!d.allSamples) return null;
-                                                    const v1 = d.allSamples[s1];
-                                                    const v2 = d.allSamples[s2];
+                                                    if (!validCache) return null;
+                                                    const idx = d.originalIndex;
+                                                    const v1 = validCache[s1]?.[idx];
+                                                    const v2 = validCache[s2]?.[idx];
                                                     if (typeof v1 === 'number' && !isNaN(v1) && typeof v2 === 'number' && !isNaN(v2)) {
                                                         return v1 - v2;
                                                     }
