@@ -291,6 +291,7 @@ export default function App() {
   const [selectedSensor, setSelectedSensor] = useState('');
   const [visibleSensors, setVisibleSensors] = useState<string[]>([]);
   const [constituentSet, setConstituentSet] = useState<'4' | '9' | 'IHO23' | 'FES2014' | 'UTIDE' | 'AUTO'>('9');
+  const [harmonicMethod, setHarmonicMethod] = useState<'ols' | 'fft'>('ols');
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
   const [timeOffset, setTimeOffset] = useState<number>(0);
@@ -540,7 +541,7 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings, forceFullAnalysis: boolean = isFullAnalysisRun, overrideFilterWindow?: number) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings, forceFullAnalysis: boolean = isFullAnalysisRun, overrideFilterWindow?: number, method: 'ols' | 'fft' = harmonicMethod) => {
     if (!rawRows.length) return;
     if (isProcessing.current) return;
     const currentSensor = sensorToUse || selectedSensor;
@@ -1082,53 +1083,94 @@ export default function App() {
             // Detrend the data
             const y_detrended = y_vals.map((y, i) => y - (unifiedSlope * t_hours[i]));
 
-            const solution = solveLeastSquares(t_hours, y_detrended, compsToFit);
-            fittedZ0 = solution[0] || meanRaw;
-            
-            // Calculate residuals for ANOVA/SNR
-            let residualVariance = 0;
-            if (constituentSet === 'AUTO') {
-               let sumResSq = 0;
-               for (let i = 0; i < t_hours.length; i++) {
-                   let fitVal = fittedZ0;
-                   for (let j = 0; j < compsToFit.length; j++) {
-                       const a = solution[1 + 2 * j] || 0;
-                       const b = solution[1 + 2 * j + 1] || 0;
-                       const phaseArg = 2 * Math.PI * HARMONIC_FREQS[compsToFit[j]].f * t_hours[i];
-                       fitVal += a * Math.cos(phaseArg) + b * Math.sin(phaseArg);
-                   }
-                   sumResSq += Math.pow(y_detrended[i] - fitVal, 2);
-               }
-               residualVariance = sumResSq / Math.max(1, t_hours.length - compsToFit.length * 2 - 1);
-            }
-            
-            let snrPassedCount = 0;
-            
-            results = compsToFit.map((c, i) => {
-                const a = solution[1 + 2 * i] || 0;
-                const b = solution[1 + 2 * i + 1] || 0;
-                const amp = Math.sqrt(a * a + b * b);
-                let phase = Math.atan2(b, a) * (180 / Math.PI);
-                if (phase < 0) phase += 360;
+            let solution: number[] = [];
+            fittedZ0 = meanRaw;
+
+            if (method === 'fft') {
+                let snrPassedCount = 0;
+                results = compsToFit.map((c, i) => {
+                    let sumCos = 0;
+                    let sumSin = 0;
+                    const f = HARMONIC_FREQS[c].f;
+                    for (let j = 0; j < n; j++) {
+                        const arg = 2 * Math.PI * f * t_hours[j];
+                        sumCos += y_detrended[j] * Math.cos(arg);
+                        sumSin += y_detrended[j] * Math.sin(arg);
+                    }
+                    const a = (2 / n) * sumCos;
+                    const b = (2 / n) * sumSin;
+                    const amp = Math.sqrt(a * a + b * b);
+                    let phase = Math.atan2(b, a) * (180 / Math.PI);
+                    if (phase < 0) phase += 360;
+                    
+                    if (constituentSet === 'AUTO') {
+                        // pseudo-SNR check for FFT
+                        const snr = (amp * amp) / (n * 0.001); // simplified threshold
+                        if (snr > 2) snrPassedCount++;
+                    }
+                    
+                    return {
+                        comp: c,
+                        amp,
+                        phase,
+                        desc: HARMONIC_FREQS[c].d,
+                        freq: f,
+                        snr: constituentSet === 'AUTO' ? (amp*amp) : undefined
+                    };
+                });
+
+                if (constituentSet === 'AUTO') {
+                    setAutoDiagnostics(prev => prev ? { ...prev, snrPassed: snrPassedCount } : null);
+                }
+            } else {
+                solution = solveLeastSquares(t_hours, y_detrended, compsToFit);
+                fittedZ0 = solution[0] || meanRaw;
                 
-                let snr = 0;
-                if (constituentSet === 'AUTO' && residualVariance > 0) {
-                    snr = (amp * amp / 2) / (residualVariance / t_hours.length);
-                    if (snr > 2) snrPassedCount++; // Conventional significance threshold
+                // Calculate residuals for ANOVA/SNR
+                let residualVariance = 0;
+                if (constituentSet === 'AUTO') {
+                   let sumResSq = 0;
+                   for (let i = 0; i < t_hours.length; i++) {
+                       let fitVal = fittedZ0;
+                       for (let j = 0; j < compsToFit.length; j++) {
+                           const a = solution[1 + 2 * j] || 0;
+                           const b = solution[1 + 2 * j + 1] || 0;
+                           const phaseArg = 2 * Math.PI * HARMONIC_FREQS[compsToFit[j]].f * t_hours[i];
+                           fitVal += a * Math.cos(phaseArg) + b * Math.sin(phaseArg);
+                       }
+                       sumResSq += Math.pow(y_detrended[i] - fitVal, 2);
+                   }
+                   residualVariance = sumResSq / Math.max(1, t_hours.length - compsToFit.length * 2 - 1);
                 }
                 
-                return {
-                  comp: c,
-                  amp,
-                  phase,
-                  desc: HARMONIC_FREQS[c].d,
-                  freq: HARMONIC_FREQS[c].f,
-                  snr: constituentSet === 'AUTO' ? snr : undefined
-                };
-            });
-            
-            if (constituentSet === 'AUTO') {
-                setAutoDiagnostics(prev => prev ? { ...prev, snrPassed: snrPassedCount } : null);
+                let snrPassedCount = 0;
+                
+                results = compsToFit.map((c, i) => {
+                    const a = solution[1 + 2 * i] || 0;
+                    const b = solution[1 + 2 * i + 1] || 0;
+                    const amp = Math.sqrt(a * a + b * b);
+                    let phase = Math.atan2(b, a) * (180 / Math.PI);
+                    if (phase < 0) phase += 360;
+                    
+                    let snr = 0;
+                    if (constituentSet === 'AUTO' && residualVariance > 0) {
+                        snr = (amp * amp / 2) / (residualVariance / t_hours.length);
+                        if (snr > 2) snrPassedCount++; // Conventional significance threshold
+                    }
+                    
+                    return {
+                      comp: c,
+                      amp,
+                      phase,
+                      desc: HARMONIC_FREQS[c].d,
+                      freq: HARMONIC_FREQS[c].f,
+                      snr: constituentSet === 'AUTO' ? snr : undefined
+                    };
+                });
+                
+                if (constituentSet === 'AUTO') {
+                    setAutoDiagnostics(prev => prev ? { ...prev, snrPassed: snrPassedCount } : null);
+                }
             }
         }
 
@@ -2431,9 +2473,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     rmse={rmseVal} 
                     constituentSet={constituentSet}
                     setConstituentSet={setConstituentSet}
+                    harmonicMethod={harmonicMethod}
+                    setHarmonicMethod={setHarmonicMethod}
                     onCalculate={() => { 
                         setIsFullAnalysisRun(true); 
-                        runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true); 
+                        runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true, undefined, harmonicMethod); 
                     }}
                     isCalculating={isLoading}
                     autoDiagnostics={autoDiagnostics}
@@ -3789,7 +3833,7 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
   );
 }
 
-function HarmonicView({ results, rmse, constituentSet, setConstituentSet, onCalculate, isCalculating, autoDiagnostics, isDeTiding, setIsDeTiding }: any) {
+function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmonicMethod, setHarmonicMethod, onCalculate, isCalculating, autoDiagnostics, isDeTiding, setIsDeTiding }: any) {
   const handleDownloadCSV = () => {
     if (!results || results.length === 0) return;
     let csv = "Component,Definition,Frequency (cph),Amplitude (m),Phase (deg)\n";
@@ -3802,8 +3846,8 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, onCalc
 
   return (
     <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm overflow-hidden flex flex-col gap-6">
-       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end gap-6">
-          <div className="flex-1">
+       <div className="flex flex-col gap-4 w-full">
+          <div className="w-full border-b border-slate-100 pb-3">
               <h3 className="text-lg font-black text-slate-800 px-2 font-display">Analisis Konstanta Harmonik</h3>
               {rmse !== undefined && rmse !== null && results.length > 0 && (
                   <div className="px-2 mt-1">
@@ -3813,7 +3857,19 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, onCalc
               )}
           </div>
           
-          <div className="flex flex-wrap items-end gap-3 w-full xl:w-auto">
+          <div className="flex flex-wrap items-end gap-3 w-full">
+             <div className="flex flex-col gap-1.5 min-w-[200px]">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Metode Analisis</label>
+                <select 
+                  value={harmonicMethod}
+                  onChange={(e) => setHarmonicMethod(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
+                >
+                  <option value="ols">Ordinary Least Squares (UTide)</option>
+                  <option value="fft">Fast Fourier Transform (FFT)</option>
+                </select>
+             </div>
+
              <div className="flex flex-col gap-1.5 min-w-[200px]">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Constituent Set</label>
                 <select 
@@ -3875,7 +3931,7 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, onCalc
              </div>
           </div>
        )}
-
+       
        {results.length > 0 ? (
           <div className="overflow-x-auto rounded-xl border border-slate-100">
             <table className="w-full text-sm text-left">
