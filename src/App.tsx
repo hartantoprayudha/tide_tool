@@ -75,6 +75,8 @@ interface TideRecord {
   predictedLevel?: number;
   allSamples?: Record<string, number>;
   stlTrendVal?: number;
+  ssaTrendVal?: number;
+  robustStlTrendVal?: number;
 }
 
 interface ConstituentResult {
@@ -322,7 +324,7 @@ export default function App() {
   const [rmseVal, setRmseVal] = useState<number | null>(null);
   const isProcessing = useRef(false);
   const [z0, setZ0] = useState(0);
-  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
+  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number }, robustStlTrend?: { slope: number, intercept: number, rateYear: number }, ssaTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
   const [isFullAnalysisRun, setIsFullAnalysisRun] = useState(false);
   const [validCache, setValidCache] = useState<Record<string, number[]>>({});
@@ -1242,12 +1244,14 @@ export default function App() {
             
             const lsqTrend = regTrend;
 
-            // 5c. STL Decomposition-based Trend (Simplified 1-Year Moving Average) for data > 1 year
+            // 5c. Advanced Trends (STL, Robust STL, SSA) for data >= 2 years
             let stlTrendData: ReturnType<typeof calculateTrend> | undefined;
+            let robustStlTrendData: ReturnType<typeof calculateTrend> | undefined;
+            let ssaTrendData: ReturnType<typeof calculateTrend> | undefined;
             const tEnd = processed[processed.length - 1].timestamp.getTime();
             const durationHours = (tEnd - t0) / 3600000;
             
-            if (durationHours > 8760) {
+            if (durationHours >= 17520) { // >= 2 years
                 const dt_ms = (tEnd - t0) / (processed.length - 1);
                 const windowSize = Math.max(1, Math.round((365.25 * 24 * 3600 * 1000) / dt_ms));
                 const halfWindow = Math.floor(windowSize / 2);
@@ -1272,6 +1276,7 @@ export default function App() {
                     }
                 }
                 
+                // Original STL Decomposition (1-Year Moving Average)
                 const stlTrendX: number[] = [];
                 const stlTrendY: number[] = [];
                 let currentSum = 0;
@@ -1307,9 +1312,135 @@ export default function App() {
                 if (stlTrendX.length > 2) {
                     stlTrendData = calculateTrend(stlTrendX, stlTrendY);
                 }
+
+                // Resample yFull to Daily for Robust STL and Iterative SSA
+                const dailyX: number[] = [];
+                const dailyY: number[] = [];
+                let sliceSum = 0;
+                let sliceCount = 0;
+                let curDay = Math.floor((processed[0].timestamp.getTime() - t0) / 86400000);
+
+                for(let i=0; i<yFull.length; i++) {
+                    const day = Math.floor((processed[i].timestamp.getTime() - t0) / 86400000);
+                    if (!isNaN(yFull[i])) {
+                        if(day === curDay) {
+                            sliceSum += yFull[i];
+                            sliceCount++;
+                        } else {
+                            if(sliceCount > 0) {
+                                dailyY.push(sliceSum / sliceCount);
+                                dailyX.push(curDay * 24 + 12);
+                            } else {
+                                dailyY.push(NaN);
+                                dailyX.push(curDay * 24 + 12);
+                            }
+                            while(curDay < day - 1) {
+                                curDay++;
+                                dailyY.push(NaN);
+                                dailyX.push(curDay * 24 + 12);
+                            }
+                            curDay = day;
+                            sliceSum = yFull[i];
+                            sliceCount = 1;
+                        }
+                    }
+                }
+                if(sliceCount > 0) {
+                    dailyY.push(sliceSum / sliceCount);
+                    dailyX.push(curDay * 24 + 12);
+                }
+
+                for(let i=0; i<dailyY.length; i++) {
+                    if(isNaN(dailyY[i])) {
+                        let left = i-1; while(left>=0 && isNaN(dailyY[left])) left--;
+                        let right = i+1; while(right<dailyY.length && isNaN(dailyY[right])) right++;
+                        if(left>=0 && right<dailyY.length) {
+                            dailyY[i] = dailyY[left] + (dailyY[right] - dailyY[left]) * ((i - left) / (right - left));
+                        } else if(left>=0) dailyY[i] = dailyY[left];
+                        else if(right<dailyY.length) dailyY[i] = dailyY[right];
+                        else dailyY[i] = 0;
+                    }
+                }
+
+                // Robust STL (1-Year Moving Median)
+                const robustTrendY: number[] = [];
+                const windowDays = 365;
+                const halfWindowDays = Math.floor(windowDays/2);
+                for(let i=0; i<dailyY.length; i++) {
+                    const start = Math.max(0, i - halfWindowDays);
+                    const end = Math.min(dailyY.length - 1, i + halfWindowDays);
+                    const arr = dailyY.slice(start, end + 1).filter(v => !isNaN(v)).sort((a,b)=>a-b);
+                    robustTrendY.push(arr[Math.floor(arr.length/2)]);
+                }
+                if(dailyX.length > 2) robustStlTrendData = calculateTrend(dailyX, robustTrendY);
+
+                // Iterative SSA (First Principal Component)
+                const L = 365;
+                const N = dailyY.length;
+                const K = N - L + 1;
+                if (K > 0) {
+                    const C = new Float64Array(L * L);
+                    for(let i=0; i<L; i++) {
+                        for(let j=i; j<L; j++) {
+                            let sum = 0;
+                            for(let k=0; k<K; k++) sum += dailyY[i+k] * dailyY[j+k];
+                            C[i*L + j] = sum / K;
+                            C[j*L + i] = C[i*L + j];
+                        }
+                    }
+                    
+                    let v = new Float64Array(L);
+                    v.fill(1.0 / Math.sqrt(L));
+                    for(let iter=0; iter<20; iter++) {
+                        let v_next = new Float64Array(L);
+                        let norm = 0;
+                        for(let i=0; i<L; i++) {
+                            let sum = 0;
+                            for(let j=0; j<L; j++) sum += C[i*L + j] * v[j];
+                            v_next[i] = sum;
+                            norm += sum * sum;
+                        }
+                        norm = Math.sqrt(norm);
+                        if (norm > 0) for(let i=0; i<L; i++) v[i] = v_next[i] / norm;
+                    }
+                    
+                    const PC1 = new Float64Array(K);
+                    for(let k=0; k<K; k++) {
+                        let sum = 0;
+                        for(let i=0; i<L; i++) sum += dailyY[i+k] * v[i];
+                        PC1[k] = sum;
+                    }
+                    
+                    const ssaY = new Float64Array(N);
+                    const countArr = new Float64Array(N);
+                    for(let i=0; i<L; i++) {
+                        for(let j=0; j<K; j++) {
+                            ssaY[i+j] += v[i] * PC1[j];
+                            countArr[i+j]++;
+                        }
+                    }
+                    for(let i=0; i<N; i++) ssaY[i] /= countArr[i];
+                    
+                    if(dailyX.length > 2) ssaTrendData = calculateTrend(dailyX, Array.from(ssaY));
+
+                    // Interpolate back to hourly records for the chart
+                    for(let i=0; i<processed.length; i++) {
+                        const t = (processed[i].timestamp.getTime() - t0) / 3600000;
+                        let dayIdxFloat = (t - 12) / 24;
+                        let idx = Math.floor(dayIdxFloat);
+                        if (idx < 0) idx = 0;
+                        if (idx > N - 2) idx = N - 2;
+                        if (N > 1) {
+                            const d_clamped = Math.max(0, Math.min(1, dayIdxFloat - idx));
+                            processed[i].ssaTrendVal = ssaY[idx] + (ssaY[idx+1] - ssaY[idx]) * d_clamped;
+                        } else if (N === 1) {
+                            processed[i].ssaTrendVal = ssaY[0];
+                        }
+                    }
+                }
             }
 
-            setLinearTrend({ ...regTrend, lsqTrend, stlTrend: stlTrendData });
+            setLinearTrend({ ...regTrend, lsqTrend, stlTrend: stlTrendData, robustStlTrend: robustStlTrendData, ssaTrend: ssaTrendData });
             
             // Calculate RMSE
             let sumSqE = 0, countE = 0;
@@ -2057,6 +2188,12 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
           content += `Method\tRate\tUnit\n`;
           if (linearTrend.stlTrend) {
               content += `STL Decomposition\t${linearTrend.stlTrend.rateYear.toFixed(4)}\tm/year\n`;
+          }
+          if (linearTrend.robustStlTrend) {
+              content += `Robust STL\t${linearTrend.robustStlTrend.rateYear.toFixed(4)}\tm/year\n`;
+          }
+          if (linearTrend.ssaTrend) {
+              content += `Iterative SSA\t${linearTrend.ssaTrend.rateYear.toFixed(4)}\tm/year\n`;
           }
           content += `Linear Regression\t${linearTrend.rateYear.toFixed(4)}\tm/year\n`;
       }
@@ -2870,7 +3007,9 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
       const timeMs = r.timestamp.getTime();
       let trendlineVal = undefined;
       
-      if (trend?.stlTrend) {
+      if (trend?.ssaTrend) {
+        trendlineVal = r.ssaTrendVal !== undefined ? r.ssaTrendVal : undefined;
+      } else if (trend?.stlTrend) {
         trendlineVal = r.stlTrendVal !== undefined ? r.stlTrendVal : undefined;
       } else if (trend) {
         trendlineVal = trend.slope * ((timeMs - t0) / 3600000) + trend.intercept;
@@ -3112,23 +3251,37 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <div className="relative group h-full">
                 <StatCard 
                   label="Sea Level Trend" 
-                  value={`${trend ? ((trend.stlTrend ? trend.stlTrend.rateYear : trend.rateYear) * 1000).toFixed(2) : "0.00"} mm/y`} 
-                  trend={trend?.stlTrend ? "STL Decomposition" : (isDeTiding ? "De-tided Regr" : "Linear Regr")} 
-                  trendColor={trend ? ((trend.stlTrend ? trend.stlTrend.rateYear : trend.rateYear) > 0 ? "text-red-500" : "text-emerald-500") : "text-slate-500"} 
+                  value={`${trend ? (((trend.ssaTrend ? trend.ssaTrend.rateYear : (trend.stlTrend ? trend.stlTrend.rateYear : trend.rateYear))) * 1000).toFixed(2) : "0.00"} mm/y`} 
+                  trend={trend?.ssaTrend ? "Iterative SSA" : (trend?.stlTrend ? "STL Decomposition" : (isDeTiding ? "De-tided Regr" : "Linear Regr"))} 
+                  trendColor={trend ? (((trend.ssaTrend ? trend.ssaTrend.rateYear : (trend.stlTrend ? trend.stlTrend.rateYear : trend.rateYear))) > 0 ? "text-red-500" : "text-emerald-500") : "text-slate-500"} 
                   valueClassName="pl-[3px] pr-[6px]"
                 />
-                <div className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="bg-white shadow-xl border border-slate-200 p-2 rounded-lg text-[9px] font-bold text-slate-500 min-w-[120px]">
-                        <div className="border-b border-slate-100 pb-1 mb-1 text-slate-400 uppercase">Trend Methods</div>
-                        {trend?.stlTrend && (
-                          <div className="flex justify-between items-center gap-2">
-                             <span>STL Trend:</span>
-                             <span className="text-slate-800">{(trend.stlTrend.rateYear * 1000).toFixed(2)} mm/y</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center gap-2">
-                           <span>Regression:</span>
-                           <span className="text-slate-800">{( (trend?.rateYear || 0) * 1000).toFixed(2)} mm/y</span>
+                <div className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none">
+                    <div className="bg-slate-800 shadow-2xl border border-slate-700 p-3 rounded-xl text-[10px] font-medium text-slate-300 min-w-[150px]">
+                        <div className="border-b border-slate-600 pb-1.5 mb-2 text-slate-400 font-bold uppercase tracking-wider">Trend Methods</div>
+                        <div className="space-y-1.5">
+                            {trend?.ssaTrend && (
+                              <div className="flex justify-between items-center gap-3">
+                                 <span>Iterative SSA:</span>
+                                 <span className="text-white font-mono">{(trend.ssaTrend.rateYear * 1000).toFixed(2)} mm/y</span>
+                              </div>
+                            )}
+                            {trend?.robustStlTrend && (
+                              <div className="flex justify-between items-center gap-3">
+                                 <span>Robust STL:</span>
+                                 <span className="text-white font-mono">{(trend.robustStlTrend.rateYear * 1000).toFixed(2)} mm/y</span>
+                              </div>
+                            )}
+                            {trend?.stlTrend && (
+                              <div className="flex justify-between items-center gap-3">
+                                 <span>STL Decomp:</span>
+                                 <span className="text-white font-mono">{(trend.stlTrend.rateYear * 1000).toFixed(2)} mm/y</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between items-center gap-3">
+                               <span>Linear Regr:</span>
+                               <span className="text-white font-mono">{( (trend?.rateYear || 0) * 1000).toFixed(2)} mm/y</span>
+                            </div>
                         </div>
                     </div>
                 </div>
