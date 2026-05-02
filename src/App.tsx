@@ -74,6 +74,7 @@ interface TideRecord {
   isOutlier: boolean;
   predictedLevel?: number;
   allSamples?: Record<string, number>;
+  stlTrendVal?: number;
 }
 
 interface ConstituentResult {
@@ -1088,7 +1089,8 @@ export default function App() {
 
             if (method === 'fft') {
                 let snrPassedCount = 0;
-                results = compsToFit.map((c, i) => {
+                
+                const fftRawResults = compsToFit.map((c, i) => {
                     let sumCos = 0;
                     let sumSin = 0;
                     const f = HARMONIC_FREQS[c].f;
@@ -1103,19 +1105,37 @@ export default function App() {
                     let phase = Math.atan2(b, a) * (180 / Math.PI);
                     if (phase < 0) phase += 360;
                     
-                    if (constituentSet === 'AUTO') {
-                        // pseudo-SNR check for FFT
-                        const snr = (amp * amp) / (n * 0.001); // simplified threshold
-                        if (snr > 2) snrPassedCount++;
+                    return { c, a, b, amp, phase, f };
+                });
+                
+                let residualVariance = 0;
+                if (constituentSet === 'AUTO') {
+                   let sumResSq = 0;
+                   for (let i = 0; i < n; i++) {
+                       let fitVal = fittedZ0; // Since y_detrended doesn't include Z0, actually fitVal should start at 0
+                       for (let j = 0; j < fftRawResults.length; j++) {
+                           const phaseArg = 2 * Math.PI * fftRawResults[j].f * t_hours[i];
+                           fitVal += fftRawResults[j].a * Math.cos(phaseArg) + fftRawResults[j].b * Math.sin(phaseArg);
+                       }
+                       sumResSq += Math.pow(y_detrended[i] - fitVal, 2);
+                   }
+                   residualVariance = sumResSq / Math.max(1, n - fftRawResults.length * 2 - 1);
+                }
+                
+                results = fftRawResults.map(res => {
+                    let snr = 0;
+                    if (constituentSet === 'AUTO' && residualVariance > 0) {
+                        snr = (res.amp * res.amp / 2) / (residualVariance / n);
+                        if (snr > 2) snrPassedCount++; // Conventional significance threshold
                     }
                     
                     return {
-                        comp: c,
-                        amp,
-                        phase,
-                        desc: HARMONIC_FREQS[c].d,
-                        freq: f,
-                        snr: constituentSet === 'AUTO' ? (amp*amp) : undefined
+                        comp: res.c,
+                        amp: res.amp,
+                        phase: res.phase,
+                        desc: HARMONIC_FREQS[res.c].d,
+                        freq: res.f,
+                        snr: constituentSet === 'AUTO' ? snr : undefined
                     };
                 });
 
@@ -1266,8 +1286,10 @@ export default function App() {
                 
                 for (let i = halfWindow; i < yFull.length - halfWindow; i++) {
                     if (currentCount > (windowSize * 0.25)) { // Output if we have at least 25% of data in the window
+                        const val = currentSum / currentCount;
                         stlTrendX.push((processed[i].timestamp.getTime() - t0) / 3600000);
-                        stlTrendY.push(currentSum / currentCount);
+                        stlTrendY.push(val);
+                        processed[i].stlTrendVal = val;
                     }
                     
                     const outgoingIdx = i - halfWindow;
@@ -2846,11 +2868,19 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     for (let i = startIdx; i <= endIdx; i += step) {
       const r = records[i];
       const timeMs = r.timestamp.getTime();
+      let trendlineVal = undefined;
+      
+      if (trend?.stlTrend) {
+        trendlineVal = r.stlTrendVal !== undefined ? r.stlTrendVal : undefined;
+      } else if (trend) {
+        trendlineVal = trend.slope * ((timeMs - t0) / 3600000) + trend.intercept;
+      }
+      
       sampled.push({
         ...r,
         originalIndex: i,
         timeMs,
-        trendline: trend ? (trend.slope * ((timeMs - t0) / 3600000) + trend.intercept) : undefined
+        trendline: trendlineVal
       });
     }
 
@@ -3096,10 +3126,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                              <span className="text-slate-800">{(trend.stlTrend.rateYear * 1000).toFixed(2)} mm/y</span>
                           </div>
                         )}
-                        <div className="flex justify-between items-center gap-2">
-                           <span>Least Square:</span>
-                           <span className="text-slate-800">{( (trend?.lsqTrend?.rateYear || 0) * 1000).toFixed(2)} mm/y</span>
-                        </div>
                         <div className="flex justify-between items-center gap-2">
                            <span>Regression:</span>
                            <span className="text-slate-800">{( (trend?.rateYear || 0) * 1000).toFixed(2)} mm/y</span>
@@ -3516,7 +3542,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.90} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
               <Line hide={hiddenLines.combined} type="monotone" dataKey="combined" stroke="#F5BF03" strokeWidth={2} dot={false} name="Combined" isAnimationActive={false} connectNulls={false} />
               <Line hide={hiddenLines.interpolated} type="monotone" dataKey="interpolated" stroke="#800000" strokeWidth={2} dot={false} name="Interpolated" isAnimationActive={false} connectNulls={false} />
-              <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" isAnimationActive={false} />
+              <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" isAnimationActive={false} connectNulls={false} />
               
               <Brush 
                 dataKey="timeMs" 
