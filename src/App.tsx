@@ -2437,6 +2437,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     }}
                     isCalculating={isLoading}
                     autoDiagnostics={autoDiagnostics}
+                    isDeTiding={isDeTiding}
+                    setIsDeTiding={(val: boolean) => {
+                       setIsDeTiding(val);
+                       runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, val, combinationSettings, interpolationSettings, false);
+                    }}
                  />
               </div>
             )}
@@ -3073,6 +3078,40 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest">Dashboard Controls</h4>
              </div>
              
+             {/* Scaling */}
+             <div className="space-y-2 p-3 bg-sky-50/50 border border-sky-100 rounded-xl">
+                <label className="text-[10px] font-bold text-sky-700">Scaling Correction</label>
+                <div className="grid grid-cols-2 gap-2">
+                    <select 
+                        value={scaleReference} 
+                        onChange={(e) => setScaleReference(e.target.value)}
+                        className="bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-600 outline-none"
+                    >
+                        <option value="">Reference...</option>
+                        {availableSensors.map((s: string) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <select 
+                        value={scaleTarget} 
+                        onChange={(e) => setScaleTarget(e.target.value)}
+                        className="bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-600 outline-none"
+                    >
+                        <option value="">Target...</option>
+                        {availableSensors.map((s: string) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                </div>
+                <div className="flex gap-1.5">
+                    <input 
+                        type="number" step="0.0001"
+                        value={Number.isNaN(scaleFactor) ? '' : scaleFactor}
+                        onChange={(e) => setScaleFactor(parseFloat(e.target.value))}
+                        className="min-w-0 flex-1 bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none"
+                        placeholder="Factor"
+                    />
+                    <button onClick={computeScalingFactor} className="flex-none p-1 px-2 border border-sky-200 text-sky-600 rounded-lg text-[9px] font-extrabold bg-white hover:bg-sky-100 transition-colors" title="Auto Compute Factor">AUTO</button>
+                    <button onClick={applyScaling} className="flex-none p-1 px-3 bg-sky-600 text-white rounded-lg text-[9px] font-extrabold hover:bg-sky-700 transition-colors shadow-sm">FIX</button>
+                </div>
+             </div>
+
              {/* Partial Offset */}
              <div className="space-y-2 p-3 bg-amber-50/50 border border-amber-100 rounded-xl relative">
                 <label className="text-[10px] font-bold text-amber-700 flex items-center justify-between">
@@ -3120,40 +3159,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 </div>
              </div>
 
-             {/* Scaling */}
-             <div className="space-y-2 p-3 bg-sky-50/50 border border-sky-100 rounded-xl">
-                <label className="text-[10px] font-bold text-sky-700">Scaling Correction</label>
-                <div className="grid grid-cols-2 gap-2">
-                    <select 
-                        value={scaleReference} 
-                        onChange={(e) => setScaleReference(e.target.value)}
-                        className="bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-600 outline-none"
-                    >
-                        <option value="">Reference...</option>
-                        {availableSensors.map((s: string) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <select 
-                        value={scaleTarget} 
-                        onChange={(e) => setScaleTarget(e.target.value)}
-                        className="bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-600 outline-none"
-                    >
-                        <option value="">Target...</option>
-                        {availableSensors.map((s: string) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                </div>
-                <div className="flex gap-1.5">
-                    <input 
-                        type="number" step="0.0001"
-                        value={Number.isNaN(scaleFactor) ? '' : scaleFactor}
-                        onChange={(e) => setScaleFactor(parseFloat(e.target.value))}
-                        className="min-w-0 flex-1 bg-white border border-sky-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none"
-                        placeholder="Factor"
-                    />
-                    <button onClick={computeScalingFactor} className="flex-none p-1 px-2 border border-sky-200 text-sky-600 rounded-lg text-[9px] font-extrabold bg-white hover:bg-sky-100 transition-colors" title="Auto Compute Factor">AUTO</button>
-                    <button onClick={applyScaling} className="flex-none p-1 px-3 bg-sky-600 text-white rounded-lg text-[9px] font-extrabold hover:bg-sky-700 transition-colors shadow-sm">FIX</button>
-                </div>
-             </div>
-
              {/* Trend Analysis Settings */}
              <div className="space-y-1.5 pt-3 border-t border-slate-100">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Trend & Sync Analysis</label>
@@ -3183,21 +3188,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                         Hitung Interpolasi
                     </button>
                 </div>
-
-                <label className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
-                   <input 
-                      type="checkbox" 
-                      checked={isDeTiding} 
-                      onChange={(e) => {
-                         setIsDeTiding(e.target.checked);
-                         runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, e.target.checked);
-                      }}
-                      className="w-3.5 h-3.5 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
-                   />
-                   <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-slate-700 uppercase">Detide Data</span>
-                   </div>
-                </label>
              </div>
 
              {/* Multi-sensor toggles */}
@@ -3799,7 +3789,7 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
   );
 }
 
-function HarmonicView({ results, rmse, constituentSet, setConstituentSet, onCalculate, isCalculating, autoDiagnostics }: any) {
+function HarmonicView({ results, rmse, constituentSet, setConstituentSet, onCalculate, isCalculating, autoDiagnostics, isDeTiding, setIsDeTiding }: any) {
   const handleDownloadCSV = () => {
     if (!results || results.length === 0) return;
     let csv = "Component,Definition,Frequency (cph),Amplitude (m),Phase (deg)\n";
@@ -3838,6 +3828,18 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, onCalc
                   <option value="UTIDE">UTide Standard (67)</option>
                   <option value="AUTO">Auto (Rayleigh & SNR)</option>
                 </select>
+             </div>
+             
+             <div className="flex flex-col gap-1.5 pl-2 pr-1 justify-end h-full">
+                 <label className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors h-11">
+                    <input 
+                       type="checkbox" 
+                       checked={isDeTiding} 
+                       onChange={(e) => setIsDeTiding(e.target.checked)}
+                       className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
+                    />
+                    <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest whitespace-nowrap pt-1">Detide Data</span>
+                 </label>
              </div>
              
              <button 
