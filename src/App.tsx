@@ -344,6 +344,7 @@ export default function App() {
   });
   
   // Prediction State
+  const [useTrendInPrediction, setUseTrendInPrediction] = useState(false);
   const [predStartDate, setPredStartDate] = useState(formatUTC(new Date(), 'yyyy-MM-dd'));
   const [predEndDate, setPredEndDate] = useState(formatUTC(addDays(new Date(), 7), 'yyyy-MM-dd'));
   const [predictions, setPredictions] = useState<any[]>([]);
@@ -1701,6 +1702,10 @@ export default function App() {
                     const ph = res.phase * (Math.PI / 180);
                     val += res.amp * Math.cos(w * t - ph);
                 });
+                if (useTrendInPrediction) {
+                    const slopeToUse = linearTrend?.ssaTrend?.slope || linearTrend?.slope || 0;
+                    val += slopeToUse * t;
+                }
                 return val;
             };
 
@@ -2657,6 +2662,8 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     setEndDate={setPredEndDate}
                     onGenerate={generatePredictions}
                     onExport={exportPredictions}
+                    useTrendInPrediction={useTrendInPrediction}
+                    setUseTrendInPrediction={setUseTrendInPrediction}
                     isLoading={isLoading}
                     title={chartTitle}
                     hasInsufficientData={!!dataLengthWarning}
@@ -4065,17 +4072,7 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
                 </select>
              </div>
              
-             <div className="flex flex-col gap-1.5 pl-2 pr-1 justify-end h-full">
-                 <label className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors h-11">
-                    <input 
-                       type="checkbox" 
-                       checked={isDeTiding} 
-                       onChange={(e) => setIsDeTiding(e.target.checked)}
-                       className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
-                    />
-                    <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest whitespace-nowrap pt-1">Detide Data</span>
-                 </label>
-             </div>
+
              
              <button 
                 onClick={onCalculate}
@@ -4185,7 +4182,7 @@ const PredictionTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title, hasInsufficientData }: any) {
+function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title, hasInsufficientData, useTrendInPrediction, setUseTrendInPrediction }: any) {
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
   const [refAreaRight, setRefAreaRight] = useState<string>('');
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
@@ -4316,6 +4313,15 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                  Kurang dari 29 Piantan
               </span>
             )}
+            <label className="flex items-center gap-2 px-2 py-2 mb-2 cursor-pointer group">
+              <input 
+                 type="checkbox" 
+                 checked={useTrendInPrediction} 
+                 onChange={(e) => setUseTrendInPrediction(e.target.checked)}
+                 className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
+              />
+              <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest pt-0.5 group-hover:text-slate-800 transition-colors">Sertakan Trend (Iterative SSA)</span>
+            </label>
             <button 
               onClick={onGenerate}
               disabled={isLoading || !startDate || !endDate || endDate < startDate || hasInsufficientData}
