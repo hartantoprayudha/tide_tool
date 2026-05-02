@@ -1404,7 +1404,7 @@ export default function App() {
                 Papa.parse(file, {
                   header: true,
                   skipEmptyLines: true,
-                  worker: true,
+                  worker: false, // Disabled to prevent postMessage structured clone out-of-memory on huge files
                   complete: resolve,
                   error: reject
                 });
@@ -2772,38 +2772,40 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     const startMs = domainSearch.start - domainBuffer;
     const endMs = domainSearch.end + domainBuffer;
 
-    // 2. Filter data by domain (if zoomed)
-    let filteredRecords = records;
+    let startIdx = 0;
+    let endIdx = records.length - 1;
+
     if (zoomDomain) {
-      filteredRecords = records.map((r, i) => ({ ...r, originalIndex: i })).filter((r: any) => {
-        const t = r.timestamp.getTime();
-        return t >= startMs && t <= endMs;
-      });
-    } else {
-      filteredRecords = records.map((r, i) => ({ ...r, originalIndex: i }));
+      const first = records.findIndex((r: any) => r.timestamp.getTime() >= startMs);
+      if (first !== -1) startIdx = first;
+      else startIdx = records.length;
+      
+      let last = records.length - 1;
+      while (last >= 0 && records[last].timestamp.getTime() > endMs) last--;
+      endIdx = last;
     }
 
-    // 3. Sample the filtered data
+    const count = endIdx - startIdx + 1;
+    if (count <= 0) return [];
+
     // Targeted resolution: ~2000 points for smoothness without lag
     const maxPoints = 2000;
-    let sampled;
-    if (filteredRecords.length > maxPoints) {
-      const step = Math.ceil(filteredRecords.length / maxPoints);
-      sampled = filteredRecords.filter((_, i) => i % step === 0);
-    } else {
-      sampled = filteredRecords;
-    }
-
-    // 4. Map only the sampled records to add necessary chart properties (trendline, timeMs)
+    const step = count > maxPoints ? Math.ceil(count / maxPoints) : 1;
     const t0 = records[0].timestamp.getTime();
-    return sampled.map(r => {
+    
+    const sampled = [];
+    for (let i = startIdx; i <= endIdx; i += step) {
+      const r = records[i];
       const timeMs = r.timestamp.getTime();
-      return {
+      sampled.push({
         ...r,
+        originalIndex: i,
         timeMs,
         trendline: trend ? (trend.slope * ((timeMs - t0) / 3600000) + trend.intercept) : undefined
-      };
-    });
+      });
+    }
+
+    return sampled;
   }, [records, trend, zoomDomain]);
 
   const handleDragAction = () => {
