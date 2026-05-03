@@ -188,7 +188,7 @@ export default function SummarizeView() {
       finalTrend = stlTrend;
     }
 
-    if (stationName && (latitude !== 0 || longitude !== 0)) {
+    if (stationName !== 'Unknown' || latitude !== 0 || longitude !== 0 || msl !== 0 || hat !== 0 || finalTrend !== 0 || text.includes('Tide Analysis Report')) {
         return {
           stationName, latitude, longitude, stlTrend: finalTrend, msl, hat, lat, mhws, mlws, fileName
         };
