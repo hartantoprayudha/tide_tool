@@ -311,6 +311,24 @@ export default function App() {
   }, [timeOffset]);
 
   // Analysis State
+  const [harmonicDataSelection, setHarmonicDataSelection] = useState<string>('');
+
+  const harmonicDataOptions = useMemo(() => {
+     let opts: string[] = [];
+     availableSensors.forEach((s) => {
+         opts.push(`valid|${s}`);
+         opts.push(`combined|${s}`);
+         opts.push(`interpolated|${s}`);
+     });
+     return opts;
+  }, [availableSensors]);
+
+  useEffect(() => {
+     if (availableSensors.length > 0 && (!harmonicDataSelection || !harmonicDataOptions.includes(harmonicDataSelection))) {
+         setHarmonicDataSelection(`valid|${availableSensors[0]}`);
+     }
+  }, [availableSensors, harmonicDataOptions, harmonicDataSelection]);
+
   const [zThreshold, setZThreshold] = useState(3.0);
   const [manualMin, setManualMin] = useState<number | "">("");
   const [manualMax, setManualMax] = useState<number | "">("");
@@ -556,7 +574,7 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings, forceFullAnalysis: boolean = isFullAnalysisRun, overrideFilterWindow?: number, method: 'ols' | 'fft' = harmonicMethod, usePembersihan: boolean = isPembersihanActive, useFilter: boolean = isFilterActive) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings, forceFullAnalysis: boolean = isFullAnalysisRun, overrideFilterWindow?: number, method: 'ols' | 'fft' = harmonicMethod, usePembersihan: boolean = isPembersihanActive, useFilter: boolean = isFilterActive, hDataSelection: string = harmonicDataSelection) => {
     if (!rawRows.length) return;
     if (isProcessing.current) return;
     const currentSensor = sensorToUse || selectedSensor;
@@ -1070,10 +1088,71 @@ export default function App() {
              return;
         }
 
-        // 4. Final Precise Harmonic Analysis (on the mathematically cleaned and filtered data)
-        const validForFinal = processed.filter(r => !isNaN(r.filtered));
-        const t_hours = validForFinal.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
-        const y_vals = validForFinal.map(r => r.filtered);
+        // 4. Final Precise Harmonic Analysis
+        let harmonicBaseArray: any[] = processed;
+        let yField = 'filtered';
+        
+        let selType = 'valid';
+        let selSensor = currentSensor;
+        if (hDataSelection) {
+            const parts = hDataSelection.split('|');
+            if (parts.length === 2) {
+                selType = parts[0];
+                selSensor = parts[1];
+            }
+        }
+
+        if (selSensor !== currentSensor && updatedCache[selSensor]) {
+            harmonicBaseArray = updatedCache[selSensor];
+        }
+
+        if (selType === 'combined') {
+            harmonicBaseArray = harmonicBaseArray.map((r, i) => {
+                 let combinedVal = updatedCache[selSensor]?.[i]?.filtered ?? NaN;
+                 if (isNaN(combinedVal)) {
+                     for (const source of combSettings.sourceSensors) {
+                         const srcValid = updatedCache[source]?.[i]?.filtered;
+                         if (srcValid !== undefined && !isNaN(srcValid)) {
+                             combinedVal = srcValid;
+                             break;
+                         }
+                     }
+                 }
+                 return { ...r, combinedTemp: combinedVal };
+            });
+            yField = 'combinedTemp';
+        } else if (selType === 'interpolated') {
+            let baseForInterp = harmonicBaseArray;
+            if (combSettings.enabled) {
+                 baseForInterp = harmonicBaseArray.map((r, i) => {
+                     let combinedVal = updatedCache[selSensor]?.[i]?.filtered ?? NaN;
+                     if (isNaN(combinedVal)) {
+                         for (const source of combSettings.sourceSensors) {
+                             const srcValid = updatedCache[source]?.[i]?.filtered;
+                             if (srcValid !== undefined && !isNaN(srcValid)) {
+                                 combinedVal = srcValid;
+                                 break;
+                             }
+                         }
+                     }
+                     return { ...r, combined: combinedVal }; 
+                 });
+            }
+            const interpolatedBase = doInterpolation(interpSettings, baseForInterp);
+            harmonicBaseArray = interpolatedBase;
+            yField = 'interpolated';
+        }
+
+        const validForFinal = harmonicBaseArray.filter(r => !isNaN(r[yField]));
+        if (validForFinal.length === 0) {
+            setIsLoading(false);
+            isProcessing.current = false;
+            return;
+        }
+
+        const baseTime = harmonicBaseArray[0]?.timestamp?.getTime() || 0;
+        const t_hours = validForFinal.map(r => (r.timestamp.getTime() - baseTime) / 3600000);
+        const y_vals = validForFinal.map(r => r[yField]);
         
         let fittedZ0 = meanRaw;
         let results: ConstituentResult[] = [];
@@ -2655,9 +2734,12 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     setConstituentSet={setConstituentSet}
                     harmonicMethod={harmonicMethod}
                     setHarmonicMethod={setHarmonicMethod}
+                    dataSelection={harmonicDataSelection}
+                    setDataSelection={setHarmonicDataSelection}
+                    dataOptions={harmonicDataOptions}
                     onCalculate={() => { 
                         setIsFullAnalysisRun(true); 
-                        runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true, undefined, harmonicMethod); 
+                        runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true, undefined, harmonicMethod, isPembersihanActive, isFilterActive, harmonicDataSelection); 
                     }}
                     isCalculating={isLoading}
                     autoDiagnostics={autoDiagnostics}
@@ -4087,10 +4169,14 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
   );
 }
 
-function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmonicMethod, setHarmonicMethod, onCalculate, isCalculating, autoDiagnostics, isDeTiding, setIsDeTiding }: any) {
+function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmonicMethod, setHarmonicMethod, onCalculate, isCalculating, autoDiagnostics, isDeTiding, setIsDeTiding, dataSelection, setDataSelection, dataOptions }: any) {
   const handleDownloadCSV = () => {
     if (!results || results.length === 0) return;
-    let csv = "Component,Definition,Frequency (cph),Amplitude (m),Phase (deg)\n";
+    let csv = `# Data Selection,${dataSelection}\n`;
+    csv += `# Metode Analisis,${harmonicMethod}\n`;
+    csv += `# Constituent Set,${constituentSet}\n`;
+    csv += `# RMSE,${rmse !== undefined && rmse !== null ? rmse.toFixed(4) : 'N/A'}\n\n`;
+    csv += "Component,Definition,Frequency (cph),Amplitude (m),Phase (deg)\n";
     results.forEach((r: any) => {
       csv += `${r.comp},${r.desc},${r.freq.toFixed(8)},${r.amp.toFixed(3)},${r.phase.toFixed(3)}\n`;
     });
@@ -4112,6 +4198,26 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
           </div>
           
           <div className="flex flex-wrap items-end gap-3 w-full">
+             <div className="flex flex-col gap-1.5 min-w-[200px]">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Data Selection</label>
+                <select 
+                  value={dataSelection}
+                  onChange={(e) => setDataSelection(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer"
+                >
+                  {dataOptions && dataOptions.map((opt: string) => {
+                      const parts = opt.split('|');
+                      const type = parts[0];
+                      const sns = parts[1];
+                      let label = opt;
+                      if (type === 'valid') label = `Valid ${sns}`;
+                      if (type === 'combined') label = `Combined ${sns} lead`;
+                      if (type === 'interpolated') label = `Interpolated ${sns} lead`;
+                      return <option key={opt} value={opt}>{label}</option>;
+                  })}
+                </select>
+             </div>
+
              <div className="flex flex-col gap-1.5 min-w-[200px]">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Metode Analisis</label>
                 <select 
@@ -4135,7 +4241,6 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
                   <option value="9">9 Constants (Standard)</option>
                   <option value="IHO23">IHO 23 Constants (GeoTide)</option>
                   <option value="FES2014">FES2014 (34 Constants)</option>
-                  <option value="UTIDE">UTide Standard (67)</option>
                   <option value="AUTO">Auto (Rayleigh & SNR)</option>
                 </select>
              </div>
