@@ -314,8 +314,19 @@ export default function App() {
   const [zThreshold, setZThreshold] = useState(3.0);
   const [manualMin, setManualMin] = useState<number | "">("");
   const [manualMax, setManualMax] = useState<number | "">("");
-  const [isPembersihanActive, setIsPembersihanActive] = useState(false);
-  const [isFilterActive, setIsFilterActive] = useState(false);
+  const [sensorPembersihanActive, setSensorPembersihanActive] = useState<Record<string, boolean>>({});
+  const [sensorFilterActive, setSensorFilterActive] = useState<Record<string, boolean>>({});
+  
+  const isPembersihanActive = sensorPembersihanActive[selectedSensor] || false;
+  const isFilterActive = sensorFilterActive[selectedSensor] || false;
+
+  const setIsPembersihanActive = (val: boolean, sensor = selectedSensor) => {
+      setSensorPembersihanActive(prev => ({ ...prev, [sensor]: val }));
+  };
+
+  const setIsFilterActive = (val: boolean, sensor = selectedSensor) => {
+      setSensorFilterActive(prev => ({ ...prev, [sensor]: val }));
+  };
   const [filterType, setFilterType] = useState<'ma' | 'median' | 'butterworth'>('ma');
   const [filterWindow, setFilterWindow] = useState(15);
   const [medianWindow, setMedianWindow] = useState(3);
@@ -327,7 +338,7 @@ export default function App() {
   const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number }, robustStlTrend?: { slope: number, intercept: number, rateYear: number }, ssaTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
   const [isFullAnalysisRun, setIsFullAnalysisRun] = useState(false);
-  const [validCache, setValidCache] = useState<Record<string, number[]>>({});
+  const [validCache, setValidCache] = useState<Record<string, TideRecord[]>>({});
   
   // Combination State
   const [combinationSettings, setCombinationSettings] = useState({
@@ -545,7 +556,7 @@ export default function App() {
     return x;
   };
 
-  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings, forceFullAnalysis: boolean = isFullAnalysisRun, overrideFilterWindow?: number, method: 'ols' | 'fft' = harmonicMethod) => {
+  const runAnalysis = (rawRows: any[], sensorToUse?: string, vOffset: number = verticalOffset, tOffset: number = timeOffset, activeMods: PartialModifier[] = modifiers, useDeTiding: boolean = isDeTiding, combSettings: any = combinationSettings, interpSettings: any = interpolationSettings, forceFullAnalysis: boolean = isFullAnalysisRun, overrideFilterWindow?: number, method: 'ols' | 'fft' = harmonicMethod, usePembersihan: boolean = isPembersihanActive, useFilter: boolean = isFilterActive) => {
     if (!rawRows.length) return;
     if (isProcessing.current) return;
     const currentSensor = sensorToUse || selectedSensor;
@@ -876,7 +887,7 @@ export default function App() {
             if (isNaN(r.raw)) {
                 return { ...r, isOutlier: true };
             }
-            if (!isPembersihanActive) {
+            if (!usePembersihan) {
                 return { ...r, isOutlier: false };
             }
             // B. Apply Outlier Detection
@@ -960,7 +971,7 @@ export default function App() {
         }
 
         // 3. Low-Pass Filter Logic (Optimized Sliding Window)
-        if (!isFilterActive) {
+        if (!useFilter) {
             for(let i = 0; i < processed.length; i++) {
                 processed[i].filtered = isNaN(validUnfiltered[i]) ? NaN : parseFloat(cleanedInput[i].toFixed(3));
             }
@@ -1045,8 +1056,7 @@ export default function App() {
         });
 
         // Store the final Valid data in our cache
-        const finalValid = processed.map(r => r.filtered);
-        const updatedCache = { ...validCache, [currentSensor]: finalValid };
+        const updatedCache = { ...validCache, [currentSensor]: processed };
         setValidCache(updatedCache);
         
         // As requested: Trigger for Combined and Interpolated are from their respective buttons.
@@ -1490,10 +1500,10 @@ export default function App() {
          }
       } else {
          for (let i = 0; i < updatedRecords.length; i++) {
-             let combinedVal = validCache[currentSensor]?.[i] ?? NaN;
+             let combinedVal = validCache[currentSensor]?.[i]?.filtered ?? NaN;
              if (isNaN(combinedVal)) {
                  for (const source of settings.sourceSensors) {
-                     const srcValid = validCache[source]?.[i];
+                     const srcValid = validCache[source]?.[i]?.filtered;
                      if (srcValid !== undefined && !isNaN(srcValid)) {
                          combinedVal = srcValid;
                          break;
@@ -1652,10 +1662,10 @@ export default function App() {
             }
         }
         setFilterWindow(initialFilterWindow);
-        setIsPembersihanActive(false);
-        setIsFilterActive(false);
+        setSensorPembersihanActive({});
+        setSensorFilterActive({});
 
-        runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, [], isDeTiding, combinationSettings, interpolationSettings, false, initialFilterWindow);
+        runAnalysis(mergedData, initialSensor, verticalOffset, timeOffset, [], isDeTiding, combinationSettings, interpolationSettings, false, initialFilterWindow, harmonicMethod, false, false);
         setActiveTab('dashboard');
         setShowMetadataModal(true);
       } catch (err) {
@@ -2268,9 +2278,15 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
               <select 
                 value={selectedSensor}
                 onChange={(e) => {
-                  setSelectedSensor(e.target.value);
+                  const newSensor = e.target.value;
+                  setSelectedSensor(newSensor);
                   setIsFullAnalysisRun(false);
-                  runAnalysis(rawData, e.target.value, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false);
+                  
+                  // Restore active cleaning states for the chosen sensor
+                  const newIsPem = sensorPembersihanActive[newSensor] || false;
+                  const newIsFil = sensorFilterActive[newSensor] || false;
+                  
+                  runAnalysis(rawData, newSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false, undefined, harmonicMethod, newIsPem, newIsFil);
                 }}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer hover:border-sky-300 transition-colors"
               >
@@ -2579,11 +2595,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                         setInterpolationSettings({ enabled: false, maxGapMinutes: 15 });
                         setValidCache({});
                         setIsFullAnalysisRun(false);
-                        setIsPembersihanActive(false);
-                        setIsFilterActive(false);
+                        setSensorPembersihanActive({});
+                        setSensorFilterActive({});
                         
                         // Still run raw analysis without any offsets to recompute raw
-                        runAnalysis(rawData, selectedSensor, 0, 0, [], isDeTiding, { enabled: false, referenceSensor: '', sourceSensors: [] }, { enabled: false, maxGapMinutes: 15 }, false);
+                        runAnalysis(rawData, selectedSensor, 0, 0, [], isDeTiding, { enabled: false, referenceSensor: '', sourceSensors: [] }, { enabled: false, maxGapMinutes: 15 }, false, undefined, harmonicMethod, false, false);
                     }}
                 />
             )}
@@ -2611,7 +2627,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                       setManualMax={setManualMax}
                       onUpdate={() => { 
                           setIsPembersihanActive(true);
-                          runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false); 
+                          runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false, undefined, harmonicMethod, true, isFilterActive); 
                       }} 
                     />
                     <FilterView 
@@ -2625,7 +2641,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                        setCutoff={setButterCutoff}
                        onUpdate={() => { 
                           setIsFilterActive(true);
-                          runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false); 
+                          runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false, undefined, harmonicMethod, isPembersihanActive, true); 
                        }} 
                     />
                 </div>
@@ -2932,7 +2948,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         if (zoomDomain) {
             if (timeMs < zoomDomain.start || timeMs > zoomDomain.end) return;
         }
-        const v = validCache?.[selectedSensor]?.[i];
+        const v = validCache?.[selectedSensor]?.[i]?.filtered;
         if (typeof v === 'number' && !isNaN(v)) {
             sum += v;
             count++;
@@ -3761,8 +3777,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                                                 dataKey={(d: any) => {
                                                     if (!validCache) return null;
                                                     const idx = d.originalIndex;
-                                                    const v1 = validCache[s1]?.[idx];
-                                                    const v2 = validCache[s2]?.[idx];
+                                                    const v1 = validCache[s1]?.[idx]?.filtered;
+                                                    const v2 = validCache[s2]?.[idx]?.filtered;
                                                     if (typeof v1 === 'number' && !isNaN(v1) && typeof v2 === 'number' && !isNaN(v2)) {
                                                         return v1 - v2;
                                                     }
