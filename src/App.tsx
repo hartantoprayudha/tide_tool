@@ -90,6 +90,8 @@ interface ConstituentResult {
 // --- CONSTANTS ---
 // Frequencies in cycles per hour
 const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
+
+
   'M2': { f: 0.080511401, d: 'Principal lunar semidiurnal' },
   'S2': { f: 0.083333333, d: 'Principal solar semidiurnal' },
   'K1': { f: 0.041780746, d: 'Luni-solar diurnal' },
@@ -166,7 +168,178 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   'Nu2': { f: 0.079201621, d: 'NU2' },
   'MSqm': { f: 0.004333900, d: 'Lunar solar quarter monthly' },
   'Mtm': { f: 0.004562100, d: 'Lunar third monthly' },
-  'N4': { f: 0.157998498, d: 'Over-tide' }
+  'N4': { f: 0.157998498, d: 'Over-tide' },
+  'Mnum': { f: 0.001309781, d: 'Mnum' },
+  'Msf': { f: 0.002821933, d: 'Msf' },
+  'sig1': { f: 0.035908722, d: 'sig1' },
+  'rho1': { f: 0.037420874, d: 'rho1' },
+  'MS1': { f: 0.038844734, d: 'MS1' },
+  'MP1': { f: 0.038958813, d: 'MP1' },
+  'chi1': { f: 0.040470965, d: 'chi1' },
+  'pi1': { f: 0.041438513, d: 'pi1' },
+  'psi1': { f: 0.041894820, d: 'psi1' },
+  'phi1': { f: 0.042008905, d: 'phi1' },
+  'th1': { f: 0.043090527, d: 'th1' },
+  '2PO1': { f: 0.044374520, d: '2PO1' },
+  'KQ1': { f: 0.046342990, d: 'KQ1' },
+  '2MN2S2': { f: 0.073355383, d: '2MN2S2' },
+  '3M(SK)2': { f: 0.074639376, d: '3M(SK)2' },
+  '2NS2': { f: 0.074665164, d: '2NS2' },
+  '3M2S2': { f: 0.074867535, d: '3M2S2' },
+  'MNK2': { f: 0.075949157, d: 'MNK2' },
+  'MNS2': { f: 0.076177316, d: 'MNS2' },
+  'MnuS2': { f: 0.076379687, d: 'MnuS2' },
+  'MNK2S2': { f: 0.076405475, d: 'MNK2S2' },
+  '2MS2K2': { f: 0.077233150, d: '2MS2K2' },
+  '2MK2': { f: 0.077461309, d: '2MK2' },
+  'mu2': { f: 0.077689468, d: 'mu2' },
+  'SNK2': { f: 0.078771090, d: 'SNK2' },
+  'NA2': { f: 0.078885169, d: 'NA2' },
+  'NB2': { f: 0.079113323, d: 'NB2' },
+  'nu2': { f: 0.079201620, d: 'nu2' },
+  '2KN2S2': { f: 0.079455566, d: '2KN2S2' },
+  'MSK2': { f: 0.080283242, d: 'MSK2' },
+  'MPS2': { f: 0.080397321, d: 'MPS2' },
+  'MSP2': { f: 0.080625480, d: 'MSP2' },
+  'M2(KS)2': { f: 0.080967718, d: 'M2(KS)2' },
+  'lambda2': { f: 0.081821181, d: 'lambda2' },
+  '2SK2': { f: 0.083105174, d: '2SK2' },
+  'MSnu2': { f: 0.084643114, d: 'MSnu2' },
+  'KJ2': { f: 0.085073644, d: 'KJ2' },
+  '2KM(SN)2': { f: 0.085301803, d: '2KM(SN)2' },
+  '2MS2N2': { f: 0.086357637, d: '2MS2N2' },
+  'SKM2': { f: 0.086383425, d: 'SKM2' },
+  '3(SM)N2': { f: 0.087465047, d: '3(SM)N2' },
+  'SKN2': { f: 0.087895577, d: 'SKN2' },
+  'MQ3': { f: 0.117729903, d: 'MQ3' },
+  '2NKM3': { f: 0.119267843, d: '2NKM3' },
+  '2MS3': { f: 0.119356134, d: '2MS3' },
+  '2MP3': { f: 0.119470214, d: '2MP3' },
+  'NK3': { f: 0.120779995, d: 'NK3' },
+  'MP3': { f: 0.122063988, d: 'MP3' },
+  'MS3': { f: 0.122178067, d: 'MS3' },
+  'MK3': { f: 0.122292147, d: 'MK3' },
+  '2MQ3': { f: 0.123804299, d: '2MQ3' },
+  'SP3': { f: 0.124885921, d: 'SP3' },
+  'S3': { f: 0.125000000, d: 'S3' },
+  'K3': { f: 0.125342238, d: 'K3' },
+  '4MS4': { f: 0.155378936, d: '4MS4' },
+  '2MNS4': { f: 0.156688716, d: '2MNS4' },
+  '3MK4': { f: 0.157972709, d: '3MK4' },
+  '2N4': { f: 0.157998497, d: '2N4' },
+  '2NKS4': { f: 0.158226656, d: '2NKS4' },
+  'MSNK4': { f: 0.159282490, d: 'MSNK4' },
+  'Mnu4': { f: 0.159713020, d: 'Mnu4' },
+  'MNKS4': { f: 0.159738808, d: 'MNKS4' },
+  '2MSK4': { f: 0.160794642, d: '2MSK4' },
+  'MA4': { f: 0.160908722, d: 'MA4' },
+  '2MRS4': { f: 0.161136875, d: '2MRS4' },
+  '2MKS4': { f: 0.161250960, d: '2MKS4' },
+  '3MN4': { f: 0.162534953, d: '3MN4' },
+  'NK4': { f: 0.162560741, d: 'NK4' },
+  'M2SK4': { f: 0.163616575, d: 'M2SK4' },
+  'MT4': { f: 0.163730660, d: 'MT4' },
+  'MR4': { f: 0.163958808, d: 'MR4' },
+  '2SNM4': { f: 0.165154515, d: '2SNM4' },
+  '2MSN4': { f: 0.165356886, d: '2MSN4' },
+  '3SM4': { f: 0.169488599, d: '3SM4' },
+  '2SKM4': { f: 0.169716758, d: '2SKM4' },
+  'MNO5': { f: 0.198241304, d: 'MNO5' },
+  '2NKMS5': { f: 0.198482356, d: '2NKMS5' },
+  '3MK5': { f: 0.199753456, d: '3MK5' },
+  '2NK5': { f: 0.199779243, d: '2NK5' },
+  '3MS5': { f: 0.199867535, d: '3MS5' },
+  '3MP5': { f: 0.199981614, d: '3MP5' },
+  'M5': { f: 0.201278501, d: 'M5' },
+  'MNK5': { f: 0.201291395, d: 'MNK5' },
+  'MB5': { f: 0.201392581, d: 'MB5' },
+  'MSO5': { f: 0.202575388, d: 'MSO5' },
+  '2MS5': { f: 0.202689468, d: '2MS5' },
+  '3MO5': { f: 0.202803547, d: '3MO5' },
+  '3MQ5': { f: 0.204315699, d: '3MQ5' },
+  '2(MN)S6': { f: 0.235687965, d: '2(MN)S6' },
+  '3MNS6': { f: 0.237200117, d: '3MNS6' },
+  '4MK6': { f: 0.238484110, d: '4MK6' },
+  'M2N6': { f: 0.238509898, d: 'M2N6' },
+  '4MS6': { f: 0.238712269, d: '4MS6' },
+  '2NMKS6': { f: 0.238738057, d: '2NMKS6' },
+  '2MSNK6': { f: 0.239793891, d: '2MSNK6' },
+  '2Mnu6': { f: 0.240224421, d: '2Mnu6' },
+  '2MNKS6': { f: 0.240250209, d: '2MNKS6' },
+  '3MSK6': { f: 0.241306043, d: '3MSK6' },
+  'MA6': { f: 0.241420122, d: 'MA6' },
+  'MSN6': { f: 0.242843982, d: 'MSN6' },
+  '4MN6': { f: 0.243046354, d: '4MN6' },
+  'MNK6': { f: 0.243072141, d: 'MNK6' },
+  '2(MS)K6': { f: 0.244127976, d: '2(MS)K6' },
+  '2MT6': { f: 0.244242061, d: '2MT6' },
+  '2SN6': { f: 0.245665915, d: '2SN6' },
+  '3MSN6': { f: 0.245868286, d: '3MSN6' },
+  'MKL6': { f: 0.246096445, d: 'MKL6' },
+  '2MNO7': { f: 0.278752704, d: '2MNO7' },
+  '4MK7': { f: 0.280264856, d: '4MK7' },
+  '2NMK7': { f: 0.280290644, d: '2NMK7' },
+  'M7': { f: 0.281789902, d: 'M7' },
+  '2MNK7': { f: 0.281802796, d: '2MNK7' },
+  '2MSO7': { f: 0.283086789, d: '2MSO7' },
+  'MSKO7': { f: 0.286136881, d: 'MSKO7' },
+  '5MK8': { f: 0.318995511, d: '5MK8' },
+  '2(MN)8': { f: 0.319009052, d: '2(MN)8' },
+  '5MS8': { f: 0.319223669, d: '5MS8' },
+  '2(MN)KS8': { f: 0.319249457, d: '2(MN)KS8' },
+  '3MN8': { f: 0.320533450, d: '3MN8' },
+  '3Mnu8': { f: 0.320735821, d: '3Mnu8' },
+  '3MNKS8': { f: 0.320761609, d: '3MNKS8' },
+  '4MSK8': { f: 0.321817443, d: '4MSK8' },
+  'MA8': { f: 0.321931523, d: 'MA8' },
+  '2MSN8': { f: 0.323355383, d: '2MSN8' },
+  '2MNK8': { f: 0.323583542, d: '2MNK8' },
+  '3MS8': { f: 0.324867535, d: '3MS8' },
+  '3MK8': { f: 0.325095694, d: '3MK8' },
+  '2SNM8': { f: 0.326177316, d: '2SNM8' },
+  'MSNK8': { f: 0.326405475, d: 'MSNK8' },
+  '2(MS)8': { f: 0.327689468, d: '2(MS)8' },
+  '2MSK8': { f: 0.327917627, d: '2MSK8' },
+  '3SM8': { f: 0.330511401, d: '3SM8' },
+  '2SMK8': { f: 0.330739559, d: '2SMK8' },
+  'S8': { f: 0.333333333, d: 'S8' },
+  '3MN09': { f: 0.359264105, d: '3MN09' },
+  '2(MN)K9': { f: 0.360802044, d: '2(MN)K9' },
+  'MA9': { f: 0.362187223, d: 'MA9' },
+  '3MNK9': { f: 0.362314196, d: '3MNK9' },
+  '4MK9': { f: 0.363826348, d: '4MK9' },
+  '3MSK9': { f: 0.366648281, d: '3MSK9' },
+  '3M2N10': { f: 0.399532699, d: '3M2N10' },
+  '6MS10': { f: 0.399735070, d: '6MS10' },
+  '3M2NKS10': { f: 0.399760858, d: '3M2NKS10' },
+  '4MSNK10': { f: 0.400816692, d: '4MSNK10' },
+  '4MN10': { f: 0.401044851, d: '4MN10' },
+  '4Mnu10': { f: 0.401247222, d: '4Mnu10' },
+  '5MSK10': { f: 0.402328844, d: '5MSK10' },
+  'M10': { f: 0.402557003, d: 'M10' },
+  '3MSN10': { f: 0.403866784, d: '3MSN10' },
+  '6MN10': { f: 0.404069155, d: '6MN10' },
+  '3MNK10': { f: 0.404094942, d: '3MNK10' },
+  '4MK10': { f: 0.405607094, d: '4MK10' },
+  '2MNSK10': { f: 0.406916875, d: '2MNSK10' },
+  '3M2S10': { f: 0.408200868, d: '3M2S10' },
+  '4MSK11': { f: 0.447159682, d: '4MSK11' },
+  '4M2N12': { f: 0.480044099, d: '4M2N12' },
+  '4M2NKS12': { f: 0.480272258, d: '4M2NKS12' },
+  '5MSNK12': { f: 0.481328093, d: '5MSNK12' },
+  '5MN12': { f: 0.481556251, d: '5MN12' },
+  '5Mnu12': { f: 0.481758623, d: '5Mnu12' },
+  '6MSK12': { f: 0.482840244, d: '6MSK12' },
+  'MA12': { f: 0.482954324, d: 'MA12' },
+  'M12': { f: 0.483068403, d: 'M12' },
+  '4MSN12': { f: 0.484378184, d: '4MSN12' },
+  '5MS12': { f: 0.485890336, d: '5MS12' },
+  '5MK12': { f: 0.486118495, d: '5MK12' },
+  '3MNKS12': { f: 0.487428276, d: '3MNKS12' },
+  '4M2S12': { f: 0.488712269, d: '4M2S12' },
+  '5MSN14': { f: 0.564889585, d: '5MSN14' },
+  '5MNK14': { f: 0.565117744, d: '5MNK14' },
+  '6MS14': { f: 0.566401737, d: '6MS14' },
 };
 
 const getMoonEvents = (data: any[]) => {
@@ -293,7 +466,7 @@ export default function App() {
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
   const [selectedSensor, setSelectedSensor] = useState('');
   const [visibleSensors, setVisibleSensors] = useState<string[]>([]);
-  const [constituentSet, setConstituentSet] = useState<'4' | '9' | 'IHO23' | 'FES2014' | 'UTIDE' | 'AUTO'>('9');
+  const [constituentSet, setConstituentSet] = useState<string>('9');
   const [harmonicMethod, setHarmonicMethod] = useState<'ols' | 'fft'>('ols');
   const [isLoading, setIsLoading] = useState(false);
   const [verticalOffset, setVerticalOffset] = useState<number>(0);
@@ -790,8 +963,12 @@ export default function App() {
         
         if (constituentSet === '4') compsToFit = ['M2', 'S2', 'K1', 'O1'];
         else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
+        else if (constituentSet === 'IHO10') compsToFit = ['M2', 'K1', 'S2', 'O1', 'P1', 'N2', 'K2', 'Q1', 'M4', 'MS4'];
         else if (constituentSet === 'IHO23') compsToFit = ['Sa', 'Ssa', 'Mm', 'Mf', 'Q1', 'O1', 'P1', 'K1', 'J1', '2N2', 'MU2', 'N2', 'NU2', 'M2', 'L2', 'T2', 'S2', 'R2', 'K2', 'MN4', 'M4', 'MS4', 'M6'];
+        else if (constituentSet === 'NOAA') compsToFit = ['Sa', 'Mm', 'Mf', '2Q1', 'Q1', 'O1', 'M1', 'K1', 'J1', 'OO1', '2N2', 'MU2', 'N2', 'NU2', 'M2', 'LAM2', 'L2', 'T2', 'S2', 'R2', 'K2', '2SM2', '2MK3', 'M3', 'MK3', 'MN4', 'M4', 'MS4', 'S4', 'M6', 'S6', 'M8'];
         else if (constituentSet === 'FES2014') compsToFit = ['2N2', 'E2', 'J1', 'K1', 'K2', 'L2', 'La2', 'M2', 'M3', 'M4', 'M6', 'M8', 'Mf', 'MKS2', 'Mm', 'MN4', 'MS4', 'MSf', 'MSqm', 'Mtm', 'Mu2', 'N2', 'N4', 'Nu2', 'O1', 'P1', 'Q1', 'R2', 'S1', 'S2', 'S4', 'Sa', 'Ssa', 'T2'];
+        else if (constituentSet === 'ETCPOT') compsToFit = ['Sa', 'Ssa', 'Mnum', 'Mm', 'Msf', 'Mf', 'Mfm', '2Q1', 'Q1', 'rho1', 'O1', 'MP1', 'TAU1', 'NO1', 'chi1', 'pi1', 'P1', 'S1', 'K1', 'psi1', 'phi1', 'th1', 'J1', 'SO1', 'OO1', 'mu2', 'N2', 'nu2', 'M2', 'lambda2', 'L2', 'T2', 'S2', 'K2', 'KJ2', 'M3'];
+        else if (constituentSet === 'UKHO') compsToFit = ['Sa', 'Ssa', 'Mnum', 'Mm', 'Msf', 'Mf', '2Q1', 'sig1', 'Q1', 'rho1', 'O1', 'MS1', 'MP1', 'NO1', 'chi1', 'pi1', 'P1', 'S1', 'K1', 'psi1', 'phi1', 'th1', 'J1', '2PO1', 'SO1', 'OO1', 'KQ1', '2MN2S2', '3M(SK)2', '2NS2', '3M2S2', 'MNK2', 'MNS2', 'MnuS2', 'MNK2S2', '2MS2K2', '2MK2', '2N2', 'mu2', 'SNK2', 'NA2', 'N2', 'NB2', 'nu2', '2KN2S2', 'MSK2', 'MPS2', 'M2', 'MSP2', 'MKS2', 'M2(KS)2', 'lambda2', 'L2', '2SK2', 'T2', 'S2', 'R2', 'K2', 'MSnu2', 'MSN2', 'KJ2', '2KM(SN)2', '2SM2', '2MS2N2', 'SKM2', '3(SM)N2', 'SKN2', 'MQ3', 'MO3', '2NKM3', '2MS3', '2MP3', 'M3', 'NK3', 'MP3', 'MS3', 'MK3', '2MQ3', 'SP3', 'S3', 'SK3', 'K3', '4MS4', '2MNS4', '3MK4', '2N4', '2NKS4', 'MSNK4', 'MN4', 'Mnu4', 'MNKS4', '2MSK4', 'MA4', 'M4', '2MRS4', '2MKS4', 'SN4', '3MN4', 'NK4', 'M2SK4', 'MT4', 'MS4', 'MR4', 'MK4', '2SNM4', '2MSN4', 'S4', 'SK4', '3SM4', '2SKM4', 'MNO5', '2NKMS5', '3MK5', '2NK5', '3MS5', '3MP5', 'M5', 'MNK5', 'MB5', 'MSO5', '2MS5', '3MO5', '3MQ5', '2(MN)S6', '3MNS6', '4MK6', 'M2N6', '4MS6', '2NMKS6', '2MSNK6', '2MN6', '2Mnu6', '2MNKS6', '3MSK6', 'MA6', 'M6', 'MSN6', '4MN6', 'MNK6', '2(MS)K6', '2MT6', '2MS6', '2MK6', '2SN6', '3MSN6', 'MKL6', '2SM6', 'MSK6', 'S6', '2MNO7', '4MK7', '2NMK7', 'M7', '2MNK7', '2MSO7', 'MSKO7', '5MK8', '2(MN)8', '5MS8', '2(MN)KS8', '3MN8', '3Mnu8', '3MNKS8', '4MSK8', 'MA8', 'M8', '2MSN8', '2MNK8', '3MS8', '3MK8', '2SNM8', 'MSNK8', '2(MS)8', '2MSK8', '3SM8', '2SMK8', 'S8', '3MN09', '2(MN)K9', 'MA9', '3MNK9', '4MK9', '3MSK9', '3M2N10', '6MS10', '3M2NKS10', '4MSNK10', '4MN10', '4Mnu10', '5MSK10', 'M10', '3MSN10', '6MN10', '3MNK10', '4MK10', '2MNSK10', '3M2S10', '4MSK11', '4M2N12', '4M2NKS12', '5MSNK12', '5MN12', '5Mnu12', '6MSK12', 'MA12', 'M12', '4MSN12', '5MS12', '5MK12', '3MNKS12', '4M2S12', '5MSN14', '5MNK14', '6MS14'];
         else if (constituentSet === 'AUTO') {
             const rayleighCriterionFreq = 1.0 / durationHoursCheck;
             const priorityList = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 'Mm', 'Ssa', 'Sa', 'E2', 'La2', 'M3', 'M8', 'MKS2', 'MSqm', 'Mtm', 'N4', 'R2', 'S1'];
@@ -818,6 +995,9 @@ export default function App() {
             }
         }
         else compsToFit = Object.keys(HARMONIC_FREQS); // UTIDE (All 67)
+
+        // Make sure we only use constituents that we actually have frequency definitions for
+        compsToFit = compsToFit.filter(c => HARMONIC_FREQS[c] !== undefined);
 
         // A. Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
         // For outlier detection "Jalankan Pembersihan", we use Auto (Rayleigh & SNR) algorithm to build the cache "predicted"
@@ -1180,22 +1360,33 @@ export default function App() {
             fittedZ0 = meanRaw;
 
             if (method === 'fft') {
+                fittedZ0 = unifiedIntercept;
                 let snrPassedCount = 0;
                 
+                // Using Successive Subtraction (Matching Pursuit) to resolve leakage and reduce RMSE
+                let residual = new Float64Array(n);
+                for(let j=0; j<n; j++) residual[j] = y_detrended[j] - unifiedIntercept;
+
                 const fftRawResults = compsToFit.map((c, i) => {
                     let sumCos = 0;
                     let sumSin = 0;
                     const f = HARMONIC_FREQS[c].f;
+                    
                     for (let j = 0; j < n; j++) {
                         const arg = 2 * Math.PI * f * t_hours[j];
-                        sumCos += y_detrended[j] * Math.cos(arg);
-                        sumSin += y_detrended[j] * Math.sin(arg);
+                        sumCos += residual[j] * Math.cos(arg);
+                        sumSin += residual[j] * Math.sin(arg);
                     }
                     const a = (2 / n) * sumCos;
                     const b = (2 / n) * sumSin;
                     const amp = Math.sqrt(a * a + b * b);
                     let phase = Math.atan2(b, a) * (180 / Math.PI);
                     if (phase < 0) phase += 360;
+                    
+                    for (let j = 0; j < n; j++) {
+                        const arg = 2 * Math.PI * f * t_hours[j];
+                        residual[j] -= (a * Math.cos(arg) + b * Math.sin(arg));
+                    }
                     
                     return { c, a, b, amp, phase, f };
                 });
@@ -1693,7 +1884,8 @@ export default function App() {
       setIsLoading(true);
 
       try {
-        const filePromises = Array.from(files).map((file) => {
+        const filesArray = Array.from(files).sort((a, b) => a.name.localeCompare(b.name));
+        const filePromises = filesArray.map((file) => {
           return new Promise<Papa.ParseResult<any>>((resolve, reject) => {
             // First read as text to detect special formats
             const reader = new FileReader();
@@ -1780,25 +1972,78 @@ export default function App() {
 
         const results = await Promise.all(filePromises);
         
-        // Validate headers if merging multiple files
+        let mergedData: any[] = [];
+        let finalFields: string[] = [];
+
         if (results.length > 1) {
-          const firstHeader = JSON.stringify(results[0].meta.fields);
-          for (let i = 1; i < results.length; i++) {
-            if (JSON.stringify(results[i].meta.fields) !== firstHeader) {
-              alert('Error: File CSV yang di-merge tidak memiliki judul header yang sama persis!');
-              setIsLoading(false);
-              return; // Abort if headers mismatch
+            const set1 = new Set(results[0].data.map((d: any) => d['Timestamp']));
+            let hasOverlap = false;
+            for (let i = 0; i < Math.min(100, results[1].data.length); i++) {
+                if (set1.has(results[1].data[i]['Timestamp'])) {
+                    hasOverlap = true;
+                    break;
+                }
             }
-          }
+
+            if (hasOverlap) {
+                // HORIZONTAL MERGE
+                const tsMap = new Map<string, any>();
+                let sensorCounter = 1;
+                finalFields = ['Timestamp'];
+
+                results.forEach((res) => {
+                    const rowFields = res.meta.fields || Object.keys(res.data[0] || {});
+                    const sensorFields = rowFields.filter((f: string) => {
+                        const lowerF = f.toLowerCase();
+                        return f !== 'Timestamp' && (lowerF.includes('(m)') || lowerF.includes('(cm)') || lowerF.includes('sensor'));
+                    });
+
+                    const fieldMap = new Map<string, string>();
+                    sensorFields.forEach(f => {
+                       const newName = `Sensor ${sensorCounter} (cm)`;
+                       fieldMap.set(f, newName);
+                       finalFields.push(newName);
+                       sensorCounter++;
+                    });
+
+                    res.data.forEach((row: any) => {
+                        const ts = row['Timestamp'];
+                        if (!ts) return;
+                        if (!tsMap.has(ts)) {
+                            tsMap.set(ts, { 'Timestamp': ts });
+                        }
+                        const existing = tsMap.get(ts);
+                        sensorFields.forEach(f => {
+                            if (row[f] !== undefined && row[f] !== null) {
+                                existing[fieldMap.get(f)!] = row[f];
+                            }
+                        });
+                    });
+                });
+                
+                mergedData = Array.from(tsMap.values());
+            } else {
+                // VERTICAL MERGE
+                const firstHeader = JSON.stringify(results[0].meta.fields || Object.keys(results[0].data[0]||{}));
+                for (let i = 1; i < results.length; i++) {
+                    const currentHeader = JSON.stringify(results[i].meta.fields || Object.keys(results[i].data[0]||{}));
+                    if (currentHeader !== firstHeader) {
+                        alert('Error: File CSV yang di-merge vertikal tidak memiliki judul header yang sama persis!');
+                        setIsLoading(false);
+                        return;
+                    }
+                }
+                results.forEach(res => {
+                    mergedData = mergedData.concat(res.data);
+                });
+                finalFields = results[0].meta.fields || Object.keys(mergedData[0] || {});
+            }
+        } else {
+            mergedData = results[0].data;
+            finalFields = results[0].meta.fields || Object.keys(mergedData[0] || {});
         }
 
-        // Merge Data
-        let mergedData: any[] = [];
-        results.forEach(res => {
-          mergedData = mergedData.concat(res.data);
-        });
-
-        const fields = results[0].meta.fields || [];
+        const fields = finalFields;
         const detectedSensors = fields.filter((f:string) => {
            const lowerF = f.toLowerCase();
            return lowerF.includes('(m)') || lowerF.includes('(cm)') || lowerF.startsWith('sensor');
@@ -1938,16 +2183,29 @@ export default function App() {
       });
       content = lines.join('\n');
     } else {
-      const lines = [
-        `Tide Prediction Report`,
-        `Range: ${predStartDate} to ${predEndDate}`,
-        `Note: Timestamps are formatted as dd/mm/yyyy hh:mm:ss`,
-        `------------------------------------------`
-      ];
+      const lines: string[] = [];
+      const activeStation = stationNameRef.current || chartTitle;
+      lines.push(`Station: ${activeStation} (Prediction)`);
+      if (stationLatRef.current || stationLonRef.current) {
+          lines.push(`Latitude: ${stationLatRef.current || '-'}`);
+          lines.push(`Longitude: ${stationLonRef.current || '-'}`);
+      }
+      lines.push(`Type: WATERLEVEL`);
+      lines.push(`Datum: MSL`);
+      lines.push(`Reference: ${isNaN(z0) ? '0.000' : z0.toFixed(3)}`);
+      lines.push(`Date Format: DD.MM.YYYY hh:mm:ss`);
+      lines.push(`Data Start`);
+
       predictions.forEach(p => {
-          lines.push(`${formatTimestamp(p.timestamp)}\t${typeof p.value === 'number' ? p.value.toFixed(3) : p.value}`);
+          let rowStr = formatTimestamp(p.timestamp);
+          const getStrVal = (val: any) => {
+              const num = Number(val);
+              if (typeof num !== 'number' || isNaN(num) || num === 999 || num === -999) return '999';
+              return Math.round(num * 100).toString();
+          };
+          lines.push(`${rowStr}\t${getStrVal(p.value)}`);
       });
-      content = lines.join('\n');
+      content = lines.join('\r\n');
     }
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -2385,7 +2643,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
       content += `--- HARMONIC CONSTITUENTS ---\n`;
       content += `Comp\tAmp (m)\tPhase (deg)\tDesc\n`;
-      harmonicResults.forEach(r => {
+      [...harmonicResults].sort((a: any, b: any) => b.amp - a.amp).forEach(r => {
         content += `${r.comp}\t${r.amp.toFixed(3)}\t${r.phase.toFixed(3)}\t${r.desc}\n`;
       });
     }
@@ -4262,7 +4520,7 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
     csv += `# Constituent Set,${constituentSet}\n`;
     csv += `# RMSE,${rmse !== undefined && rmse !== null ? rmse.toFixed(4) : 'N/A'}\n\n`;
     csv += "Component,Definition,Frequency (cph),Amplitude (m),Phase (deg)\n";
-    results.forEach((r: any) => {
+    [...results].sort((a: any, b: any) => b.amp - a.amp).forEach((r: any) => {
       csv += `${r.comp},${r.desc},${r.freq.toFixed(8)},${r.amp.toFixed(3)},${r.phase.toFixed(3)}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -4324,8 +4582,12 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
                 >
                   <option value="4">4 Constants (Basic)</option>
                   <option value="9">9 Constants (Standard)</option>
-                  <option value="IHO23">IHO 23 Constants (GeoTide)</option>
+                  <option value="IHO10">IHO-10 (10 Constants)</option>
+                  <option value="IHO23">IHO-23 (23 Constants)</option>
+                  <option value="NOAA">NOAA (32 Constants)</option>
                   <option value="FES2014">FES2014 (34 Constants)</option>
+                  <option value="ETCPOT">ETCPOT (36 Constants)</option>
+                  <option value="UKHO">UKHO TotalTide (214 Constants)</option>
                   <option value="AUTO">Auto (Rayleigh & SNR)</option>
                 </select>
              </div>
@@ -4379,7 +4641,7 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {results.map((r: any) => (
+                {[...results].sort((a: any, b: any) => b.amp - a.amp).map((r: any) => (
                    <tr key={r.comp} className="hover:bg-slate-50/50 transition-colors">
                     <td className="py-4 px-6 font-black text-[#0284c7]">{r.comp}</td>
                     <td className="py-4 px-6 text-slate-500 text-xs leading-snug">{r.desc}</td>
