@@ -125,12 +125,18 @@ export default function SummarizeView() {
     let stationName = 'Unknown';
     let latitude = 0;
     let longitude = 0;
-    let stlTrend = 0;
+    let finalTrend = 0;
     let msl = 0;
     let hat = 0;
     let lat = 0;
     let mhws = 0;
     let mlws = 0;
+
+    let hasSsa = false;
+    let ssaTrend = 0;
+    let hasLinear = false;
+    let linearTrend = 0;
+    let stlTrend = 0; // fallback
 
     // Helper to find value from line
     const extractVal = (line: string, index: number = 1) => {
@@ -161,14 +167,30 @@ export default function SummarizeView() {
         inSeaLevelTrendSection = true;
       } else if (line.includes('MODEL ACCURACIES') || line.includes('HARMONIC CONSTITUENTS')) {
         inSeaLevelTrendSection = false;
-      } else if (inSeaLevelTrendSection && line.startsWith('STL Decomposition')) {
-        stlTrend = parseFloat(extractVal(line)) || 0;
+      } else if (inSeaLevelTrendSection) {
+        if (line.startsWith('STL Decomposition')) {
+          stlTrend = parseFloat(extractVal(line)) || 0;
+        } else if (line.startsWith('Iterative SSA')) {
+          hasSsa = true;
+          ssaTrend = parseFloat(extractVal(line)) || 0;
+        } else if (line.startsWith('Linear Regression')) {
+          hasLinear = true;
+          linearTrend = parseFloat(extractVal(line)) || 0;
+        }
       }
     });
 
+    if (hasSsa) {
+      finalTrend = ssaTrend;
+    } else if (hasLinear) {
+      finalTrend = linearTrend;
+    } else {
+      finalTrend = stlTrend;
+    }
+
     if (stationName && (latitude !== 0 || longitude !== 0)) {
         return {
-          stationName, latitude, longitude, stlTrend, msl, hat, lat, mhws, mlws, fileName
+          stationName, latitude, longitude, stlTrend: finalTrend, msl, hat, lat, mhws, mlws, fileName
         };
     }
     return null;
@@ -180,7 +202,7 @@ export default function SummarizeView() {
 
   const formatSummaryExport = (): string => {
     // Tab delimited header
-    let content = 'Station Name\tLatitude\tLongitude\tSTL Trend (m/year)\tMSL (m)\tHAT (m)\tLAT (m)\tMHWS (m)\tMLWS (m)\n';
+    let content = 'Station Name\tLatitude\tLongitude\tTrend (m/year)\tMSL (m)\tHAT (m)\tLAT (m)\tMHWS (m)\tMLWS (m)\n';
     
     summaryData.forEach(row => {
       content += `${row.stationName}\t${row.latitude}\t${row.longitude}\t${row.stlTrend}\t${row.msl}\t${row.hat}\t${row.lat}\t${row.mhws}\t${row.mlws}\n`;
@@ -298,7 +320,7 @@ export default function SummarizeView() {
                              <th className="px-4 py-3 font-semibold border-b">Stasiun</th>
                              <th className="px-4 py-3 font-semibold border-b">Lat</th>
                              <th className="px-4 py-3 font-semibold border-b">Lon</th>
-                             <th className="px-4 py-3 font-semibold border-b text-right">Trend (STL)</th>
+                             <th className="px-4 py-3 font-semibold border-b text-right">Trend</th>
                              <th className="px-4 py-3 font-semibold border-b text-right">MSL</th>
                              <th className="px-4 py-3 font-semibold border-b text-right">HAT</th>
                              <th className="px-4 py-3 font-semibold border-b text-right">LAT</th>

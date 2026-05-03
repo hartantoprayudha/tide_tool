@@ -3982,7 +3982,7 @@ function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin
         <div className="space-y-6">
           <div className="space-y-4">
             <div className="flex justify-between items-end">
-              <label className="text-[10px] font-black text-slate-700 font-display uppercase tracking-widest">Threshold Z-Score</label>
+              <label className="text-[10px] font-black text-slate-700 font-display uppercase tracking-widest">Threshold</label>
               <span className="text-xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
             </div>
             <input 
