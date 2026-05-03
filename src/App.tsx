@@ -353,7 +353,7 @@ export default function App() {
   const [rmseVal, setRmseVal] = useState<number | null>(null);
   const isProcessing = useRef(false);
   const [z0, setZ0] = useState(0);
-  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number }, robustStlTrend?: { slope: number, intercept: number, rateYear: number }, ssaTrend?: { slope: number, intercept: number, rateYear: number } } | null>(null);
+  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number }, robustStlTrend?: { slope: number, intercept: number, rateYear: number }, ssaTrend?: { slope: number, intercept: number, rateYear: number }, polyTrend?: { c0: number, c1: number, c2: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
   const [isFullAnalysisRun, setIsFullAnalysisRun] = useState(false);
   const [validCache, setValidCache] = useState<Record<string, TideRecord[]>>({});
@@ -1327,6 +1327,64 @@ export default function App() {
                 return { slope, intercept, rateYear };
             };
 
+            const calculatePolyTrend = (dataX: number[], dataY: number[]): { c0: number, c1: number, c2: number } | undefined => {
+                const n = dataX.length;
+                if (n < 3) return undefined;
+                
+                // Normalization and centering to prevent numerical instability
+                let maxX = dataX[0];
+                let minX = dataX[0];
+                for (let i = 1; i < n; i++) {
+                    if (dataX[i] > maxX) maxX = dataX[i];
+                    if (dataX[i] < minX) minX = dataX[i];
+                }
+                const scaleX = (maxX - minX) > 0 ? (maxX - minX) : 1;
+                const offsetX = minX;
+                
+                let sumX = 0, sumX2 = 0, sumX3 = 0, sumX4 = 0;
+                let sumY = 0, sumXY = 0, sumX2Y = 0;
+
+                for (let i = 0; i < n; i++) {
+                    const vx = (dataX[i] - offsetX) / scaleX;
+                    const vy = dataY[i];
+                    const vx2 = vx * vx;
+                    sumX += vx;
+                    sumX2 += vx2;
+                    sumX3 += vx2 * vx;
+                    sumX4 += vx2 * vx2;
+                    sumY += vy;
+                    sumXY += vx * vy;
+                    sumX2Y += vx2 * vy;
+                }
+
+                const det = n * (sumX2 * sumX4 - sumX3 * sumX3) 
+                          - sumX * (sumX * sumX4 - sumX2 * sumX3) 
+                          + sumX2 * (sumX * sumX3 - sumX2 * sumX2);
+
+                if (Math.abs(det) < 1e-12) return undefined;
+
+                const c0_norm = (sumY * (sumX2 * sumX4 - sumX3 * sumX3) 
+                          - sumX * (sumXY * sumX4 - sumX2Y * sumX3) 
+                          + sumX2 * (sumXY * sumX3 - sumX2Y * sumX2)) / det;
+
+                const c1_norm = (n * (sumXY * sumX4 - sumX2Y * sumX3) 
+                          - sumY * (sumX * sumX4 - sumX2 * sumX3) 
+                          + sumX2 * (sumX * sumX2Y - sumX2 * sumXY)) / det;
+
+                const c2_norm = (n * (sumX2 * sumX2Y - sumX3 * sumXY) 
+                          - sumX * (sumX * sumX2Y - sumX2 * sumXY) 
+                          + sumY * (sumX * sumX3 - sumX2 * sumX2)) / det;
+
+                const s1 = c1_norm / scaleX;
+                const s2 = c2_norm / (scaleX * scaleX);
+
+                const c0 = c0_norm - s1 * offsetX + s2 * offsetX * offsetX;
+                const c1 = s1 - 2 * s2 * offsetX;
+                const c2 = s2;
+
+                return { c0, c1, c2 };
+            };
+
             // Use unified fit values if valid, otherwise fallback to simple regression
             const regTrend = !_isInsufficient 
                 ? { slope: unifiedSlope, intercept: unifiedIntercept, rateYear: unifiedSlope * 24 * 365.25 }
@@ -1338,6 +1396,7 @@ export default function App() {
             let stlTrendData: ReturnType<typeof calculateTrend> | undefined;
             let robustStlTrendData: ReturnType<typeof calculateTrend> | undefined;
             let ssaTrendData: ReturnType<typeof calculateTrend> | undefined;
+            
             const tEnd = processed[processed.length - 1].timestamp.getTime();
             const durationHours = (tEnd - t0) / 3600000;
             
@@ -1530,7 +1589,28 @@ export default function App() {
                 }
             }
 
-            setLinearTrend({ ...regTrend, lsqTrend, stlTrend: stlTrendData, robustStlTrend: robustStlTrendData, ssaTrend: ssaTrendData });
+            let trendPointsX: number[] = [];
+            let trendPointsY: number[] = [];
+            
+            for (let i = 0; i < processed.length; i++) {
+                const r = processed[i];
+                let tVal: number | undefined = undefined;
+                if (ssaTrendData && r.ssaTrendVal !== undefined) tVal = r.ssaTrendVal;
+                else if (stlTrendData && r.stlTrendVal !== undefined) tVal = r.stlTrendVal;
+                else if (regTrend) tVal = regTrend.slope * ((r.timestamp.getTime() - t0) / 3600000) + regTrend.intercept;
+                
+                if (tVal !== undefined && !isNaN(tVal)) {
+                    trendPointsX.push((r.timestamp.getTime() - t0) / 3600000);
+                    trendPointsY.push(tVal);
+                }
+            }
+
+            let polyTrendData = undefined;
+            if (trendPointsX.length > 2) {
+                polyTrendData = calculatePolyTrend(trendPointsX, trendPointsY);
+            }
+
+            setLinearTrend({ ...regTrend, lsqTrend, stlTrend: stlTrendData, robustStlTrend: robustStlTrendData, ssaTrend: ssaTrendData, polyTrend: polyTrendData });
             
             // Calculate RMSE
             let sumSqE = 0, countE = 0;
@@ -1792,8 +1872,13 @@ export default function App() {
                     val += res.amp * Math.cos(w * t - ph);
                 });
                 if (useTrendInPrediction) {
-                    const slopeToUse = linearTrend?.ssaTrend?.slope || linearTrend?.slope || 0;
-                    val += slopeToUse * t;
+                    if (linearTrend?.polyTrend) {
+                        const { c0, c1, c2 } = linearTrend.polyTrend;
+                        val += (c0 - z0) + c1 * t + c2 * t * t;
+                    } else {
+                        const slopeToUse = linearTrend?.ssaTrend?.slope || linearTrend?.slope || 0;
+                        val += slopeToUse * t;
+                    }
                 }
                 return val;
             };
