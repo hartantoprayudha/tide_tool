@@ -3519,12 +3519,12 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         >
           {contextMenu && (
             <div 
-              className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-slate-200 py-1.5 min-w-[200px]"
+              className="fixed z-[9999] bg-[#e9eff3] rounded-lg shadow-xl border border-slate-200 py-1.5 w-[200px] text-[12px]"
               style={{ top: contextMenu.y, left: contextMenu.x }}
               onClick={(e) => e.stopPropagation()}
             >
               <button 
-                className="w-full text-left px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:text-sky-600 transition-colors"
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-sky-600 transition-colors"
                 onClick={() => {
                   handleCalculateMSL();
                   setContextMenu(null);
@@ -3532,6 +3532,58 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               >
                 Hitung Muka Laut Rerata
               </button>
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-rose-600 transition-colors"
+                onClick={() => {
+                  onReset();
+                  setContextMenu(null);
+                }}
+              >
+                General Reset
+              </button>
+              {zoomDomain && (
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-sky-600 transition-colors"
+                onClick={() => {
+                  zoomOut();
+                  setContextMenu(null);
+                }}
+              >
+                Reset Zoom
+              </button>
+              )}
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-rose-600 transition-colors"
+                onClick={() => {
+                  let startMs, endMs;
+                  if (zoomDomain) {
+                      startMs = zoomDomain.start;
+                      endMs = zoomDomain.end;
+                  } else if (records.length > 0) {
+                      startMs = records[0].timestamp.getTime();
+                      endMs = records[records.length - 1].timestamp.getTime();
+                  }
+                  if (startMs !== undefined && endMs !== undefined) {
+                      const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: 0, scale: 1, action: 'delete' as const }];
+                      setModifiers(newMods);
+                      runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods, isDeTiding);
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                Delete
+              </button>
+              {modifiers.length > 0 && (
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-amber-600 transition-colors"
+                onClick={() => {
+                  undoModifier();
+                  setContextMenu(null);
+                }}
+              >
+                Undo Delete/Mod
+              </button>
+              )}
             </div>
           )}
           {dragAction === 'delete' && (
