@@ -2114,9 +2114,10 @@ export default function App() {
 
     let content = "";
     if (formatType === 'csv') {
-      const lines = ["Timestamp,Predicted Height (m)"];
+      const lines = ["Timestamp,Predicted Height (cm)"];
       predictions.forEach(p => {
-        lines.push(`${formatTimestamp(p.timestamp)},${p.value}`);
+        const valCm = Math.round(Number(p.value) * 100);
+        lines.push(`${formatTimestamp(p.timestamp)},${valCm}`);
       });
       content = lines.join('\n');
     } else {
