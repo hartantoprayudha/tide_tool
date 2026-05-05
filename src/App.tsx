@@ -504,8 +504,10 @@ export default function App() {
   }, [availableSensors, harmonicDataOptions, harmonicDataSelection]);
 
   const [zThreshold, setZThreshold] = useState(3.0);
+  const [useZScoreOutlier, setUseZScoreOutlier] = useState(true);
   const [manualMin, setManualMin] = useState<number | "">("");
   const [manualMax, setManualMax] = useState<number | "">("");
+  const [useManualOutlier, setUseManualOutlier] = useState(false);
   const [sensorPembersihanActive, setSensorPembersihanActive] = useState<Record<string, boolean>>({});
   const [sensorFilterActive, setSensorFilterActive] = useState<Record<string, boolean>>({});
   
@@ -1106,21 +1108,25 @@ export default function App() {
             let isStatOutlier = false;
             let isHarmonicOutlier = false;
             
-            if (!_isInsufficient) {
-                 isHarmonicOutlier = residual > (zThreshold * stdResidual); // use standard deviation of residuals
-            } else {
-                 isStatOutlier = Math.abs(r.raw - meanRaw) > (zThreshold * stdRaw);
-            }
-            
-            // Limit bounds
-            if (r.raw > roughHAT + (zThreshold * stdResidual * 0.5) || r.raw < roughLAT - (zThreshold * stdResidual * 0.5)) {
-                 isHarmonicOutlier = true;
+            if (useZScoreOutlier) {
+                if (!_isInsufficient) {
+                     isHarmonicOutlier = residual > (zThreshold * stdResidual); // use standard deviation of residuals
+                } else {
+                     isStatOutlier = Math.abs(r.raw - meanRaw) > (zThreshold * stdRaw);
+                }
+                
+                // Limit bounds
+                if (r.raw > roughHAT + (zThreshold * stdResidual * 0.5) || r.raw < roughLAT - (zThreshold * stdResidual * 0.5)) {
+                     isHarmonicOutlier = true;
+                }
             }
             
             // Manual Range Check
             let isManualOutlier = false;
-            if (manualMin !== "" && r.raw < (manualMin as number)) isManualOutlier = true;
-            if (manualMax !== "" && r.raw > (manualMax as number)) isManualOutlier = true;
+            if (useManualOutlier) {
+                if (manualMin !== "" && r.raw < (manualMin as number)) isManualOutlier = true;
+                if (manualMax !== "" && r.raw > (manualMax as number)) isManualOutlier = true;
+            }
 
             return {
                 ...r,
@@ -2355,7 +2361,7 @@ export default function App() {
 
     logContent += `4. Time Offset      : ${timeOffset} jam\n`;
     logContent += `5. Time Resampling  : otomatis berdasarkan interval data data\n`;
-    logContent += `6. Deteksi Outlier  : Z-Score Threshold: ${zThreshold} / Manual Range: [${manualMin === "" ? "none" : manualMin}, ${manualMax === "" ? "none" : manualMax}]\n`;
+    logContent += `6. Deteksi Outlier  : ${useZScoreOutlier ? `Z-Score (${zThreshold}σ)` : 'Z-Score (Off)'} | ${useManualOutlier ? `Manual Range [${manualMin === "" ? "none" : manualMin}, ${manualMax === "" ? "none" : manualMax}]` : 'Manual Range (Off)'}\n`;
     logContent += `7. Set Konstanta    : ${constituentSet}\n`;
     logContent += `8. De-Tiding Trend  : ${isDeTiding ? 'Aktif' : 'Tidak Aktif'}\n`;
     logContent += `9. Smoothing Filter : ${filterType} (Window: ${filterType === 'ma' ? filterWindow : filterType === 'median' ? medianWindow : 'N/A'})\n`;
@@ -2954,10 +2960,14 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                       records={records} 
                       threshold={zThreshold} 
                       setThreshold={setZThreshold}
+                      useZScoreOutlier={useZScoreOutlier}
+                      setUseZScoreOutlier={setUseZScoreOutlier}
                       manualMin={manualMin}
                       setManualMin={setManualMin}
                       manualMax={manualMax}
                       setManualMax={setManualMax}
+                      useManualOutlier={useManualOutlier}
+                      setUseManualOutlier={setUseManualOutlier}
                       onUpdate={() => { 
                           setIsPembersihanActive(true);
                           runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false, undefined, harmonicMethod, true, isFilterActive); 
@@ -4365,7 +4375,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   );
 }
 
-function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin, manualMax, setManualMax, onUpdate }: any) {
+function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin, manualMax, setManualMax, useZScoreOutlier, setUseZScoreOutlier, useManualOutlier, setUseManualOutlier, onUpdate }: any) {
   return (
     <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 space-y-6 shadow-sm overflow-hidden">
        <div className="flex items-center gap-4">
@@ -4374,52 +4384,71 @@ function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin
         </div>
         <div>
           <h2 className="text-lg font-black text-slate-800">Spike & Outlier Control</h2>
-          <p className="text-[11px] text-slate-500 leading-tight">Gunakan Z-Score atau rentang manual untuk membuang anomali data.</p>
+          <p className="text-[11px] text-slate-500 leading-tight">Gunakan Z-Score atau rentang manual (atau keduanya) untuk membuang anomali data.</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-6">
-          <div className="space-y-4">
-            <div className="flex justify-between items-end">
-              <label className="text-[10px] font-black text-slate-700 font-display uppercase tracking-widest">Threshold</label>
-              <span className="text-xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
+          <div className={`space-y-4 p-4 rounded-xl border transition-colors ${useZScoreOutlier ? 'bg-sky-50/30 border-sky-100' : 'bg-slate-50 border-slate-200 opacity-70'}`}>
+            <label className="flex items-center gap-2 cursor-pointer group mb-2">
+                <input 
+                    type="checkbox" 
+                    checked={useZScoreOutlier}
+                    onChange={(e) => setUseZScoreOutlier(e.target.checked)}
+                    className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500 cursor-pointer"
+                />
+                <span className="text-[10px] font-black text-slate-700 font-display uppercase tracking-widest group-hover:text-slate-900 transition-colors">Gunakan Z-Score & Harmonic Bounds</span>
+            </label>
+            <div className={`space-y-4 ${useZScoreOutlier ? '' : 'pointer-events-none'}`}>
+                <div className="flex justify-between items-end">
+                  <label className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest">Threshold Z-Score</label>
+                  <span className="text-xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
+                </div>
+                <input 
+                  type="range" min="0.5" max="5" step="0.1" 
+                  value={isNaN(threshold) ? 3.0 : threshold} 
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setThreshold(isNaN(val) ? 3.0 : val);
+                  }}
+                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+                />
+                <p className="text-[9px] text-slate-400 font-medium italic">Nilai lebih kecil menghapus lebih banyak data variansi tinggi.</p>
             </div>
-            <input 
-              type="range" min="0.5" max="5" step="0.1" 
-              value={isNaN(threshold) ? 3.0 : threshold} 
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                setThreshold(isNaN(val) ? 3.0 : val);
-              }}
-              className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
-            />
-            <p className="text-[9px] text-slate-400 font-medium italic">Nilai lebih kecil menghapus lebih banyak data.</p>
           </div>
 
-          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-             <label className="text-[10px] font-black text-slate-800 uppercase tracking-widest block font-display">Pembersihan Manual (m)</label>
-             <div className="grid grid-cols-2 gap-3">
+          <div className={`p-4 rounded-xl border transition-colors space-y-3 ${useManualOutlier ? 'bg-amber-50/30 border-amber-100' : 'bg-slate-50 border-slate-200 opacity-70'}`}>
+             <label className="flex items-center gap-2 cursor-pointer group mb-2">
+                <input 
+                    type="checkbox"
+                    checked={useManualOutlier}
+                    onChange={(e) => setUseManualOutlier(e.target.checked)}
+                    className="w-4 h-4 rounded text-amber-500 border-slate-300 focus:ring-amber-500 cursor-pointer"
+                />
+                <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest font-display group-hover:text-slate-900 transition-colors">Gunakan Pembersihan Manual (m)</span>
+             </label>
+             <div className={`grid grid-cols-2 gap-3 ${useManualOutlier ? '' : 'pointer-events-none'}`}>
                 <div className="space-y-1">
-                   <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Min</div>
+                   <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Min Limit</div>
                    <input 
                       type="number" 
                       step="0.001"
                       value={manualMin}
                       placeholder="Min..."
                       onChange={(e) => setManualMin(e.target.value === "" ? "" : parseFloat(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-sky-100"
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-100"
                    />
                 </div>
                 <div className="space-y-1">
-                   <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Max</div>
+                   <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Max Limit</div>
                    <input 
                       type="number" 
                       step="0.001"
                       value={manualMax}
                       placeholder="Max..."
                       onChange={(e) => setManualMax(e.target.value === "" ? "" : parseFloat(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-sky-100"
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-100"
                    />
                 </div>
              </div>
@@ -4429,7 +4458,7 @@ function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin
             onClick={onUpdate}
             className="w-full py-3 bg-[#1e293b] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-md active:scale-95 uppercase tracking-wider"
           >
-            <RefreshCw size={16} /> Jalankan Pembersihan
+            <RefreshCw size={16} /> Update Outlier Check
           </button>
         </div>
 
