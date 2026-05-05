@@ -906,12 +906,13 @@ export default function App() {
             dts.push(processed[i+1].timestamp.getTime() - processed[i].timestamp.getTime());
         }
         dts.sort((a,b) => a - b);
-        const dt = dts.length > 0 ? dts[Math.floor(dts.length / 2)] : 60000;
+        let dt = dts.length > 0 ? dts[Math.floor(dts.length / 2)] : 60000;
+        if (!dt || isNaN(dt) || dt <= 0) dt = 60000;
 
         const regularized: TideRecord[] = [];
         let currIdx = 0;
-        const startT = processed[0].timestamp.getTime();
-        const endT = processed[processed.length - 1].timestamp.getTime();
+        const startT = processed[0]?.timestamp?.getTime() || 0;
+        const endT = processed[processed.length - 1]?.timestamp?.getTime() || 0;
 
         for (let t = startT; t <= endT; t += dt) {
             while (currIdx < processed.length && processed[currIdx].timestamp.getTime() < t - dt / 2) {
@@ -932,6 +933,11 @@ export default function App() {
             }
         }
         processed = regularized;
+        if (processed.length === 0) {
+            alert("Gagal memproses data. Rentang waktu tidak valid.");
+            setIsLoading(false);
+            return;
+        }
         // -----------------------------------------------------------------
 
         // Phase 1.5: Gross error removal (flat value > 60 mins check)
@@ -969,7 +975,7 @@ export default function App() {
         // 2. Harmonic Outlier Detection (Two-Pass Logic)
         let compsToFit: string[] = [];
         
-        const durationHoursCheck = (processed[processed.length - 1].timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
+        const durationHoursCheck = ((processed[processed.length - 1]?.timestamp?.getTime() || 0) - (processed[0]?.timestamp?.getTime() || 0)) / 3600000;
         
         if (constituentSet === '4') compsToFit = ['M2', 'S2', 'K1', 'O1'];
         else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
@@ -1019,7 +1025,7 @@ export default function App() {
         const roughCompsToFit = autoOutlierComps; 
         
         const validForRough = processed.filter(r => !isNaN(r.raw));
-        const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000);
+        const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - (processed[0]?.timestamp?.getTime() || 0)) / 3600000);
         const y_vals_raw = validForRough.map(r => r.raw);
         const meanRaw = y_vals_raw.reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1);
         const stdRaw = Math.sqrt(y_vals_raw.map(x => Math.pow(x - meanRaw, 2)).reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1));
@@ -1072,7 +1078,7 @@ export default function App() {
         
         // First pass: compute predicted levels and sum of squared residuals
         processed.forEach(r => {
-            const tHour = (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
+            const tHour = (r.timestamp.getTime() - (processed[0]?.timestamp?.getTime() || 0)) / 3600000;
             let predictedLevel = roughZ0 + roughSlope * tHour;
             if (!_isInsufficient && roughSolution.length > 0) {
                 for (let i = 0; i < roughCompsToFit.length; i++) {
@@ -1159,7 +1165,7 @@ export default function App() {
                 cleanedInput[idx] = validUnfiltered[idx];
             } else {
                 // Temporary fill for filter stability - using linear trend or roughZ0
-                const tHour = (processed[idx].timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
+                const tHour = ((processed[idx]?.timestamp?.getTime() || 0) - (processed[0]?.timestamp?.getTime() || 0)) / 3600000;
                 cleanedInput[idx] = roughZ0 + roughSlope * tHour; 
             }
         }
@@ -1176,7 +1182,7 @@ export default function App() {
                 const gapLength = endGap - startGap;
                 
                 const getTrendVal = (idx: number) => {
-                    const tH = (processed[idx].timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
+                    const tH = ((processed[idx]?.timestamp?.getTime() || 0) - (processed[0]?.timestamp?.getTime() || 0)) / 3600000;
                     return roughZ0 + roughSlope * tH;
                 };
 
@@ -1514,7 +1520,7 @@ export default function App() {
         // 5. Linear Trend & Least Squares Analysis with optional De-Tiding
         let validRecords = processed.filter(r => !isNaN(r.filtered) && !r.isOutlier);
         if (validRecords.length > 1) {
-            const t0 = processed[0].timestamp.getTime();
+            const t0 = processed[0]?.timestamp?.getTime() || 0;
             const x = validRecords.map(r => (r.timestamp.getTime() - t0) / 3600000);
             
             // 5a. Linear Regression (Standard)
@@ -1603,7 +1609,7 @@ export default function App() {
             let robustStlTrendData: ReturnType<typeof calculateTrend> | undefined;
             let ssaTrendData: ReturnType<typeof calculateTrend> | undefined;
             
-            const tEnd = processed[processed.length - 1].timestamp.getTime();
+            const tEnd = processed[processed.length - 1]?.timestamp?.getTime() || 0;
             const durationHours = (tEnd - t0) / 3600000;
             
             if (durationHours >= 17520) { // >= 2 years
@@ -1647,7 +1653,7 @@ export default function App() {
                 for (let i = halfWindow; i < yFull.length - halfWindow; i++) {
                     if (currentCount > (windowSize * 0.25)) { // Output if we have at least 25% of data in the window
                         const val = currentSum / currentCount;
-                        stlTrendX.push((processed[i].timestamp.getTime() - t0) / 3600000);
+                        stlTrendX.push(((processed[i]?.timestamp?.getTime() || 0) - t0) / 3600000);
                         stlTrendY.push(val);
                         processed[i].stlTrendVal = val;
                     }
@@ -1673,10 +1679,10 @@ export default function App() {
                 const dailyY: number[] = [];
                 let sliceSum = 0;
                 let sliceCount = 0;
-                let curDay = Math.floor((processed[0].timestamp.getTime() - t0) / 86400000);
+                let curDay = Math.floor(((processed[0]?.timestamp?.getTime() || 0) - t0) / 86400000);
 
                 for(let i=0; i<yFull.length; i++) {
-                    const day = Math.floor((processed[i].timestamp.getTime() - t0) / 86400000);
+                    const day = Math.floor(((processed[i]?.timestamp?.getTime() || 0) - t0) / 86400000);
                     if (!isNaN(yFull[i])) {
                         if(day === curDay) {
                             sliceSum += yFull[i];
@@ -1780,7 +1786,7 @@ export default function App() {
 
                     // Interpolate back to hourly records for the chart
                     for(let i=0; i<processed.length; i++) {
-                        const t = (processed[i].timestamp.getTime() - t0) / 3600000;
+                        const t = ((processed[i]?.timestamp?.getTime() || 0) - t0) / 3600000;
                         let dayIdxFloat = (t - 12) / 24;
                         let idx = Math.floor(dayIdxFloat);
                         if (idx < 0) idx = 0;
@@ -1820,7 +1826,7 @@ export default function App() {
             
             // Calculate RMSE
             let sumSqE = 0, countE = 0;
-            const rt0 = processed[0].timestamp.getTime();
+            const rt0 = processed[0]?.timestamp?.getTime() || 0;
             processed.forEach(r => {
                 if (!r.isOutlier && !isNaN(r.filtered)) {
                     const rt = (r.timestamp.getTime() - rt0) / 3600000;
@@ -2066,7 +2072,7 @@ export default function App() {
             }
 
             const predData = [];
-            const t0 = records[0].timestamp.getTime();
+            const t0 = records[0]?.timestamp?.getTime() || 0;
             const dailyStats: Record<string, any> = {};
 
             const calcValue = (d: Date) => {
@@ -2196,7 +2202,7 @@ export default function App() {
         return;
     }
 
-    const isOneMinuteData = records.length > 1 && Math.abs(records[1].timestamp.getTime() - records[0].timestamp.getTime()) >= 59000 && Math.abs(records[1].timestamp.getTime() - records[0].timestamp.getTime()) <= 61000;
+    const isOneMinuteData = records.length > 1 && Math.abs((records[1]?.timestamp?.getTime() || 0) - (records[0]?.timestamp?.getTime() || 0)) >= 59000 && Math.abs((records[1]?.timestamp?.getTime() || 0) - (records[0]?.timestamp?.getTime() || 0)) <= 61000;
     const currentMode = isOneMinuteData ? exportIntervalMode : '1_minute';
 
     let exportRecords = records;
@@ -2955,7 +2961,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                 />
             )}
             {activeTab === 'validate' && records.length > 0 && (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-6">
                     <OutlierView 
                       records={records} 
                       threshold={zThreshold} 
@@ -3350,7 +3356,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     if (!records.length) return [];
     
     // 1. Determine the domain to sample from
-    const domainSearch = zoomDomain || { start: records[0].timestamp.getTime(), end: records[records.length - 1].timestamp.getTime() };
+    const domainSearch = zoomDomain || { start: records[0]?.timestamp?.getTime() || 0, end: records[records.length - 1]?.timestamp?.getTime() || 0 };
     const domainBuffer = zoomDomain ? (zoomDomain.end - zoomDomain.start) * 0.05 : 0;
     const startMs = domainSearch.start - domainBuffer;
     const endMs = domainSearch.end + domainBuffer;
@@ -4388,75 +4394,80 @@ function OutlierView({ records, threshold, setThreshold, manualMin, setManualMin
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-6">
-          <div className={`space-y-4 p-4 rounded-xl border transition-colors ${useZScoreOutlier ? 'bg-sky-50/30 border-sky-100' : 'bg-slate-50 border-slate-200 opacity-70'}`}>
-            <label className="flex items-center gap-2 cursor-pointer group mb-2">
-                <input 
-                    type="checkbox" 
-                    checked={useZScoreOutlier}
-                    onChange={(e) => setUseZScoreOutlier(e.target.checked)}
-                    className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500 cursor-pointer"
-                />
-                <span className="text-[10px] font-black text-slate-700 font-display uppercase tracking-widest group-hover:text-slate-900 transition-colors">Gunakan Z-Score & Harmonic Bounds</span>
-            </label>
-            <div className={`space-y-4 ${useZScoreOutlier ? '' : 'pointer-events-none'}`}>
-                <div className="flex justify-between items-end">
-                  <label className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest">Threshold Z-Score</label>
-                  <span className="text-xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
-                </div>
-                <input 
-                  type="range" min="0.5" max="5" step="0.1" 
-                  value={isNaN(threshold) ? 3.0 : threshold} 
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    setThreshold(isNaN(val) ? 3.0 : val);
-                  }}
-                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
-                />
-                <p className="text-[9px] text-slate-400 font-medium italic">Nilai lebih kecil menghapus lebih banyak data variansi tinggi.</p>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className={`space-y-4 p-4 rounded-xl border transition-colors ${useZScoreOutlier ? 'bg-sky-50/30 border-sky-100' : 'bg-slate-50 border-slate-200 opacity-70'}`}>
+              <label className="flex items-center gap-2 cursor-pointer group mb-2">
+                  <input 
+                      type="checkbox" 
+                      checked={useZScoreOutlier}
+                      onChange={(e) => setUseZScoreOutlier(e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <span className="text-[10px] font-black text-slate-700 font-display uppercase tracking-widest group-hover:text-slate-900 transition-colors">Gunakan Z-Score & Harmonic Bounds</span>
+              </label>
+              <div className={`space-y-4 ${useZScoreOutlier ? '' : 'pointer-events-none'}`}>
+                  <div className="flex justify-between items-end">
+                    <label className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest">Threshold Z-Score</label>
+                    <span className="text-xl font-black text-[#0284c7] font-mono">{isNaN(threshold) ? 0 : threshold}σ</span>
+                  </div>
+                  <input 
+                    type="range" min="0.5" max="5" step="0.1" 
+                    value={isNaN(threshold) ? 3.0 : threshold} 
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      setThreshold(isNaN(val) ? 3.0 : val);
+                    }}
+                    className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0284c7]"
+                  />
+                  <p className="text-[9px] text-slate-400 font-medium italic mt-2 text-balance leading-snug">Nilai lebih kecil menghapus lebih banyak data variansi tinggi.</p>
+              </div>
             </div>
-          </div>
 
-          <div className={`p-4 rounded-xl border transition-colors space-y-3 ${useManualOutlier ? 'bg-amber-50/30 border-amber-100' : 'bg-slate-50 border-slate-200 opacity-70'}`}>
-             <label className="flex items-center gap-2 cursor-pointer group mb-2">
-                <input 
-                    type="checkbox"
-                    checked={useManualOutlier}
-                    onChange={(e) => setUseManualOutlier(e.target.checked)}
-                    className="w-4 h-4 rounded text-amber-500 border-slate-300 focus:ring-amber-500 cursor-pointer"
-                />
-                <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest font-display group-hover:text-slate-900 transition-colors">Gunakan Pembersihan Manual (m)</span>
-             </label>
-             <div className={`grid grid-cols-2 gap-3 ${useManualOutlier ? '' : 'pointer-events-none'}`}>
-                <div className="space-y-1">
-                   <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Min Limit</div>
-                   <input 
-                      type="number" 
-                      step="0.001"
-                      value={manualMin}
-                      placeholder="Min..."
-                      onChange={(e) => setManualMin(e.target.value === "" ? "" : parseFloat(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-100"
-                   />
-                </div>
-                <div className="space-y-1">
-                   <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Max Limit</div>
-                   <input 
-                      type="number" 
-                      step="0.001"
-                      value={manualMax}
-                      placeholder="Max..."
-                      onChange={(e) => setManualMax(e.target.value === "" ? "" : parseFloat(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-100"
-                   />
-                </div>
-             </div>
+            <div className={`p-4 rounded-xl border transition-colors space-y-3 ${useManualOutlier ? 'bg-amber-50/30 border-amber-100' : 'bg-slate-50 border-slate-200 opacity-70'}`}>
+               <label className="flex items-center gap-2 cursor-pointer group mb-2">
+                  <input 
+                      type="checkbox"
+                      checked={useManualOutlier}
+                      onChange={(e) => setUseManualOutlier(e.target.checked)}
+                      className="w-4 h-4 rounded text-amber-500 border-slate-300 focus:ring-amber-500 cursor-pointer"
+                  />
+                  <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest font-display group-hover:text-slate-900 transition-colors">Gunakan Pembersihan Manual (m)</span>
+               </label>
+               <div className={`grid grid-cols-2 gap-3 ${useManualOutlier ? '' : 'pointer-events-none'}`}>
+                  <div className="space-y-1">
+                     <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Min Limit</div>
+                     <input 
+                        type="number" 
+                        step="0.001"
+                        value={manualMin}
+                        placeholder="Min..."
+                        onChange={(e) => setManualMin(e.target.value === "" ? "" : parseFloat(e.target.value))}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-100"
+                     />
+                  </div>
+                  <div className="space-y-1">
+                     <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Max Limit</div>
+                     <input 
+                        type="number" 
+                        step="0.001"
+                        value={manualMax}
+                        placeholder="Max..."
+                        onChange={(e) => setManualMax(e.target.value === "" ? "" : parseFloat(e.target.value))}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-100"
+                     />
+                  </div>
+               </div>
+               <p className="text-[9px] text-slate-400 font-medium italic mt-3 pt-2 border-t border-slate-100/50 leading-snug">
+                  Data yang berada di luar rentang min dan max akan otomatis dibuang sebagai outlier ekstrem.
+               </p>
+            </div>
           </div>
 
           <button 
             onClick={onUpdate}
-            className="w-full py-3 bg-[#1e293b] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-md active:scale-95 uppercase tracking-wider"
+            className="w-full py-4 bg-[#1e293b] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-3 hover:bg-black transition-all shadow-md active:scale-95 uppercase tracking-wider"
           >
             <RefreshCw size={16} /> Update Outlier Check
           </button>
