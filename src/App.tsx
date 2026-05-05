@@ -1000,24 +1000,11 @@ export default function App() {
         compsToFit = compsToFit.filter(c => HARMONIC_FREQS[c] !== undefined);
 
         // A. Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
-        // For outlier detection "Jalankan Pembersihan", we use Auto (Rayleigh & SNR) algorithm to build the cache "predicted"
-        let autoOutlierComps: string[] = [];
-        const rayleighCriterionFreq = 1.0 / durationHoursCheck;
-        const priorityList = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 'Mm', 'Ssa', 'Sa', 'E2', 'La2', 'M3', 'M8', 'MKS2', 'MSqm', 'Mtm', 'N4', 'R2', 'S1'];
-        Object.keys(HARMONIC_FREQS).forEach(k => {
-             if (!priorityList.includes(k)) priorityList.push(k);
-        });
-        priorityList.forEach(c => {
-             if (!HARMONIC_FREQS[c]) return;
-             let canAdd = true;
-             for (let i = 0; i < autoOutlierComps.length; i++) {
-                 if (Math.abs(HARMONIC_FREQS[c].f - HARMONIC_FREQS[autoOutlierComps[i]].f) < rayleighCriterionFreq) {
-                     canAdd = false;
-                     break;
-                 }
-             }
-             if (canAdd) autoOutlierComps.push(c);
-        });
+        // For outlier detection "Jalankan Pembersihan", we use 9 constants to build the cache "predicted"
+        let autoOutlierComps = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
+        
+        // Ensure we only use available consts
+        autoOutlierComps = autoOutlierComps.filter(c => HARMONIC_FREQS[c] !== undefined);
         
         const roughCompsToFit = autoOutlierComps; 
         
@@ -3290,7 +3277,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
-  const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
+  const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({
+    combined: true,
+    interpolated: true,
+    predictedLevel: true
+  });
   const [vZoom, setVZoom] = useState(1);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
 
@@ -3347,6 +3338,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     let key = e.dataKey;
     if (e.value === "Valid") key = "filtered";
     else if (e.value === "Sea Level Trend") key = "trendline";
+    else if (e.value === "Predicted") key = "predictedLevel";
     else if (availableSensors.includes(e.value)) key = e.value;
     
     if (typeof key === 'function' && typeof e.value === 'string') {
@@ -3804,7 +3796,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Multi-Sensor Overlay</label>
                 <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
                     {availableSensors.map((s: string) => {
-                        const palette = ['#6366f1', '#3b82f6', '#ff00ff', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+                        const palette = ['#3E9BFE', '#059669', '#ff00ff', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
                         const color = palette[availableSensors.indexOf(s) % palette.length];
                         const isActive = visibleSensors.includes(s);
                         return (
@@ -3991,7 +3983,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 dataKey="timeMs" 
                 type="number"
                 scale="time"
-                domain={['dataMin', 'dataMax']}
+                domain={zoomDomain ? [zoomDomain.start, zoomDomain.end] : ['dataMin', 'dataMax']}
+                allowDataOverflow
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM HH:mm')}
                 tick={{fontSize: 9, fill:'#64748b'}} 
                 minTickGap={30}
@@ -4054,7 +4047,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                           )}
                           
                           {visibleSensors.map((s, idx) => {
-                             const palette = ['#2563eb', '#059669', '#ff00ff', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
+                             const palette = ['#3E9BFE', '#059669', '#ff00ff', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
                              const color = palette[availableSensors.indexOf(s) % palette.length];
                              return (
                                <div key={s} className="flex items-center justify-between gap-6 text-[11px]">
@@ -4077,6 +4070,18 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                                 </div>
                                 <span className="font-bold text-slate-800 font-mono">
                                   {data.trendline.toFixed(3)} m
+                                </span>
+                              </div>
+                          )}
+
+                          {data.predictedLevel !== undefined && !isNaN(data.predictedLevel) && (
+                              <div className="flex items-center justify-between gap-6 text-[11px]">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 rounded-sm bg-[#0a0a0a]" />
+                                  <span className="font-semibold text-slate-600">Predicted (Outlier Detect)</span>
+                                </div>
+                                <span className="font-bold text-slate-800 font-mono">
+                                  {data.predictedLevel.toFixed(3)} m
                                 </span>
                               </div>
                           )}
@@ -4111,7 +4116,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               ) : null}
 
               {availableSensors.map((sensor, idx) => {
-                  const palette = ['#2563eb', '#059669', '#ff00ff', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
+                  const palette = ['#3E9BFE', '#059669', '#ff00ff', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
                   const color = palette[idx % palette.length];
                   if (!visibleSensors.includes(sensor)) return null;
                   return (
@@ -4134,6 +4139,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               <Line hide={hiddenLines.combined} type="monotone" dataKey="combined" stroke="#F5BF03" strokeWidth={2} dot={false} name="Combined" isAnimationActive={false} connectNulls={false} />
               <Line hide={hiddenLines.interpolated} type="monotone" dataKey="interpolated" stroke="#800000" strokeWidth={2} dot={false} name="Interpolated" isAnimationActive={false} connectNulls={false} />
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" isAnimationActive={false} connectNulls={false} />
+              <Line hide={hiddenLines.predictedLevel} type="monotone" dataKey="predictedLevel" stroke="#0a0a0a" strokeWidth={1.5} dot={false} name="Predicted" isAnimationActive={false} connectNulls={false} />
               
               <Brush 
                 dataKey="timeMs" 
@@ -4705,6 +4711,22 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
 
   const moonEvents = useMemo(() => getMoonEvents(displayPreds), [displayPreds]);
 
+  const predYDomain = useMemo(() => {
+    if (!displayPreds.length) return ['auto', 'auto'];
+    
+    let min = Number.MAX_VALUE;
+    let max = -Number.MAX_VALUE;
+    displayPreds.forEach((d: any) => {
+        if (d.value < min) min = d.value;
+        if (d.value > max) max = d.value;
+    });
+    
+    if (min === Number.MAX_VALUE) return ['auto', 'auto'];
+    
+    const padding = (max - min) * 0.1;
+    return [Math.floor((min - padding) / 0.5) * 0.5, Math.ceil((max + padding) / 0.5) * 0.5];
+  }, [displayPreds]);
+
   const zoom = () => {
     if (refAreaLeft === refAreaRight || refAreaRight === '') {
       setRefAreaLeft('');
@@ -4839,7 +4861,8 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 dataKey="timeMs" 
                 type="number"
                 scale="time"
-                domain={['dataMin', 'dataMax']}
+                domain={zoomDomain ? [zoomDomain.start, zoomDomain.end] : ['dataMin', 'dataMax']}
+                allowDataOverflow
                 tick={{fontSize: 9, fill: '#64748b'}} 
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM/yyyy')}
                 minTickGap={30}
@@ -4850,7 +4873,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 label={{ value: 'Elevasi (m)', angle: -90, position: 'insideLeft', offset: -10, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
                 tick={{fontSize: 9, fill: '#64748b'}} 
                 axisLine={false} 
-                domain={['auto', 'auto']} 
+                domain={predYDomain} 
                 width={80}
               />
               <Tooltip content={<PredictionTooltip />} />
