@@ -443,6 +443,7 @@ interface PartialModifier {
   sensor: string;
   offset: number;
   scale: number;
+  timeOffset?: number;
   referenceSensor?: string;
   action?: 'modify' | 'delete';
 }
@@ -811,8 +812,15 @@ export default function App() {
           }
 
           const unmodifiedDateMs = dateObj.getTime();
-          if (tOffset !== 0) {
-              dateObj = new Date(unmodifiedDateMs + tOffset * 3600000);
+          let localTOffset = tOffset;
+          for (let mIdx = 0; mIdx < activeMods.length; mIdx++) {
+              const mod = activeMods[mIdx];
+              if (mod.timeOffset && mod.sensor === currentSensor && unmodifiedDateMs >= mod.startMs && unmodifiedDateMs <= mod.endMs) {
+                  localTOffset += mod.timeOffset;
+              }
+          }
+          if (localTOffset !== 0) {
+              dateObj = new Date(unmodifiedDateMs + localTOffset * 3600000);
           }
 
           const allSamples: Record<string, number> = {};
@@ -2655,54 +2663,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">V-Offset (m)</label>
-                <input 
-                  type="number"
-                  step="0.01"
-                  value={vOffsetStr}
-                  placeholder="0.00"
-                  onChange={(e) => setVOffsetStr(e.target.value)}
-                  onBlur={() => {
-                      const val = parseFloat(vOffsetStr) || 0;
-                      if (val !== verticalOffset) {
-                          setVerticalOffset(val);
-                          runAnalysis(rawData, selectedSensor, val, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, isFullAnalysisRun);
-                      }
-                  }}
-                  onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                          e.currentTarget.blur();
-                      }
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
-                />
-            </div>
-            <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">T-Offset (Hr)</label>
-                <input 
-                  type="number"
-                  step="0.5"
-                  value={tOffsetStr}
-                  placeholder="0.0"
-                  onChange={(e) => setTOffsetStr(e.target.value)}
-                  onBlur={() => {
-                      const val = parseFloat(tOffsetStr) || 0;
-                      if (val !== timeOffset) {
-                          setTimeOffset(val);
-                          runAnalysis(rawData, selectedSensor, verticalOffset, val, modifiers, isDeTiding, combinationSettings, interpolationSettings, isFullAnalysisRun);
-                      }
-                  }}
-                  onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                          e.currentTarget.blur();
-                      }
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
-                />
-            </div>
-          </div>
+
           
           <div className="hidden">
              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-display flex items-center gap-1 cursor-pointer" title="Centang jika waktu di file data Anda merupakan waktu UTC. Menghindari shift akibat timezone lokal komputer.">
@@ -2925,7 +2886,9 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     modifiers={modifiers}
                     setModifiers={setModifiers}
                     verticalOffset={verticalOffset}
+                    setVerticalOffset={setVerticalOffset}
                     timeOffset={timeOffset}
+                    setTimeOffset={setTimeOffset}
                     isDeTiding={isDeTiding}
                     setIsDeTiding={setIsDeTiding}
                     combinationSettings={combinationSettings}
@@ -3275,7 +3238,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, timeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, setVerticalOffset, timeOffset, setTimeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({
     combined: true,
@@ -3324,12 +3287,13 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const [offsetReference, setOffsetReference] = useState<string>('');
   const [offsetTarget, setOffsetTarget] = useState<string>('');
   const [localOffset, setLocalOffset] = useState<number>(0);
+  const [localTimeOffset, setLocalTimeOffset] = useState<number>(0);
   
   // Zoom States
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
   const [refAreaRight, setRefAreaRight] = useState<string>('');
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
-  const [dragAction, setDragAction] = useState<'zoom' | 'delete'>('zoom');
+  const [dragAction, setDragAction] = useState<'zoom' | 'delete' | 'pan'>('zoom');
   const [showDifferences, setShowDifferences] = useState<boolean>(false);
 
   const outliers = useMemo(() => records.filter((r:any) => r.isOutlier).length, [records]);
@@ -3460,6 +3424,27 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
     setLocalOffset(0);
     alert(`Partial offset diterapkan pada ${zoomDomain ? 'area zoom' : 'seluruh data'}.`);
+  };
+
+  const applyLocalTimeOffset = () => {
+    if (localTimeOffset === 0) return;
+    if (records.length === 0) return;
+
+    let startMs, endMs;
+
+    if (zoomDomain) {
+        startMs = zoomDomain.start;
+        endMs = zoomDomain.end;
+    } else {
+        startMs = records[0].timestamp.getTime();
+        endMs = records[records.length - 1].timestamp.getTime();
+    }
+
+    const newMods = [...modifiers, { startMs, endMs, sensor: selectedSensor, offset: 0, scale: 1, timeOffset: localTimeOffset }];
+    setModifiers(newMods);
+    runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods);
+    setLocalTimeOffset(0);
+    alert(`Time offset diterapkan pada ${zoomDomain ? 'area zoom' : 'seluruh data'}.`);
   };
 
   const computePartialOffset = () => {
@@ -3677,6 +3662,64 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
              <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100">
                 <Settings size={16} className="text-slate-400" />
                 <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest">Dashboard Controls</h4>
+             </div>
+             
+             {/* General Offsets */}
+             <div className="grid grid-cols-2 gap-2 mb-4">
+                 <div className="space-y-1.5 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Global V-Offset</label>
+                    <input 
+                        type="number" step="0.01"
+                        value={verticalOffset === 0 ? '' : verticalOffset}
+                        onChange={(e) => setVerticalOffset(parseFloat(e.target.value) || 0)}
+                        onBlur={() => {
+                            runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings);
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.currentTarget.blur();
+                            }
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 flex-1 text-[11px] font-bold text-slate-700 outline-none focus:ring-2 focus:ring-slate-200"
+                        placeholder="0.00 m"
+                    />
+                 </div>
+                 <div className="space-y-1.5 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Global T-Offset</label>
+                    <input 
+                        type="number" step="0.5"
+                        value={timeOffset === 0 ? '' : timeOffset}
+                        onChange={(e) => setTimeOffset(parseFloat(e.target.value) || 0)}
+                        onBlur={() => {
+                            runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings);
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.currentTarget.blur();
+                            }
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 flex-1 text-[11px] font-bold text-slate-700 outline-none focus:ring-2 focus:ring-slate-200"
+                        placeholder="0.0 Hr"
+                    />
+                 </div>
+             </div>
+
+             {/* Partial Time Offset */}
+             <div className="space-y-2 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl relative">
+                <label className="text-[10px] font-bold text-indigo-700 flex items-center justify-between">
+                    <span>Targeted Time Offset (Hr)</span>
+                    <Clock size={12}/>
+                </label>
+                <div className="flex gap-2">
+                    <input 
+                        type="number" step="0.5"
+                        value={Number.isNaN(localTimeOffset) ? '' : localTimeOffset}
+                        onChange={(e) => setLocalTimeOffset(parseFloat(e.target.value))}
+                        className="min-w-0 flex-1 bg-white border border-indigo-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 outline-none"
+                        placeholder="Offset (Hr)"
+                    />
+                    <button onClick={applyLocalTimeOffset} className="flex-none p-1 px-3 bg-indigo-600 text-white rounded-lg text-[9px] font-extrabold hover:bg-indigo-700 transition-colors shadow-sm">FIX</button>
+                </div>
              </div>
              
              {/* Scaling */}
@@ -3928,6 +3971,15 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               >
                 Delete
               </button>
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-sky-600 transition-colors"
+                onClick={() => {
+                  setDragAction('pan');
+                  setContextMenu(null);
+                }}
+              >
+                Geser
+              </button>
               {modifiers.length > 0 && (
               <button 
                 className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-amber-600 transition-colors"
@@ -3945,6 +3997,17 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-rose-50 border border-rose-200 px-4 py-2 rounded-full shadow-lg z-20 flex items-center gap-2 animate-in slide-in-from-top duration-300">
                <Trash2 size={16} className="text-rose-600" />
                <span className="text-[10px] font-black text-rose-700 uppercase tracking-widest">Delete Mode Aktif: Klik atau Drag untuk menghapus data</span>
+               <button onClick={() => setDragAction('zoom')} className="ml-2 hover:bg-rose-200 p-1 rounded-full transition-colors" title="Batal (Kembali ke Zoom)">
+                  <X size={14} className="text-rose-700" />
+               </button>
+            </div>
+          )}
+          {dragAction === 'pan' && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-sky-50 border border-sky-200 px-4 py-2 rounded-full shadow-lg z-20 flex items-center gap-2 animate-in slide-in-from-top duration-300">
+               <span className="text-[10px] font-black text-sky-700 uppercase tracking-widest">Geser Mode Aktif: Drag pointer mouse (Move shape) untuk menggeser grafik</span>
+               <button onClick={() => setDragAction('zoom')} className="ml-2 hover:bg-sky-200 p-1 rounded-full transition-colors" title="Batal (Kembali ke Zoom)">
+                  <X size={14} className="text-sky-700" />
+               </button>
             </div>
           )}
           <div className="export-exclude absolute right-2 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -3963,10 +4026,37 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 className="ml-0 mt-[-42px] pl-0 pt-0"
                 data={displayData} 
                 margin={{ bottom: 40, left: 30, right: 20, top: 40 }} 
-                style={{ cursor: dragAction === 'delete' ? 'copy' : 'crosshair', userSelect: 'none' }}
-                onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
-                onMouseMove={(e: any) => refAreaLeft && e && e.activeLabel && setRefAreaRight(e.activeLabel)}
-                onMouseUp={handleDragAction}
+                style={{ cursor: dragAction === 'pan' ? 'move' : (dragAction === 'delete' ? 'copy' : 'crosshair'), userSelect: 'none' }}
+                onMouseDown={(e: any) => {
+                    if (dragAction === 'pan' && e && e.activeLabel) {
+                        setRefAreaLeft(e.activeLabel);
+                    } else if (e && e.activeLabel) {
+                        setRefAreaLeft(e.activeLabel);
+                    }
+                }}
+                onMouseMove={(e: any) => {
+                    if (dragAction === 'pan' && refAreaLeft && e && e.activeLabel) {
+                        const delta = Number(refAreaLeft) - Number(e.activeLabel);
+                        if (zoomDomain) {
+                            setZoomDomain({ start: zoomDomain.start + delta, end: zoomDomain.end + delta });
+                        } else if (records.length > 0) {
+                            const start = records[0].timestamp.getTime();
+                            const end = records[records.length - 1].timestamp.getTime();
+                            setZoomDomain({ start: start + delta, end: end + delta });
+                        }
+                        setRefAreaLeft(e.activeLabel);
+                    } else if (refAreaLeft && e && e.activeLabel) {
+                        setRefAreaRight(e.activeLabel);
+                    }
+                }}
+                onMouseUp={() => {
+                   if (dragAction !== 'pan') {
+                       handleDragAction();
+                   } else {
+                       setRefAreaLeft('');
+                       setRefAreaRight('');
+                   }
+                }}
                 onClick={(e: any) => {
                     if (dragAction === 'delete' && e && e.activeLabel) {
                         const ts = Number(e.activeLabel);
@@ -4078,7 +4168,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                               <div className="flex items-center justify-between gap-6 text-[11px]">
                                 <div className="flex items-center gap-2">
                                   <div className="w-2.5 h-2.5 rounded-sm bg-[#0a0a0a]" />
-                                  <span className="font-semibold text-slate-600">Predicted (Outlier Detect)</span>
+                                  <span className="font-semibold text-slate-600">Predicted</span>
                                 </div>
                                 <span className="font-bold text-slate-800 font-mono">
                                   {data.predictedLevel.toFixed(3)} m
@@ -4135,7 +4225,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     />
                   );
               })}
-              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.90} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
+              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.80} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
               <Line hide={hiddenLines.combined} type="monotone" dataKey="combined" stroke="#F5BF03" strokeWidth={2} dot={false} name="Combined" isAnimationActive={false} connectNulls={false} />
               <Line hide={hiddenLines.interpolated} type="monotone" dataKey="interpolated" stroke="#800000" strokeWidth={2} dot={false} name="Interpolated" isAnimationActive={false} connectNulls={false} />
               <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" isAnimationActive={false} connectNulls={false} />
