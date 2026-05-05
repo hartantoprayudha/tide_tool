@@ -1028,10 +1028,27 @@ export default function App() {
         let roughHAT = meanRaw + 3 * stdRaw; // fallback
         let roughLAT = meanRaw - 3 * stdRaw; // fallback
         let roughSolution: number[] = [];
+        let roughSlope = 0;
+        let roughIntercept = meanRaw;
 
         if (!_isInsufficient) {
-            roughSolution = solveLeastSquares(t_hours_raw, y_vals_raw, roughCompsToFit);
-            roughZ0 = roughSolution[0] || meanRaw;
+            let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+            const nRaw = t_hours_raw.length;
+            if (nRaw > 0) {
+                for (let i = 0; i < nRaw; i++) {
+                    sumX += t_hours_raw[i];
+                    sumY += y_vals_raw[i];
+                    sumXY += t_hours_raw[i] * y_vals_raw[i];
+                    sumX2 += t_hours_raw[i] * t_hours_raw[i];
+                }
+                roughSlope = (nRaw * sumXY - sumX * sumY) / (nRaw * sumX2 - sumX * sumX);
+                roughIntercept = (sumY - roughSlope * sumX) / nRaw;
+            }
+            
+            const y_raw_detrended = y_vals_raw.map((y, i) => y - (roughSlope * t_hours_raw[i]));
+
+            roughSolution = solveLeastSquares(t_hours_raw, y_raw_detrended, roughCompsToFit);
+            roughZ0 = roughSolution[0] ?? meanRaw; // roughZ0 absorbs the intercept
             let roughHatAmpSum = 0;
             for (let i = 0; i < roughCompsToFit.length; i++) {
                 const a = roughSolution[1 + 2 * i] || 0;
@@ -1054,7 +1071,7 @@ export default function App() {
         // First pass: compute predicted levels and sum of squared residuals
         processed.forEach(r => {
             const tHour = (r.timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
-            let predictedLevel = roughZ0;
+            let predictedLevel = roughZ0 + roughSlope * tHour;
             if (!_isInsufficient && roughSolution.length > 0) {
                 for (let i = 0; i < roughCompsToFit.length; i++) {
                     const comp = roughCompsToFit[i];
@@ -1136,8 +1153,8 @@ export default function App() {
                 cleanedInput[idx] = validUnfiltered[idx];
             } else {
                 // Temporary fill for filter stability - using linear trend or roughZ0
-                cleanedInput[idx] = roughZ0; 
-
+                const tHour = (processed[idx].timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
+                cleanedInput[idx] = roughZ0 + roughSlope * tHour; 
             }
         }
         
@@ -1151,11 +1168,17 @@ export default function App() {
                     endGap++;
                 }
                 const gapLength = endGap - startGap;
-                const prevVal = startGap > 0 ? validUnfiltered[startGap - 1] : roughZ0;
-                const nextVal = endGap < processed.length ? validUnfiltered[endGap] : roughZ0;
+                
+                const getTrendVal = (idx: number) => {
+                    const tH = (processed[idx].timestamp.getTime() - processed[0].timestamp.getTime()) / 3600000;
+                    return roughZ0 + roughSlope * tH;
+                };
+
+                const prevVal = startGap > 0 ? validUnfiltered[startGap - 1] : getTrendVal(startGap);
+                const nextVal = endGap < processed.length ? validUnfiltered[endGap] : getTrendVal(endGap);
                 for (let j = startGap; j < endGap; j++) {
                     const fraction = (j - startGap + 1) / (gapLength + 1);
-                    cleanedInput[j] = prevVal + (nextVal - (isNaN(prevVal) ? roughZ0 : prevVal)) * fraction;
+                    cleanedInput[j] = prevVal + (nextVal - (isNaN(prevVal) ? getTrendVal(startGap) : prevVal)) * fraction;
                 }
                 i = endGap;
             } else {
