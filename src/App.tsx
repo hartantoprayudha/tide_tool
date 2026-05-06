@@ -26,7 +26,11 @@ import {
   Info,
   ClipboardList,
   BookOpen,
-  Map as MapIcon
+  Map as MapIcon,
+  ChevronLeft,
+  ChevronRight,
+  PanelRightClose,
+  PanelRightOpen
 } from 'lucide-react';
 import ConnectView from './ConnectView';
 import SummarizeView from './SummarizeView';
@@ -450,6 +454,7 @@ interface PartialModifier {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [records, setRecords] = useState<TideRecord[]>([]);
   const [datums, setDatums] = useState<{ mhws: number, mlws: number, hat: number, lat: number } | null>(null);
   const [rawData, setRawData] = useState<any[]>([]);
@@ -1016,8 +1021,25 @@ export default function App() {
         compsToFit = compsToFit.filter(c => HARMONIC_FREQS[c] !== undefined);
 
         // A. Harmonic Analysis on Raw Data to determine HAT/LAT astronomical bounds
-        // For outlier detection "Jalankan Pembersihan", we use 9 constants to build the cache "predicted"
-        let autoOutlierComps = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
+        // For outlier detection "Jalankan Pembersihan", we use AUTO (Rayleigh) selection to build the cache "predicted"
+        const rayleighCriterionFreqRough = 1.0 / durationHoursCheck;
+        const priorityListRough = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 'Mm', 'Ssa', 'Sa', 'E2', 'La2', 'M3', 'M8', 'MKS2', 'MSqm', 'Mtm', 'N4', 'R2', 'S1'];
+        Object.keys(HARMONIC_FREQS).forEach(k => {
+            if (!priorityListRough.includes(k)) priorityListRough.push(k);
+        });
+        
+        let autoOutlierComps: string[] = [];
+        priorityListRough.forEach(c => {
+             if (!HARMONIC_FREQS[c]) return;
+             let canAdd = true;
+             for (let i = 0; i < autoOutlierComps.length; i++) {
+                 if (Math.abs(HARMONIC_FREQS[c].f - HARMONIC_FREQS[autoOutlierComps[i]].f) < rayleighCriterionFreqRough) {
+                     canAdd = false;
+                     break;
+                 }
+             }
+             if (canAdd) autoOutlierComps.push(c);
+        });
         
         // Ensure we only use available consts
         autoOutlierComps = autoOutlierComps.filter(c => HARMONIC_FREQS[c] !== undefined);
@@ -2627,26 +2649,38 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
   return (
     <div className="flex h-screen w-full bg-[#f1f5f9] font-sans antialiased overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-[#e2e8f0] flex flex-col p-6 shrink-0 shadow-sm z-20 relative">
-        <button 
-          onClick={() => setActiveTab('readme')}
-          className="flex items-center gap-2 font-extrabold text-xl text-[#0284c7] mb-10 hover:opacity-80 transition-opacity text-left"
-          title="Baca Petunjuk Penggunaan"
-        >
-          <span className="text-2xl">🌊</span>
-          <span>Tide Tools</span>
-        </button>
+      <aside className={cn("bg-white border-r border-[#e2e8f0] flex flex-col pt-6 pb-6 shrink-0 shadow-sm z-20 relative transition-all duration-300", isSidebarOpen ? "w-64 px-6" : "w-16 px-2 items-center")}>
+        <div className="flex items-center justify-between mb-10 w-full px-1">
+          {isSidebarOpen && (
+            <button 
+              onClick={() => setActiveTab('readme')}
+              className="flex items-center gap-2 font-extrabold text-xl text-[#0284c7] hover:opacity-80 transition-opacity text-left"
+              title="Baca Petunjuk Penggunaan"
+            >
+              <span className="text-2xl">🌊</span>
+              <span>Tide Tools</span>
+            </button>
+          )}
+          {!isSidebarOpen && (
+             <span className="text-2xl mb-4" title="Tide Tools">🌊</span>
+          )}
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1 rounded-md hover:bg-slate-100 text-slate-500 absolute right-1 top-6">
+            {isSidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+          </button>
+        </div>
         
-        <nav className="flex-1 space-y-1">
+        <nav className="flex-1 space-y-1 w-full">
           {['dashboard', 'connect', 'validate', 'harmonic', 'predictions', 'summarize', 'about'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
+              title={!isSidebarOpen ? tab : ''}
               className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                "w-full flex items-center rounded-lg text-sm font-medium transition-colors cursor-pointer",
                 activeTab === tab 
                   ? "bg-[#eff6ff] text-[#0284c7]" 
-                  : "text-[#64748b] hover:bg-slate-50"
+                  : "text-[#64748b] hover:bg-slate-50",
+                isSidebarOpen ? "gap-3 px-3 py-2.5" : "justify-center p-2 mb-1"
               )}
             >
               {tab === 'dashboard' && <LayoutDashboard size={18} />}
@@ -2656,13 +2690,13 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
               {tab === 'predictions' && <TrendingUp size={18} />}
               {tab === 'summarize' && <MapIcon size={18} />}
               {tab === 'about' && <Info size={18} />}
-              <span className="capitalize">{tab}</span>
+              {isSidebarOpen && <span className="capitalize">{tab}</span>}
             </button>
           ))}
         </nav>
 
-        <div className="mt-auto space-y-4">
-          {availableSensors.length > 0 && (
+        <div className="mt-auto space-y-4 w-full">
+          {availableSensors.length > 0 && isSidebarOpen && (
             <div className="space-y-1.5 animate-in fade-in slide-in-from-bottom-1">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Sensor Terdeteksi</label>
               <select 
@@ -2687,19 +2721,19 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             </div>
           )}
 
-          <div className="space-y-1.5 pt-4 border-t border-slate-100">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Custom Chart Title</label>
-            <input 
-              type="text"
-              value={chartTitle}
-              onChange={(e) => setChartTitle(e.target.value)}
-              placeholder="Enter chart name..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 placeholder:text-slate-400 mb-2"
-            />
-          </div>
+          {isSidebarOpen && (
+            <div className="space-y-1.5 pt-4 border-t border-slate-100">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Custom Chart Title</label>
+              <input 
+                type="text"
+                value={chartTitle}
+                onChange={(e) => setChartTitle(e.target.value)}
+                placeholder="Enter chart name..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 placeholder:text-slate-400 mb-2"
+              />
+            </div>
+          )}
 
-
-          
           <div className="hidden">
              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-display flex items-center gap-1 cursor-pointer" title="Centang jika waktu di file data Anda merupakan waktu UTC. Menghindari shift akibat timezone lokal komputer.">
                 <input 
@@ -3278,11 +3312,12 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 // --- SUB-VIEWS ---
 
 function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, setVerticalOffset, timeOffset, setTimeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
+  const [isControlsOpen, setIsControlsOpen] = useState(true);
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({
     combined: true,
     interpolated: true,
-    predictedLevel: true
+    predictedLevel: false
   });
   const [vZoom, setVZoom] = useState(1);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
@@ -3697,14 +3732,26 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
           </div>
 
-          <div className="w-full xl:w-80 space-y-4 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-             <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100">
-                <Settings size={16} className="text-slate-400" />
-                <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest">Dashboard Controls</h4>
+          <div className={cn("bg-white rounded-2xl border border-slate-200 shadow-sm transition-all duration-300", isControlsOpen ? "w-full xl:w-80 p-5 space-y-4" : "w-full xl:w-16 p-2 h-20 overflow-hidden flex flex-col items-center")}>
+             <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-2 cursor-pointer" onClick={() => setIsControlsOpen(!isControlsOpen)} title="Toggle Dashboard Controls">
+                    <Settings size={16} className="text-slate-400" />
+                    {isControlsOpen && <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest whitespace-nowrap">Dashboard Controls</h4>}
+                </div>
+                {isControlsOpen ? (
+                    <button onClick={() => setIsControlsOpen(false)} className="p-1 hover:bg-slate-100 rounded text-slate-400">
+                        <PanelRightClose size={14} />
+                    </button>
+                ) : (
+                    <button onClick={() => setIsControlsOpen(true)} className="p-1 hover:bg-slate-100 rounded text-slate-400">
+                        <PanelRightOpen size={14} />
+                    </button>
+                )}
              </div>
-             
-             {/* General Offsets */}
-             <div className="grid grid-cols-2 gap-2 mb-4">
+             {isControlsOpen && (
+               <div className="space-y-4 animate-in fade-in duration-300">
+                 {/* General Offsets */}
+                 <div className="grid grid-cols-2 gap-2 mb-4">
                  <div className="space-y-1.5 p-3 bg-slate-50 border border-slate-200 rounded-xl">
                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Global V-Offset</label>
                     <input 
@@ -3912,7 +3959,40 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     </label>
                  </div>
              )}
+             </div>
+             )}
           </div>
+      </div>
+
+      {/* Select By Date Feature */}
+      <div className="flex justify-end mb-2">
+         <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Select By Date :</span>
+             <input 
+                type="datetime-local" 
+                className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none"
+                onChange={(e) => {
+                   if (e.target.value) {
+                       const start = new Date(e.target.value).getTime();
+                       setZoomDomain(prev => prev ? { ...prev, start } : { start, end: records[records.length-1]?.timestamp.getTime() || start });
+                   }
+                }}
+             />
+             <span className="text-slate-400 text-xs font-bold">-</span>
+             <input 
+                type="datetime-local" 
+                className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none"
+                onChange={(e) => {
+                   if (e.target.value) {
+                       const end = new Date(e.target.value).getTime();
+                       setZoomDomain(prev => prev ? { ...prev, end } : { start: records[0]?.timestamp.getTime() || end, end });
+                   }
+                }}
+             />
+             {zoomDomain && (
+                <button onClick={zoomOut} className="px-2 py-1 hover:bg-slate-200 rounded bg-slate-100 text-slate-500"><X size={14}/></button>
+             )}
+         </div>
       </div>
 
       <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] pb-[10px] pt-[40px] mt-0 p-6 shadow-sm relative">
@@ -4803,6 +4883,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
   const [refAreaRight, setRefAreaRight] = useState<string>('');
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
+  const [vZoom, setVZoom] = useState(1);
 
   const displayPredsRaw = useMemo(() => {
     // 366 days safe threshold for leap years
@@ -4846,13 +4927,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
   const displayPreds = useMemo(() => {
     let sliced = displayPredsRaw;
     if (zoomDomain) {
-        const startIndex = displayPredsRaw.findIndex((d: any) => d.timeMs === zoomDomain.start);
-        const endIndex = displayPredsRaw.findIndex((d: any) => d.timeMs === zoomDomain.end);
-        if (startIndex !== -1 && endIndex !== -1) {
-            let s = startIndex, e = endIndex;
-            if (s > e) { s = endIndex; e = startIndex; }
-            sliced = displayPredsRaw.slice(s, e + 1);
-        }
+        sliced = displayPredsRaw.filter((d: any) => d.timeMs >= zoomDomain.start && d.timeMs <= zoomDomain.end);
     }
     
     if (sliced.length > 2500) {
@@ -4877,8 +4952,17 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
     if (min === Number.MAX_VALUE) return ['auto', 'auto'];
     
     const padding = (max - min) * 0.1;
-    return [Math.floor((min - padding) / 0.5) * 0.5, Math.ceil((max + padding) / 0.5) * 0.5];
-  }, [displayPreds]);
+    const boundedMin = Math.floor((min - padding) / 0.5) * 0.5;
+    const boundedMax = Math.ceil((max + padding) / 0.5) * 0.5;
+    
+    const center = (boundedMax + boundedMin) / 2;
+    const span = (boundedMax - boundedMin) / 2;
+    
+    return [
+        center - (span / vZoom),
+        center + (span / vZoom)
+    ];
+  }, [displayPreds, vZoom]);
 
   const zoom = () => {
     if (refAreaLeft === refAreaRight || refAreaRight === '') {
@@ -4993,7 +5077,18 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
               </span>
             </div>
           </div>
-          <div className="h-[400px] w-full" style={{ willChange: 'transform, opacity', transform: 'translateZ(0)' }}>
+          <div className="relative group h-[400px] w-full" style={{ willChange: 'transform, opacity', transform: 'translateZ(0)' }}>
+            <div className="export-exclude absolute right-8 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button onClick={() => setVZoom(z => z * 1.25)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom In Vertical">
+                <ZoomIn size={14} />
+              </button>
+              <button onClick={() => setVZoom(1)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Reset Vertical Zoom">
+                <Maximize size={14} />
+              </button>
+              <button onClick={() => setVZoom(z => z * 0.8)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom Out Vertical">
+                <ZoomOut size={14} />
+              </button>
+            </div>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart 
                 data={displayPreds} 
