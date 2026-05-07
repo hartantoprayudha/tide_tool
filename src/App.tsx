@@ -2106,13 +2106,8 @@ export default function App() {
                     val += res.amp * Math.cos(w * t - ph);
                 });
                 if (useTrendInPrediction) {
-                    if (linearTrend?.polyTrend) {
-                        const { c0, c1, c2 } = linearTrend.polyTrend;
-                        val += (c0 - z0) + c1 * t + c2 * t * t;
-                    } else {
-                        const slopeToUse = linearTrend?.ssaTrend?.slope || linearTrend?.slope || 0;
-                        val += slopeToUse * t;
-                    }
+                    const slopeToUse = linearTrend?.ssaTrend?.slope || linearTrend?.robustStlTrend?.slope || linearTrend?.slope || 0;
+                    val += slopeToUse * t;
                 }
                 return val;
             };
