@@ -3333,6 +3333,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const handleCalculateMSL = () => {
     let sum = 0;
     let count = 0;
+    let predSum = 0;
+    let predCount = 0;
     
     records.forEach((r: any, i: number) => {
         const timeMs = r.timestamp.getTime();
@@ -3344,11 +3346,16 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             sum += v;
             count++;
         }
+        if (typeof r.predictedLevel === 'number' && !isNaN(r.predictedLevel)) {
+            predSum += r.predictedLevel;
+            predCount++;
+        }
     });
 
     if (count > 0) {
         const msl = sum / count;
-        setMslResult(`Muka Laut Rerata (Area Tampil): ${msl.toFixed(4)} m`);
+        const predMsl = predCount > 0 ? predSum / predCount : null;
+        setMslResult(`Muka Laut Rerata (Area Tampil): ${msl.toFixed(4)} m${predMsl !== null ? ` | Rough Pred: ${predMsl.toFixed(4)} m` : ''}`);
     } else {
         setMslResult("Tidak ada data valid yang dapat dihitung di area ini.");
     }
@@ -4028,7 +4035,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
           </div>
         </div>
         <div 
-            className="relative h-[530px] w-full mt-[-5px] group bg-white pt-2 pb-4"
+            className="relative h-[500px] w-full mt-[-5px] group bg-white pt-2 pb-4"
             onContextMenu={(e) => {
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY });
@@ -4144,7 +4151,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <ComposedChart 
                 className="ml-0 mt-[-42px] pl-0 pt-0"
                 data={displayData} 
-                margin={{ bottom: 40, left: 30, right: 20, top: 40 }} 
+                margin={{ bottom: 10, left: 30, right: 20, top: 20 }} 
                 style={{ cursor: dragAction === 'pan' ? 'move' : (dragAction === 'delete' ? 'copy' : 'crosshair'), userSelect: 'none' }}
                 onMouseDown={(e: any) => {
                     if (dragAction === 'pan' && e && e.activeLabel) {
@@ -4231,6 +4238,18 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                               </div>
                           )}
 
+                          {data.predictedLevel !== undefined && !isNaN(data.predictedLevel) && (
+                              <div className="flex items-center justify-between gap-6 text-[11px]">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 rounded-sm bg-[#0a0a0a]" />
+                                  <span className="font-semibold text-slate-600">Predicted</span>
+                                </div>
+                                <span className="font-bold text-slate-800 font-mono">
+                                  {data.predictedLevel.toFixed(3)} m
+                                </span>
+                              </div>
+                          )}
+
                           {data.combined !== undefined && !isNaN(data.combined) && (
                             <div className="flex items-center justify-between gap-6 text-[11px]">
                               <div className="flex items-center gap-2">
@@ -4279,18 +4298,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                                 </div>
                                 <span className="font-bold text-slate-800 font-mono">
                                   {data.trendline.toFixed(3)} m
-                                </span>
-                              </div>
-                          )}
-
-                          {data.predictedLevel !== undefined && !isNaN(data.predictedLevel) && (
-                              <div className="flex items-center justify-between gap-6 text-[11px]">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-2.5 h-2.5 rounded-sm bg-[#0a0a0a]" />
-                                  <span className="font-semibold text-slate-600">Predicted</span>
-                                </div>
-                                <span className="font-bold text-slate-800 font-mono">
-                                  {data.predictedLevel.toFixed(3)} m
                                 </span>
                               </div>
                           )}
@@ -4344,11 +4351,11 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     />
                   );
               })}
-              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.80} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
-              <Line hide={hiddenLines.combined} type="monotone" dataKey="combined" stroke="#F5BF03" strokeWidth={2} dot={false} name="Combined" isAnimationActive={false} connectNulls={false} />
-              <Line hide={hiddenLines.interpolated} type="monotone" dataKey="interpolated" stroke="#800000" strokeWidth={2} dot={false} name="Interpolated" isAnimationActive={false} connectNulls={false} />
-              <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" isAnimationActive={false} connectNulls={false} />
               <Line hide={hiddenLines.predictedLevel} type="monotone" dataKey="predictedLevel" stroke="#0a0a0a" strokeWidth={1.5} dot={false} name="Predicted" isAnimationActive={false} connectNulls={false} />
+              <Line hide={hiddenLines.trendline} type="monotone" dataKey="trendline" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Sea Level Trend" isAnimationActive={false} connectNulls={false} />
+              <Line hide={hiddenLines.interpolated} type="monotone" dataKey="interpolated" stroke="#800000" strokeWidth={2} dot={false} name="Interpolated" isAnimationActive={false} connectNulls={false} />
+              <Line hide={hiddenLines.combined} type="monotone" dataKey="combined" stroke="#F5BF03" strokeWidth={2} dot={false} name="Combined" isAnimationActive={false} connectNulls={false} />
+              <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.80} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
               
               <Brush 
                 dataKey="timeMs" 
@@ -4431,8 +4438,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             </div>
         )}
 
-        <div className="mt-4 flex items-center gap-2 justify-center">
-             <div style={{ paddingTop: '-11px' }} className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest mt-[-11px]">Visual Optimization: Hourly Sampling Active</div>
+        <div className="flex items-center gap-2 justify-center" style={{ marginTop: '-15px' }}>
+             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest">Visual Optimization: Hourly Sampling Active</div>
         </div>
       </div>
 
@@ -4449,10 +4456,25 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                         </button>
                     </div>
                     <div className="p-8 flex flex-col items-center justify-center text-center">
-                        <div className="text-base font-bold text-slate-600 mb-2">{mslResult.split(':')[0]}:</div>
-                        <div className="text-3xl font-black text-sky-600 font-mono tracking-tight">
-                            {mslResult.split(':')[1]?.trim() || mslResult}
-                        </div>
+                        {mslResult.includes(' | ') ? (
+                            <>
+                                <div className="text-base font-bold text-slate-600 mb-2">{mslResult.split(':')[0]}:</div>
+                                <div className="text-3xl font-black text-sky-600 font-mono tracking-tight mb-4">
+                                    {mslResult.split('|')[0].split(':')[1]?.trim() || mslResult.split('|')[0]}
+                                </div>
+                                <div className="text-sm font-bold text-slate-500">{mslResult.split('|')[1].split(':')[0]?.trim()}:</div>
+                                <div className="text-xl font-black text-emerald-600 font-mono tracking-tight">
+                                    {mslResult.split('|')[1].split(':')[1]?.trim()}
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="text-base font-bold text-slate-600 mb-2">{mslResult.split(':')[0]}:</div>
+                                <div className="text-3xl font-black text-sky-600 font-mono tracking-tight">
+                                    {mslResult.split(':')[1]?.trim() || mslResult}
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             </div>
@@ -4945,15 +4967,17 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
     let min = Number.MAX_VALUE;
     let max = -Number.MAX_VALUE;
     displayPreds.forEach((d: any) => {
-        if (d.value < min) min = d.value;
-        if (d.value > max) max = d.value;
+        const valMin = d.dayMin !== undefined ? d.dayMin : d.value;
+        const valMax = d.dayMax !== undefined ? d.dayMax : d.value;
+        if (valMin < min) min = valMin;
+        if (valMax > max) max = valMax;
     });
     
     if (min === Number.MAX_VALUE) return ['auto', 'auto'];
     
     const padding = (max - min) * 0.1;
-    const boundedMin = Math.floor((min - padding) / 0.5) * 0.5;
-    const boundedMax = Math.ceil((max + padding) / 0.5) * 0.5;
+    const boundedMin = min - padding;
+    const boundedMax = max + padding;
     
     const center = (boundedMax + boundedMin) / 2;
     const span = (boundedMax - boundedMin) / 2;

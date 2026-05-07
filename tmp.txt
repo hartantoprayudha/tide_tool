@@ -1,21 +1,203 @@
-          "optional": true
-        }
-      }
-    },
-    "node_modules/fetch-blob": {
-      "version": "3.2.0",
-      "resolved": "https://registry.npmjs.org/fetch-blob/-/fetch-blob-3.2.0.tgz",
-      "integrity": "sha512-7yAQpD2UMJzLi1Dqv7qFYnPbaPx7ZfFK6PiIxQ4PfkGPyNyl2Ugx+a/umUonmKqjhM4DnfbMvdX6otXq83soQQ==",
-      "funding": [
-        {
-          "type": "github",
-          "url": "https://github.com/sponsors/jimmywarting"
-        },
-        {
-          "type": "paypal",
-          "url": "https://paypal.me/jimmywarting"
-        }
-      ],
-      "license": "MIT",
-      "dependencies": {
-        "node-domexception": "^1.0.0",
+4170-                            const end = records[records.length - 1].timestamp.getTime();
+4171-                            setZoomDomain({ start: start + delta, end: end + delta });
+4172-                        }
+4173-                        setRefAreaLeft(e.activeLabel);
+4174-                    } else if (refAreaLeft && e && e.activeLabel) {
+4175-                        setRefAreaRight(e.activeLabel);
+4176-                    }
+4177-                }}
+4178-                onMouseUp={() => {
+4179-                   if (dragAction !== 'pan') {
+4180-                       handleDragAction();
+4181-                   } else {
+4182-                       setRefAreaLeft('');
+4183-                       setRefAreaRight('');
+4184-                   }
+4185-                }}
+4186-                onClick={(e: any) => {
+4187-                    if (dragAction === 'delete' && e && e.activeLabel) {
+4188-                        const ts = Number(e.activeLabel);
+4189-                        if (!isNaN(ts)) {
+4190-                            const newMods = [...modifiers, { startMs: ts, endMs: ts, sensor: selectedSensor, offset: 0, scale: 1, action: 'delete' as const }];
+4191-                            setModifiers(newMods);
+4192-                            runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, newMods, isDeTiding);
+4193-                        }
+4194-                    }
+4195-                }}
+4196-            >
+4197-              <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
+4198-              <XAxis 
+4199-                dataKey="timeMs" 
+4200-                type="number"
+4201-                scale="time"
+4202-                domain={zoomDomain ? [zoomDomain.start, zoomDomain.end] : ['dataMin', 'dataMax']}
+4203-                allowDataOverflow
+4204-                tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM HH:mm')}
+4205-                tick={{fontSize: 9, fill:'#64748b'}} 
+4206-                minTickGap={30}
+4207-                axisLine={false} 
+4208-                tickMargin={10}
+4209-                height={65}
+4210-                label={{ value: 'Waktu (UTC)', position: 'insideBottom', offset: -15, style: { fontSize: '14px', fontWeight: 'bold', fill: '#475569' } }}
+4211-              />
+4212-              <YAxis 
+4213-                tickFormatter={(val: number) => val.toFixed(3)}
+4214-                label={{ value: 'Tinggi Muka Laut (m)', angle: -90, position: 'insideLeft', offset: -5, style: { fontSize: '14px', fontWeight: 'bold', fill: '#475569' } }}
+4215-                tick={{fontSize: 9, fill:'#64748b'}} 
+4216-                axisLine={false} 
+4217-                domain={yDomain} 
+4218-                width={80}
+4219-              />
+4220:              <Tooltip 
+4221-                cursor={{ stroke: '#94a3b8', strokeWidth: 1.5, strokeDasharray: '4 4' }}
+4222-                content={({ active, payload, label }) => {
+4223-                  if (active && payload && payload.length) {
+4224-                    const data = payload[0].payload;
+4225-                    return (
+4226-                      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg ring-1 ring-black/5 pointer-events-none min-w-[200px]">
+4227-                        <p className="font-bold text-slate-700 text-xs mb-2 pb-2 border-b border-slate-100">Waktu: {formatUTC(new Date(Number(label)), 'dd/MM/yyyy HH:mm:ss')}</p>
+4228-                        <div className="space-y-2 w-full">
+4229-                          {data.filtered !== undefined && !isNaN(data.filtered) && (
+4230-                              <div className="flex items-center justify-between gap-6 text-[11px]">
+4231-                                <div className="flex items-center gap-2">
+4232-                                  <div className="w-2.5 h-2.5 rounded-sm bg-[#ec7017]" />
+4233-                                  <span className="font-semibold text-slate-600">Valid</span>
+4234-                                </div>
+4235-                                <span className="font-bold text-slate-800 font-mono">
+4236-                                  {data.filtered.toFixed(3)} m
+4237-                                </span>
+4238-                              </div>
+4239-                          )}
+4240-
+4241-                          {data.combined !== undefined && !isNaN(data.combined) && (
+4242-                            <div className="flex items-center justify-between gap-6 text-[11px]">
+4243-                              <div className="flex items-center gap-2">
+4244-                                <div className="w-2.5 h-2.5 rounded-sm bg-[#F5BF03]" />
+4245-                                <span className="font-semibold text-slate-600">Combined</span>
+4246-                              </div>
+4247-                              <span className="font-bold text-slate-800 font-mono">
+4248-                                {typeof data.combined === 'number' ? data.combined.toFixed(3) : 'NaN'} m
+4249-                              </span>
+4250-                            </div>
+4251-                          )}
+4252-
+4253-                          {data.interpolated !== undefined && !isNaN(data.interpolated) && (
+4254-                            <div className="flex items-center justify-between gap-6 text-[11px]">
+4255-                              <div className="flex items-center gap-2">
+4256-                                <div className="w-2.5 h-2.5 rounded-sm bg-[#800000]" />
+4257-                                <span className="font-semibold text-slate-600">Interpolated</span>
+4258-                              </div>
+4259-                              <span className="font-bold text-slate-800 font-mono">
+4260-                                {typeof data.interpolated === 'number' ? data.interpolated.toFixed(3) : 'NaN'} m
+4261-                              </span>
+4262-                            </div>
+4263-                          )}
+4264-                          
+4265-                          {visibleSensors.map((s, idx) => {
+4266-                             const palette = ['#3E9BFE', '#059669', '#ff00ff', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
+4267-                             const color = palette[availableSensors.indexOf(s) % palette.length];
+4268-                             return (
+4269-                               <div key={s} className="flex items-center justify-between gap-6 text-[11px]">
+4270-                                 <div className="flex items-center gap-2">
+--
+5101-              </span>
+5102-            </div>
+5103-          </div>
+5104-          <div className="relative group h-[400px] w-full" style={{ willChange: 'transform, opacity', transform: 'translateZ(0)' }}>
+5105-            <div className="export-exclude absolute right-8 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+5106-              <button onClick={() => setVZoom(z => z * 1.25)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom In Vertical">
+5107-                <ZoomIn size={14} />
+5108-              </button>
+5109-              <button onClick={() => setVZoom(1)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Reset Vertical Zoom">
+5110-                <Maximize size={14} />
+5111-              </button>
+5112-              <button onClick={() => setVZoom(z => z * 0.8)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom Out Vertical">
+5113-                <ZoomOut size={14} />
+5114-              </button>
+5115-            </div>
+5116-            <ResponsiveContainer width="100%" height="100%">
+5117-              <AreaChart 
+5118-                data={displayPreds} 
+5119-                margin={{ bottom: 20 }}
+5120-                style={{ cursor: 'crosshair', userSelect: 'none' }}
+5121-                onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
+5122-                onMouseMove={(e: any) => refAreaLeft && e && e.activeLabel && setRefAreaRight(e.activeLabel)}
+5123-                onMouseUp={zoom}
+5124-              >
+5125-              <defs>
+5126-                <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
+5127-                  <stop offset="5%" stopColor="#0284c7" stopOpacity={0.2}/>
+5128-                  <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
+5129-                </linearGradient>
+5130-              </defs>
+5131-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+5132-              <XAxis 
+5133-                dataKey="timeMs" 
+5134-                type="number"
+5135-                scale="time"
+5136-                domain={zoomDomain ? [zoomDomain.start, zoomDomain.end] : ['dataMin', 'dataMax']}
+5137-                allowDataOverflow
+5138-                tick={{fontSize: 9, fill: '#64748b'}} 
+5139-                tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM/yyyy')}
+5140-                minTickGap={30}
+5141-                axisLine={false} 
+5142-              />
+5143-              <YAxis 
+5144-                tickFormatter={(val: number) => val.toFixed(3)}
+5145-                label={{ value: 'Elevasi (m)', angle: -90, position: 'insideLeft', offset: -10, style: { fontSize: '11px', fontWeight: 'bold', fill: '#475569' } }}
+5146-                tick={{fontSize: 9, fill: '#64748b'}} 
+5147-                axisLine={false} 
+5148-                domain={predYDomain} 
+5149-                width={80}
+5150-              />
+5151:              <Tooltip content={<PredictionTooltip />} />
+5152-              
+5153-              {moonEvents.map((me, i) => (
+5154-                <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 16 }} />
+5155-              ))}
+5156-
+5157-              <Area 
+5158-                type="monotone" 
+5159-                dataKey="value" 
+5160-                stroke="#0284c7" 
+5161-                strokeWidth={2} 
+5162-                fillOpacity={1} 
+5163-                fill="url(#colorVal)" 
+5164-                animationDuration={0} 
+5165-                isAnimationActive={false}
+5166-                connectNulls 
+5167-              />
+5168-              
+5169-              {refAreaLeft && refAreaRight ? (
+5170-                <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#0ea5e9" fillOpacity={0.15} />
+5171-              ) : null}
+5172-
+5173-              <Brush 
+5174-                dataKey="timeMs" 
+5175-                tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
+5176-                height={30} 
+5177-                stroke="#cbd5e1" 
+5178-                travellerWidth={10} 
+5179-                fill="#f8fafc" 
+5180-              />
+5181-            </AreaChart>
+5182-            </ResponsiveContainer>
+5183-          </div>
+5184-          {predictions.length > (365 * 24) && (
+5185-             <div className="mt-4 px-3 py-1.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded-lg uppercase tracking-widest text-center border border-amber-100 flex items-center justify-center gap-2">
+5186-                 <AlertCircle size={14} /> Tampilan Grafik Diagregasi ke Monthly-Mean untuk Performa ({predictions.length.toLocaleString()} Jam Data Prediksi BISA DI-EXPORT)
+5187-             </div>
+5188-          )}
+5189-          <div className="mt-6 border-t border-slate-100 pt-6">
+5190-             <div className="flex items-center gap-2 text-amber-500 mb-4 px-2">
+5191-                <AlertCircle size={16} />
+5192-                <span className="text-[10px] font-bold uppercase tracking-widest">Catatan Penting</span>
+5193-             </div>
+5194-             <p className="text-xs text-slate-500 leading-relaxed px-2">
+5195-                Prediksi dihitung menggunakan konstanta harmonik yang dihitung dari data input. Akurasi sangat bergantung pada panjang data input (ideal minimal 15-30 hari) dan kualitas pembersihan data awal.
+5196-             </p>
+5197-          </div>
+5198-        </div>
+5199-      )}
+5200-    </div>
+5201-  );

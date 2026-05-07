@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/server.cjs --packages=external",
-    "start": "node dist/server.cjs",
+    "build": "vite build",
+    "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
@@ -35,7 +35,11 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
     "tsx": "^4.21.0",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "html-to-image": "^1.11.13",
+    "pdf-lib": "^1.17.1",
+    "downloadjs": "^1.4.7",
+    "tailwindcss": "^4.1.14"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -44,11 +48,7 @@
     "@types/leaflet": "^1.9.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
-    "downloadjs": "^1.4.7",
     "esbuild": "^0.28.0",
-    "html-to-image": "^1.11.13",
-    "pdf-lib": "^1.17.1",
-    "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   },
