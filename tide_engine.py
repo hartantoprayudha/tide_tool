@@ -258,21 +258,34 @@ HARMONIC_FREQS = {
 
 def parse_dates(ts_col):
     """Replicates flexible date parsing from App.tsx"""
+    import warnings
     fmts = [
+        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M',
         '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', 
         '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M',
-        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M',
         '%d%m%Y %H:%M', '%d%m%Y %H%M', '%d/%m/%Y %H.%M'
     ]
     
-    parsed = pd.to_datetime(ts_col, errors='coerce')
+    parsed = pd.Series(pd.NaT, index=ts_col.index)
     mask = parsed.isna()
-    if mask.any():
-        for fmt in fmts:
-            if not mask.any(): break
+    
+    for fmt in fmts:
+        if not mask.any(): break
+        try:
             batch = pd.to_datetime(ts_col[mask], format=fmt, errors='coerce')
-            parsed[mask] = batch
+            parsed.update(batch)
             mask = parsed.isna()
+        except Exception:
+            pass
+            
+    if mask.any():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                parsed.update(pd.to_datetime(ts_col[mask], errors='coerce'))
+            except Exception:
+                pass
+                
     return parsed
 
 def solve_least_squares(t_hours, y_vals, comps):
@@ -288,6 +301,69 @@ def solve_least_squares(t_hours, y_vals, comps):
     A = np.column_stack(cols)
     res = np.linalg.lstsq(A, y_vals, rcond=None)[0]
     return res
+
+def calculate_trend(data_x, data_y):
+    if len(data_x) < 2: return 0, 0, 0
+    n = len(data_x)
+    sum_x = np.sum(data_x)
+    sum_y = np.sum(data_y)
+    sum_xy = np.sum(data_x * data_y)
+    sum_x2 = np.sum(data_x * data_x)
+    if n * sum_x2 - sum_x * sum_x == 0: return 0, 0, 0
+    slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x)
+    intercept = (sum_y - slope * sum_x) / n
+    rate_year = slope * 24 * 365.25
+    return slope, intercept, rate_year
+
+def iterative_ssa(daily_x, daily_y):
+    L = 365
+    N = len(daily_y)
+    K = N - L + 1
+    if K <= 0: return None
+    
+    C = np.zeros((L, L))
+    for i in range(L):
+        for j in range(i, L):
+            sum_val = np.sum(daily_y[i:i+K] * daily_y[j:j+K])
+            C[i, j] = sum_val / K
+            C[j, i] = C[i, j]
+            
+    v = np.full(L, 1.0 / np.sqrt(L))
+    for _ in range(20):
+        v_next = np.dot(C, v)
+        norm = np.linalg.norm(v_next)
+        if norm > 0: v = v_next / norm
+        
+    PC1 = np.zeros(K)
+    for k in range(K):
+        PC1[k] = np.sum(daily_y[k:k+L] * v)
+        
+    ssa_y = np.zeros(N)
+    count_arr = np.zeros(N)
+    for i in range(L):
+        for j in range(K):
+            ssa_y[i+j] += v[i] * PC1[j]
+            count_arr[i+j] += 1
+            
+    for i in range(N):
+        if count_arr[i] > 0:
+            ssa_y[i] /= count_arr[i]
+            
+    return calculate_trend(daily_x, ssa_y), ssa_y
+
+def robust_stl(daily_x, daily_y):
+    robust_trend_y = []
+    half_window = 365 // 2
+    n = len(daily_y)
+    for i in range(n):
+        start = max(0, i - half_window)
+        end = min(n - 1, i + half_window)
+        arr = [y for y in daily_y[start:end+1] if not np.isnan(y)]
+        if arr:
+            robust_trend_y.append(np.median(arr))
+        else:
+            robust_trend_y.append(np.nan)
+    return calculate_trend(daily_x, robust_trend_y)
 
 def run_pipeline(df, sensor_name, config=None):
     """
@@ -468,6 +544,46 @@ def run_pipeline(df, sensor_name, config=None):
     t_f = t_hours[final_valid]
     y_f = df_reg['Filtered'].values[final_valid]
     
+    # ------------------ TREND CALCULATIONS ------------------
+    # Calculate Linear Regression
+    lr_slope, lr_intercept, lr_rate = calculate_trend(t_f, y_f)
+    
+    # Daily Resampling for STL and SSA
+    t0_dt = df_reg['Timestamp'].iloc[0]
+    df_daily = df_reg.set_index('Timestamp')['Filtered'].resample('D').mean()
+    daily_x_hours = (df_daily.index - t0_dt).total_seconds() / 3600.0 + 12.0
+    daily_y = df_daily.interpolate(limit_direction='both').fillna(0).values
+    daily_x = daily_x_hours.values
+    
+    # Calculate STL Trend Data (using a basic moving average as a proxy for STL decomp's trend)
+    window_days_stl = 365
+    if len(daily_y) > window_days_stl:
+        stl_y = pd.Series(daily_y).rolling(window=window_days_stl, min_periods=1, center=True).mean().values
+        stl_slope, stl_intercept, stl_rate = calculate_trend(daily_x, stl_y)
+    else:
+        stl_slope, stl_intercept, stl_rate = 0, 0, 0
+
+    # Calculate Robust STL
+    if len(daily_y) > window_days_stl:
+        rstl_res = robust_stl(daily_x, daily_y)
+        if rstl_res:
+             rstl_slope, rstl_intercept, rstl_rate = rstl_res
+        else:
+             rstl_slope, rstl_intercept, rstl_rate = 0, 0, 0
+    else:
+        rstl_slope, rstl_intercept, rstl_rate = 0, 0, 0
+
+    # Calculate Iterative SSA
+    if len(daily_y) > 365:
+        ssa_res = iterative_ssa(daily_x, daily_y)
+        if ssa_res:
+            (ssa_slope, ssa_intercept, ssa_rate), ssa_y = ssa_res
+        else:
+            ssa_slope, ssa_intercept, ssa_rate = 0, 0, 0
+    else:
+        ssa_slope, ssa_intercept, ssa_rate = 0, 0, 0
+    # --------------------------------------------------------
+    
     # Selection based on config
     c_set = config.get('constituentSet', 'AUTO')
     if c_set == '9':
@@ -502,12 +618,26 @@ def run_pipeline(df, sensor_name, config=None):
     stats = {
         'Z0': round(z0, 4),
         'MSL': round(df_reg['Filtered'].mean(), 4),
-        'slope': final_sol[1] if final_sol is not None and len(final_sol) > 1 else 0,
+        'slope': lr_slope,  # using lr_slope for backwards compatibility where slope is used
+        'linear_rate': lr_rate,
+        'linear_intercept': lr_intercept,
+        'stl_rate': stl_rate,
+        'stl_slope': stl_slope,
+        'stl_intercept': stl_intercept,
+        'robust_stl_rate': rstl_rate,
+        'robust_stl_slope': rstl_slope,
+        'robust_stl_intercept': rstl_intercept,
+        'ssa_rate': ssa_rate,
+        'ssa_slope': ssa_slope,
+        'ssa_intercept': ssa_intercept,
+        'duration_days': float(t_hours.max()) / 24.0,
         'HAT': round(z0 + sum_amp, 4),
         'LAT': round(z0 - sum_amp, 4),
         'MHWS': round(z0 + (am2 + as2), 4),
         'MLWS': round(z0 - (am2 + as2), 4),
         'RMSE': round(np.sqrt(np.mean((y_f - get_pred(t_f, final_sol, final_comps))**2)), 4),
+        'MAE': round(np.mean(np.abs(y_f - get_pred(t_f, final_sol, final_comps))), 4),
+        'ME': round(np.mean(y_f - get_pred(t_f, final_sol, final_comps)), 4),
         'constituents': harmonic_results
     }
     

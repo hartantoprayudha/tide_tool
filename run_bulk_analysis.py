@@ -49,9 +49,9 @@ def generate_log_text(df_raw, processed_df, config, sensor, dt_start, dt_end, gr
     
     return logContent
 
-def generate_report_text(processed_df, stats, station_id):
+def generate_report_text(processed_df, stats, station_id, num_files=1):
     """Generates the Report format like App.tsx"""
-    content = f"Tide Analysis Report\tMerged Data\n"
+    content = f"Tide Analysis Report\t{num_files} Files Selected\n"
     content += f"Station Name\t{station_id}\n"
     content += "Latitude\t-\n"
     content += "Longitude\t-\n"
@@ -60,19 +60,34 @@ def generate_report_text(processed_df, stats, station_id):
     tEnd = processed_df['Timestamp'].iloc[-1]
     durationDays = (tEnd - tStart).total_seconds() / (3600 * 24)
     
-    content += f"Data Start\t{tStart.strftime('%Y-%m-%d %H:%M:%S')}\n"
-    content += f"Data End\t{tEnd.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    def to_js_locale_string(dt):
+        return f"{dt.month}/{dt.day}/{dt.year}, {dt.strftime('%I:%M:%S %p').lstrip('0')}"
+        
+    content += f"Data Start\t{to_js_locale_string(tStart)}\n"
+    content += f"Data End\t{to_js_locale_string(tEnd)}\n"
     content += f"Data Duration\t{durationDays:.2f} days\n"
-    content += f"Generated\t{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    content += f"Generated\t{to_js_locale_string(datetime.now())}\n\n"
     
     content += "--- CHART DATUMS & TIDAL RANGES ---\n"
     content += "Parameter\tValue\tUnit\n"
     content += f"MSL (Mean Sea Level)\t{stats['MSL']:.3f}\tm\n"
+    content += f"HAT (Highest Astronomical Tide)\t{stats['HAT']:.3f}\tm\n"
+    content += f"MHWS (Mean High Water Springs)\t{stats['MHWS']:.3f}\tm\n"
+    content += f"MLWS (Mean Low Water Springs)\t{stats['MLWS']:.3f}\tm\n"
+    content += f"LAT (Lowest Astronomical Tide)\t{stats['LAT']:.3f}\tm\n"
     
     am2 = next((r['amplitude'] for r in stats['constituents'] if r['name'] == 'M2'), 0)
     as2 = next((r['amplitude'] for r in stats['constituents'] if r['name'] == 'S2'), 0)
     ak1 = next((r['amplitude'] for r in stats['constituents'] if r['name'] == 'K1'), 0)
     ao1 = next((r['amplitude'] for r in stats['constituents'] if r['name'] == 'O1'), 0)
+    
+    meanSpringTide = 2 * (am2 + as2)
+    meanNeapTide = 2 * abs(am2 - as2)
+    maxAstroRange = stats['HAT'] - stats['LAT']
+    
+    content += f"Mean Spring Tide\t{meanSpringTide:.3f}\tm\n"
+    content += f"Mean Neap Tide\t{meanNeapTide:.3f}\tm\n"
+    content += f"Maximum Astronomical Tidal Range\t{maxAstroRange:.3f}\tm\n"
     
     tidalType = "Unknown"
     d = am2 + as2
@@ -83,18 +98,30 @@ def generate_report_text(processed_df, stats, station_id):
         elif f <= 3.0: tidalType = "Mixed, mainly diurnal (Campuran Condong Tunggal)"
         else: tidalType = "Diurnal (Pasang Surut Tunggal)"
         
-    meanSpringTide = 2 * (am2 + as2)
-    meanNeapTide = 2 * abs(am2 - as2)
-    maxAstroRange = stats['HAT'] - stats['LAT']
+    content += f"Tidal Type (Formzahl)\t{tidalType}\t-\n\n"
     
-    content += f"HAT (Highest Astronomical Tide)\t{stats['HAT']:.3f}\tm\n"
-    content += f"MHWS (Mean High Water Springs)\t{stats['MHWS']:.3f}\tm\n"
-    content += f"MLWS (Mean Low Water Springs)\t{stats['MLWS']:.3f}\tm\n"
-    content += f"LAT (Lowest Astronomical Tide)\t{stats['LAT']:.3f}\tm\n"
-    content += f"Mean Spring Tide\t{meanSpringTide:.3f}\tm\n"
-    content += f"Mean Neap Tide\t{meanNeapTide:.3f}\tm\n"
-    content += f"Maximum Astronomical Tidal Range\t{maxAstroRange:.3f}\tm\n"
-    content += f"Tidal Type (Formzahl)\t{tidalType}\t-\n"
+    content += "--- SEA LEVEL TREND ---\n"
+    content += "Method\tRate\tUnit\n"
+    if stats.get('duration_days', 0) > 365:
+        content += f"STL Decomposition\t{stats.get('stl_rate', 0):.4f}\tm/year\n"
+        content += f"Robust STL\t{stats.get('robust_stl_rate', 0):.4f}\tm/year\n"
+        content += f"Iterative SSA\t{stats.get('ssa_rate', 0):.4f}\tm/year\n"
+    content += f"Linear Regression\t{stats.get('linear_rate', 0):.4f}\tm/year\n\n"
+    
+    content += "--- MODEL ACCURACIES (Harmonic vs Analyzed) ---\n"
+    content += "Parameter\tValue\tUnit\n"
+    content += f"RMSE (Root Mean Square Error)\t{stats.get('RMSE', 0):.4f}\tm\n"
+    content += f"MAE (Mean Absolute Error)\t{stats.get('MAE', 0):.4f}\tm\n"
+    content += f"ME (Mean Error)\t{stats.get('ME', 0):.4f}\tm\n\n"
+    
+    content += "--- HARMONIC CONSTITUENTS ---\n"
+    content += "Comp\tAmp (m)\tPhase (deg)\tDesc\n"
+    
+    sorted_consts = sorted(stats['constituents'], key=lambda x: x['amplitude'], reverse=True)
+    from tide_engine import HARMONIC_FREQS
+    for c in sorted_consts:
+        desc = HARMONIC_FREQS.get(c['name'], {}).get('d', '')
+        content += f"{c['name']}\t{c['amplitude']:.3f}\t{c['phase']:.3f}\t{desc}\n"
     
     return content
 
@@ -173,9 +200,9 @@ def bulk_process(input_folder="."):
         with open(log_path, 'w', encoding='utf-8') as log_f:
             log_f.write(generate_log_text(df_raw, processed_df, config, sensor, dt_start, dt_end, gross_errors, station_id))
             
-        report_path = os.path.join(base_out, "report", f"tide_analysis_report_{station_id}.txt")
+        report_path = os.path.join(base_out, "report", f"tide_analysis_report_{station_id.lower()}.txt")
         with open(report_path, 'w', encoding='utf-8') as rep_f:
-            rep_f.write(generate_report_text(processed_df, stats, station_id))
+            rep_f.write(generate_report_text(processed_df, stats, station_id, len(input_files)))
             
         hydras_path = os.path.join(base_out, "hydras", f"{station_id}_hydras.txt")
         export_hydras(processed_df, station_id, sensor, hydras_path)
@@ -188,14 +215,23 @@ def bulk_process(input_folder="."):
         const_df.to_csv(const_csv_path, index=False)
         
         # Calculate trendline
+        duration_years = stats.get('duration_days', 0) / 365.25
         t0 = processed_df['Timestamp'].iloc[0]
         t_hours = (processed_df['Timestamp'] - t0).dt.total_seconds() / 3600.0
-        trendline = stats['Z0'] + stats['slope'] * t_hours
+        
+        if duration_years > 2:
+            trend_val_mm = stats.get('ssa_rate', 0) * 1000
+            trendline = stats.get('ssa_intercept', stats['Z0']) + stats.get('ssa_slope', 0) * (t_hours - 12.0)
+            trend_label = f"Sea Level Trend (Iterative SSA: {trend_val_mm:.2f} mm/year)"
+        else:
+            trend_val_mm = stats.get('linear_rate', 0) * 1000
+            trendline = stats.get('linear_intercept', stats['Z0']) + stats.get('slope', 0) * t_hours
+            trend_label = f"Sea Level Trend (Linear Regr: {trend_val_mm:.2f} mm/year)"
         
         plt.figure(figsize=(12, 6))
         plt.plot(processed_df['Timestamp'], processed_df['Filtered'], label='Valid', color='#ec7017', linewidth=2)
-        plt.plot(processed_df['Timestamp'], trendline, label='Sea Level Trend', color='#ef4444', linestyle='--', linewidth=2)
-        plt.title(f"{station_id}")
+        plt.plot(processed_df['Timestamp'], trendline, label=f"Sea Level Trend", color='#ef4444', linestyle='--', linewidth=2)
+        plt.title(f"{station_id} - {trend_label}", fontweight='bold')
         plt.xlabel("Time")
         plt.ylabel("Water Level (m)")
         plt.legend()
