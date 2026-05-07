@@ -195,7 +195,7 @@ def bulk_process(input_folder="."):
         plt.figure(figsize=(12, 6))
         plt.plot(processed_df['Timestamp'], processed_df['Filtered'], label='Valid', color='#ec7017', linewidth=2)
         plt.plot(processed_df['Timestamp'], trendline, label='Sea Level Trend', color='#ef4444', linestyle='--', linewidth=2)
-        plt.title(f"Tide Analysis: {station_id}")
+        plt.title(f"{station_id}")
         plt.xlabel("Time")
         plt.ylabel("Water Level (m)")
         plt.legend()
