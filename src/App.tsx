@@ -3317,6 +3317,21 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const [vZoom, setVZoom] = useState(1);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
 
+  const brushData = useMemo(() => {
+    if (!records.length) return [];
+    // Downsample for the brush timeline specifically (fixed 1000 points)
+    const step = Math.max(1, Math.ceil(records.length / 1000));
+    const sampled = [];
+    for (let i = 0; i < records.length; i += step) {
+      sampled.push({ timeMs: records[i].timestamp.getTime() });
+    }
+    // ensure last element is included
+    if (sampled[sampled.length - 1].timeMs !== records[records.length - 1].timestamp.getTime()) {
+      sampled.push({ timeMs: records[records.length - 1].timestamp.getTime() });
+    }
+    return sampled;
+  }, [records]);
+
   useEffect(() => {
     const handleClickOutside = () => setContextMenu(null);
     document.addEventListener("click", handleClickOutside);
@@ -4354,11 +4369,21 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               
               <Brush 
                 dataKey="timeMs" 
+                data={brushData}
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
                 height={30} 
                 stroke="#cbd5e1" 
                 travellerWidth={10} 
                 fill="#f8fafc" 
+                onChange={(e: any) => {
+                  if (e && e.startIndex !== undefined && e.endIndex !== undefined) {
+                    const startMs = brushData[e.startIndex]?.timeMs;
+                    const endMs = brushData[e.endIndex]?.timeMs;
+                    if (startMs && endMs) {
+                      setZoomDomain({ start: startMs, end: endMs });
+                    }
+                  }
+                }}
               />
             </ComposedChart>
           </ResponsiveContainer>
@@ -4941,6 +4966,19 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
     }
   }, [predictions]);
 
+  const predBrushData = useMemo(() => {
+    if (!displayPredsRaw.length) return [];
+    const step = Math.max(1, Math.ceil(displayPredsRaw.length / 1000));
+    const sampled = [];
+    for (let i = 0; i < displayPredsRaw.length; i += step) {
+      sampled.push({ timeMs: displayPredsRaw[i].timeMs });
+    }
+    if (sampled[sampled.length - 1].timeMs !== displayPredsRaw[displayPredsRaw.length - 1].timeMs) {
+      sampled.push({ timeMs: displayPredsRaw[displayPredsRaw.length - 1].timeMs });
+    }
+    return sampled;
+  }, [displayPredsRaw]);
+
   const displayPreds = useMemo(() => {
     let sliced = displayPredsRaw;
     if (zoomDomain) {
@@ -5167,11 +5205,21 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
 
               <Brush 
                 dataKey="timeMs" 
+                data={predBrushData}
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
                 height={30} 
                 stroke="#cbd5e1" 
                 travellerWidth={10} 
                 fill="#f8fafc" 
+                onChange={(e: any) => {
+                  if (e && e.startIndex !== undefined && e.endIndex !== undefined) {
+                    const startMs = predBrushData[e.startIndex]?.timeMs;
+                    const endMs = predBrushData[e.endIndex]?.timeMs;
+                    if (startMs && endMs) {
+                      setZoomDomain({ start: startMs, end: endMs });
+                    }
+                  }
+                }}
               />
             </AreaChart>
             </ResponsiveContainer>
