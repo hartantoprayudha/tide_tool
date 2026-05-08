@@ -646,9 +646,6 @@ def run_pipeline(df, sensor_name, config=None):
 def export_hydras(df, station_name, sensor_name, output_path):
     """Generates HYDRAS formatted output"""
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(f"* STATION: {station_name}\n")
-        f.write(f"* SENSOR: {sensor_name}\n")
-        f.write("* FORMAT: Timestamp, Value\n")
         for _, row in df.iterrows():
             val = row['Filtered']
             val_str = f"{val:.3f}" if not np.isnan(val) else "NaN"
