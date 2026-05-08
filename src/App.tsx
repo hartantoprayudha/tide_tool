@@ -469,9 +469,23 @@ interface PartialModifier {
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [records, setRecords] = useState<TideRecord[]>([]);
+  const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
+
+  const recordsRef = useRef<TideRecord[]>([]);
+  const records = recordsRef.current;
+  const setRecords = (data: TideRecord[] | ((prev: TideRecord[]) => TideRecord[])) => {
+    recordsRef.current = typeof data === 'function' ? data(recordsRef.current) : data;
+    forceUpdate();
+  };
+
   const [datums, setDatums] = useState<{ mhws: number, mlws: number, hat: number, lat: number } | null>(null);
-  const [rawData, setRawData] = useState<any[]>([]);
+
+  const rawDataRef = useRef<any[]>([]);
+  const rawData = rawDataRef.current;
+  const setRawData = (data: any[] | ((prev: any[]) => any[])) => {
+    rawDataRef.current = typeof data === 'function' ? data(rawDataRef.current) : data;
+    forceUpdate();
+  };
   const [modifiers, setModifiers] = useState<PartialModifier[]>([]);
   const [fileName, setFileName] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -551,7 +565,13 @@ export default function App() {
   const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number }, robustStlTrend?: { slope: number, intercept: number, rateYear: number }, ssaTrend?: { slope: number, intercept: number, rateYear: number }, polyTrend?: { c0: number, c1: number, c2: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
   const [isFullAnalysisRun, setIsFullAnalysisRun] = useState(false);
-  const [validCache, setValidCache] = useState<Record<string, TideRecord[]>>({});
+
+  const validCacheRef = useRef<Record<string, TideRecord[]>>({});
+  const validCache = validCacheRef.current;
+  const setValidCache = (data: Record<string, TideRecord[]> | ((prev: Record<string, TideRecord[]>) => Record<string, TideRecord[]>)) => {
+    validCacheRef.current = typeof data === 'function' ? data(validCacheRef.current) : data;
+    forceUpdate();
+  };
   
   // Combination State
   const [combinationSettings, setCombinationSettings] = useState({
@@ -571,7 +591,14 @@ export default function App() {
   const [useTrendInPrediction, setUseTrendInPrediction] = useState(false);
   const [predStartDate, setPredStartDate] = useState(formatUTC(new Date(), 'yyyy-MM-dd'));
   const [predEndDate, setPredEndDate] = useState(formatUTC(addDays(new Date(), 7), 'yyyy-MM-dd'));
-  const [predictions, setPredictions] = useState<any[]>([]);
+
+  const predictionsRef = useRef<any[]>([]);
+  const predictions = predictionsRef.current;
+  const setPredictions = (data: any[] | ((prev: any[]) => any[])) => {
+    predictionsRef.current = typeof data === 'function' ? data(predictionsRef.current) : data;
+    forceUpdate();
+  };
+
   const [dataLengthWarning, setDataLengthWarning] = useState<string | null>(null);
   const [autoDiagnostics, setAutoDiagnostics] = useState<{ rayleighPassed: number, totalTested: number, snrPassed: number } | null>(null);
   const [chartTitle, setChartTitle] = useState("Tide Analysis Visualization");
@@ -1887,7 +1914,7 @@ export default function App() {
           setRecords(processed);
         });
       } catch (err) {
-        console.error("Analysis error", err);
+        console.error("Analysis error", err instanceof Error ? err.message : String(err));
       } finally {
         setIsLoading(false);
         isProcessing.current = false;
@@ -2152,7 +2179,7 @@ export default function App() {
 
             setPredictions(predData);
         } catch (err) {
-            console.error("Prediction failed:", err);
+            console.error("Prediction failed:", err instanceof Error ? err.message : String(err));
         } finally {
             setIsLoading(false);
         }
@@ -3677,7 +3704,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         pdf.addImage(dataUrl, 'PNG', 0, 0, node.offsetWidth, node.offsetHeight);
         pdf.save('BIG-Tidal-Analysis.pdf');
       }
-    } catch (error) { console.error(error); }
+    } catch (error) { console.error(error instanceof Error ? error.message : String(error)); }
   };
 
   const moonEvents = useMemo(() => getMoonEvents(displayData), [displayData]);
