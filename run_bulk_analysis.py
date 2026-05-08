@@ -495,6 +495,7 @@ def bulk_process(input_folder="."):
     
     latitude = "-"
     longitude = "-"
+    stasion_name = station_id
     try:
         if os.path.exists('stainfo.csv'):
             stainfo = pd.read_csv('stainfo.csv', dtype=str)
@@ -503,6 +504,7 @@ def bulk_process(input_folder="."):
             
         match = stainfo[stainfo['Id_Sta'].str.lower() == file_prefix]
         if not match.empty:
+            stasion_name = match.iloc[0]['Nama_Sta']
             lat_val = float(match.iloc[0]['Latitude'])
             lon_val = float(match.iloc[0]['Longitude'])
             latitude = f"{lat_val:.5f}"
@@ -574,7 +576,7 @@ def bulk_process(input_folder="."):
         plt.figure(figsize=(12, 6))
         plt.plot(processed_df['Timestamp'], processed_df['Filtered'], label='Valid', color='#ec7017', linewidth=2)
         plt.plot(processed_df['Timestamp'], trendline, label=f"Sea Level Trend", color='#ef4444', linestyle='--', linewidth=2)
-        plt.title(f"{station_id} - {trend_label}", fontweight='bold')
+        plt.title(f"{stasion_name} - {trend_label}", fontweight='bold')
         plt.xlabel("Time")
         plt.ylabel("Water Level (m)")
         plt.legend()
