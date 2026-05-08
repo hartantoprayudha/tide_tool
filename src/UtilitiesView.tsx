@@ -4,6 +4,7 @@ import download from 'downloadjs';
 
 export default function UtilitiesView() {
     const [files, setFiles] = useState<File[]>([]);
+    const [sourceTimezone, setSourceTimezone] = useState<number>(0);
     const [mergeFiles, setMergeFiles] = useState<File[]>([]);
     const [converting, setConverting] = useState(false);
     const [merging, setMerging] = useState(false);
@@ -80,10 +81,10 @@ export default function UtilitiesView() {
                 // Line 1: Month Year
                 // Example: " 1 1985 042 C"
                 const header1 = lines[0].trim().split(/\s+/);
-                const month = parseInt(header1[0]);
-                const year = parseInt(header1[1]);
+                const monthOrig = parseInt(header1[0]);
+                const yearOrig = parseInt(header1[1]);
 
-                if (isNaN(month) || isNaN(year)) {
+                if (isNaN(monthOrig) || isNaN(yearOrig)) {
                     console.error("Invalid TOGA header in file:", file.name);
                     continue;
                 }
@@ -94,33 +95,39 @@ export default function UtilitiesView() {
                     const line = lines[i];
                     if (!line.trim()) continue;
 
-                    const day = i - 1; // Row 3 is Day 1
+                    const dayOrig = i - 1; // Row 3 is Day 1
                     
                     // Parse 24 hourly values
-                    // TOGA format is fixed width, 4 chars per value: " vvv." or "   ."
-                    for (let hour = 0; hour < 24; hour++) {
-                        const start = hour * 4;
+                    for (let hourOrig = 0; hourOrig < 24; hourOrig++) {
+                        const start = hourOrig * 4;
                         const chunk = line.substring(start, start + 4).trim();
                         
-                        // If it's a dot, it's missing data
+                        let value: number | null = null;
                         if (chunk === "." || !chunk || chunk.includes(".")) {
-                            const val = chunk.replace(".", "").trim();
-                            if (!val) continue; // It was just a dot or spaces
-
-                            // If we have a value accompanied by a dot (e.g. "085."), use it
-                            const value = parseInt(val);
-                            if (!isNaN(value)) {
-                                const dateStr = `${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`;
-                                const timeStr = `${hour.toString().padStart(2, '0')}:00:00`;
-                                output += `${dateStr} ${timeStr}\t${value}\n`;
+                            const valStr = chunk.replace(".", "").trim();
+                            if (valStr) {
+                                value = parseInt(valStr);
                             }
                         } else {
-                            const value = parseInt(chunk);
-                            if (!isNaN(value)) {
-                                const dateStr = `${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`;
-                                const timeStr = `${hour.toString().padStart(2, '0')}:00:00`;
-                                output += `${dateStr} ${timeStr}\t${value}\n`;
-                            }
+                            value = parseInt(chunk);
+                        }
+
+                        if (value !== null && !isNaN(value)) {
+                            // Create a date object in the source timezone
+                            // We treat the input as local, then shift it to UTC if needed
+                            const date = new Date(yearOrig, monthOrig - 1, dayOrig, hourOrig, 0, 0);
+                            
+                            // Subtract timezone to get UTC
+                            // Example: If source is UTC+7, we subtract 7 hours to get UTC+0
+                            date.setHours(date.getHours() - sourceTimezone);
+
+                            const d = date.getDate().toString().padStart(2, '0');
+                            const m = (date.getMonth() + 1).toString().padStart(2, '0');
+                            const y = date.getFullYear();
+                            const h = date.getHours().toString().padStart(2, '0');
+                            const timeStr = `${h}:00:00`;
+                            
+                            output += `${d}/${m}/${y} ${timeStr}\t${value}\n`;
                         }
                     }
                 }
@@ -156,7 +163,7 @@ export default function UtilitiesView() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* TOGA to Hydras Section */}
                 <div className="bg-slate-50 rounded-3xl p-6 border border-slate-100 flex flex-col gap-6">
                     <div className="flex items-center gap-3">
@@ -172,6 +179,25 @@ export default function UtilitiesView() {
                     </p>
 
                     <div className="space-y-4">
+                        <div className="p-3 bg-white rounded-xl border border-slate-100 space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                Original Timezone (UTC Offset)
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-400">UTC</span>
+                                <input 
+                                    type="number" 
+                                    value={sourceTimezone}
+                                    onChange={(e) => setSourceTimezone(parseFloat(e.target.value) || 0)}
+                                    className="flex-1 bg-slate-50 border-none rounded-lg px-3 py-1.5 text-xs font-bold text-slate-700 focus:ring-1 focus:ring-[#0284c7] outline-none"
+                                    placeholder="Contoh: 7"
+                                />
+                            </div>
+                            <p className="text-[9px] text-slate-400 font-medium italic">
+                                *Masukan offset jam (misal 7 untuk UTC+7). Hasil konversi akan dikoreksi ke UTC+0.
+                            </p>
+                        </div>
+
                         <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:bg-white hover:border-[#0284c7] transition-all group">
                             <div className="flex flex-col items-center justify-center pt-5 pb-6">
                                 <Upload className="w-8 h-8 mb-2 text-slate-400 group-hover:text-[#0284c7]" />
@@ -261,7 +287,7 @@ export default function UtilitiesView() {
                 </div>
 
                 {/* Results Section */}
-                <div className="bg-white rounded-3xl p-6 border border-slate-200 flex flex-col gap-6 shadow-sm ring-4 ring-slate-50">
+                <div className="bg-white rounded-3xl p-6 border border-slate-200 flex flex-col gap-6 shadow-sm ring-4 ring-slate-50 md:col-span-2">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-emerald-50 rounded-lg shadow-sm">
