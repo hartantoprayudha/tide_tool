@@ -68,6 +68,20 @@ const formatUTC = (date: Date, fmt: string) => {
   return format(new Date(utcTime), fmt);
 };
 
+const CustomXAxisTick = ({ x, y, payload }: any) => {
+  const date = new Date(payload.value);
+  const timeStr = formatUTC(date, 'HH:mm');
+  const dateStr = formatUTC(date, 'dd/MM/yyyy');
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text x={0} y={0} dy={16} textAnchor="middle" fill="#64748b" fontSize={9}>
+        <tspan x={0} dy="0">{timeStr}</tspan>
+        <tspan x={0} dy="14">{dateStr}</tspan>
+      </text>
+    </g>
+  );
+};
+
 // --- TYPES ---
 interface TideRecord {
   timestamp: Date;
@@ -4211,8 +4225,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 scale="time"
                 domain={zoomDomain ? [zoomDomain.start, zoomDomain.end] : ['dataMin', 'dataMax']}
                 allowDataOverflow
-                tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM HH:mm')}
-                tick={{fontSize: 9, fill:'#64748b'}} 
+                tick={<CustomXAxisTick />}
                 minTickGap={30}
                 axisLine={false} 
                 tickMargin={10}
@@ -4369,7 +4382,6 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               
               <Brush 
                 dataKey="timeMs" 
-                data={brushData}
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
                 height={30} 
                 stroke="#cbd5e1" 
@@ -4400,9 +4412,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                                 dataKey="timeMs" 
                                 type="number" 
                                 domain={['dataMin', 'dataMax']} 
-                                tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM HH:mm')} 
-                                stroke="#94a3b8" 
-                                fontSize={10} 
+                                tick={<CustomXAxisTick />}
+                                height={45}
                             />
                             <YAxis stroke="#94a3b8" fontSize={10} width={45} tickFormatter={(val) => val.toFixed(2)} />
                             <Tooltip
@@ -4458,8 +4469,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             </div>
         )}
 
-        <div className="flex items-center gap-2 justify-center" style={{ marginTop: '-15px' }}>
-             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest">Visual Optimization: Hourly Sampling Active</div>
+        <div className="flex items-center gap-2 justify-center mt-2 mb-2">
+             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest whitespace-nowrap">Visual Optimization: Hourly Sampling Active</div>
         </div>
       </div>
 
@@ -5168,10 +5179,10 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 scale="time"
                 domain={zoomDomain ? [zoomDomain.start, zoomDomain.end] : ['dataMin', 'dataMax']}
                 allowDataOverflow
-                tick={{fontSize: 9, fill: '#64748b'}} 
-                tickFormatter={(val: number) => formatUTC(new Date(val), 'dd/MM/yyyy')}
+                tick={<CustomXAxisTick />}
                 minTickGap={30}
                 axisLine={false} 
+                height={45}
               />
               <YAxis 
                 tickFormatter={(val: number) => val.toFixed(3)}
@@ -5205,7 +5216,6 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
 
               <Brush 
                 dataKey="timeMs" 
-                data={predBrushData}
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
                 height={30} 
                 stroke="#cbd5e1" 
