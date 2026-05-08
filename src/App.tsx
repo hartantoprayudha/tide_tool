@@ -30,10 +30,12 @@ import {
   ChevronLeft,
   ChevronRight,
   PanelRightClose,
-  PanelRightOpen
+  PanelRightOpen,
+  Wrench
 } from 'lucide-react';
 import ConnectView from './ConnectView';
 import SummarizeView from './SummarizeView';
+import UtilitiesView from './UtilitiesView';
 
 import { 
   ComposedChart,
@@ -2706,7 +2708,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
         </div>
         
         <nav className="flex-1 space-y-1 w-full">
-          {['dashboard', 'connect', 'validate', 'harmonic', 'predictions', 'summarize', 'about'].map((tab) => (
+          {['dashboard', 'connect', 'validate', 'harmonic', 'predictions', 'summarize', 'utilities', 'about'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -2725,6 +2727,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
               {tab === 'harmonic' && <Piano size={18} />}
               {tab === 'predictions' && <TrendingUp size={18} />}
               {tab === 'summarize' && <MapIcon size={18} />}
+              {tab === 'utilities' && <Wrench size={18} />}
               {tab === 'about' && <Info size={18} />}
               {isSidebarOpen && <span className="capitalize">{tab}</span>}
             </button>
@@ -2889,7 +2892,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             </div>
         )}
 
-        {!records.length && (activeTab !== 'readme' && activeTab !== 'about' && activeTab !== 'summarize' && activeTab !== 'connect') && !isLoading ? (
+        {!records.length && (activeTab !== 'readme' && activeTab !== 'about' && activeTab !== 'summarize' && activeTab !== 'connect' && activeTab !== 'utilities') && !isLoading ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-2xl border border-[#e2e8f0] p-12 text-center gap-6 shadow-sm">
             <div className="w-20 h-20 bg-sky-50 rounded-3xl flex items-center justify-center text-[#0284c7] rotate-3 hover:rotate-0 transition-transform duration-300">
               <Waves size={40} />
@@ -2934,6 +2937,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                 </div>
             )}
             {activeTab === 'summarize' && <SummarizeView />}
+            {activeTab === 'utilities' && <UtilitiesView />}
             {activeTab === 'connect' && (
                 <ConnectView 
                   onDataLoaded={(data, selectedSensorName) => {
