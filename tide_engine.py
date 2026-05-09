@@ -630,6 +630,7 @@ def run_pipeline(df, sensor_name, config=None):
         'ssa_rate': ssa_rate,
         'ssa_slope': ssa_slope,
         'ssa_intercept': ssa_intercept,
+        'ssa_y': list(ssa_y) if 'ssa_y' in locals() else None,
         'duration_days': float(t_hours.max()) / 24.0,
         'HAT': round(z0 + sum_amp, 4),
         'LAT': round(z0 - sum_amp, 4),

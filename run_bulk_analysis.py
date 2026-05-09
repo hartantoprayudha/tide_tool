@@ -564,10 +564,23 @@ def bulk_process(input_folder="."):
         t0 = processed_df['Timestamp'].iloc[0]
         t_hours = (processed_df['Timestamp'] - t0).dt.total_seconds() / 3600.0
         
-        if duration_years > 2:
+        if duration_years > 2 and stats.get('ssa_y') is not None:
             trend_val_mm = stats.get('ssa_rate', 0) * 1000
-            trendline = stats.get('ssa_intercept', stats['Z0']) + stats.get('ssa_slope', 0) * (t_hours - 12.0)
             trend_label = f"Sea Level Trend (Iterative SSA: {trend_val_mm:.2f} mm/year)"
+            
+            ssa_y = stats['ssa_y']
+            N = len(ssa_y)
+            trendline = []
+            for t in t_hours:
+                day_idx_float = (t - 12.0) / 24.0
+                idx = int(np.floor(day_idx_float))
+                idx = max(0, min(idx, N - 2))
+                if N > 1:
+                    d_clamped = max(0.0, min(1.0, day_idx_float - idx))
+                    val = ssa_y[idx] + (ssa_y[idx+1] - ssa_y[idx]) * d_clamped
+                else:
+                    val = ssa_y[0] if N == 1 else np.nan
+                trendline.append(val)
         else:
             trend_val_mm = stats.get('linear_rate', 0) * 1000
             trendline = stats.get('linear_intercept', stats['Z0']) + stats.get('slope', 0) * t_hours
