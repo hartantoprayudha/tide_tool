@@ -2248,6 +2248,13 @@ export default function App() {
   const [exportSelections, setExportSelections] = useState<Record<string, boolean>>({});
   const [exportIntervalMode, setExportIntervalMode] = useState<'1_minute' | 'hourly_sampling' | 'hourly_average'>('1_minute');
   const [withHydrasHeader, setWithHydrasHeader] = useState(true);
+  const [exportHydrasStart, setExportHydrasStart] = useState<string>('');
+  const [exportHydrasEnd, setExportHydrasEnd] = useState<string>('');
+
+  const formatToDatetimeLocal = (date: Date) => {
+      const pad = (num: number) => num.toString().padStart(2, '0');
+      return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+  };
 
   const toggleExportSelection = (key: string) => {
       setExportSelections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -2267,11 +2274,20 @@ export default function App() {
 
     let exportRecords = records;
 
+    if (exportHydrasStart) {
+        const startTime = new Date(exportHydrasStart + 'Z').getTime();
+        exportRecords = exportRecords.filter(r => r.timestamp.getTime() >= startTime);
+    }
+    if (exportHydrasEnd) {
+        const endTime = new Date(exportHydrasEnd + 'Z').getTime();
+        exportRecords = exportRecords.filter(r => r.timestamp.getTime() <= endTime);
+    }
+
     if (currentMode === 'hourly_sampling') {
-        exportRecords = records.filter(r => r.timestamp.getMinutes() === 0 && r.timestamp.getSeconds() === 0);
+        exportRecords = exportRecords.filter(r => r.timestamp.getMinutes() === 0 && r.timestamp.getSeconds() === 0);
     } else if (currentMode === 'hourly_average') {
-        const grouped = new Map<number, typeof records>();
-        records.forEach(r => {
+        const grouped = new Map<number, typeof exportRecords>();
+        exportRecords.forEach(r => {
             const hr = new Date(r.timestamp);
             hr.setMinutes(0, 0, 0);
             const key = hr.getTime();
@@ -2848,7 +2864,13 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             {records.length > 0 && (
               <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5">
                 <button 
-                  onClick={() => setShowExportModal(true)}
+                  onClick={() => {
+                      if (records.length > 0) {
+                          setExportHydrasStart(formatToDatetimeLocal(records[0].timestamp));
+                          setExportHydrasEnd(formatToDatetimeLocal(records[records.length - 1].timestamp));
+                      }
+                      setShowExportModal(true);
+                  }}
                   className="flex items-center justify-center gap-2 px-4 h-11 min-w-[150px] bg-rose-600 text-white rounded-xl text-[11px] font-black tracking-widest hover:bg-rose-700 shadow-md shadow-rose-100 transition-all hover:-translate-y-0.5 active:scale-95 uppercase"
                 >
                   <Download size={15} strokeWidth={3} />
@@ -3177,11 +3199,29 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                       <div className="p-6 pb-4 border-b border-slate-100 flex items-center justify-between">
                           <div>
                               <h3 className="text-lg font-black text-slate-800 font-display">Export HYDRAS Format</h3>
-                              <p className="text-xs text-slate-500 font-medium mt-1">Pilih data yang ingin diekspor sejajar dengan Timestamp.</p>
+                              <p className="text-xs text-slate-500 font-medium mt-1">Pilih data yang ingin diekspor ke format Hydras.</p>
                           </div>
                           <button onClick={() => setShowExportModal(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"><X size={20} /></button>
                       </div>
                       <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+                          <div className="space-y-2 mb-4">
+                              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Rentang Waktu Ekspor</div>
+                              <div className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50/50">
+                                  <input 
+                                      type="datetime-local" 
+                                      value={exportHydrasStart}
+                                      onChange={(e) => setExportHydrasStart(e.target.value)}
+                                      className="flex-1 text-[11px] font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-2 outline-none focus:ring-2 focus:ring-sky-100 min-w-0"
+                                  />
+                                  <span className="text-slate-400 font-bold text-xs">-</span>
+                                  <input 
+                                      type="datetime-local" 
+                                      value={exportHydrasEnd}
+                                      onChange={(e) => setExportHydrasEnd(e.target.value)}
+                                      className="flex-1 text-[11px] font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-2 outline-none focus:ring-2 focus:ring-sky-100 min-w-0"
+                                  />
+                              </div>
+                          </div>
                           {records.length > 1 && Math.abs(records[1].timestamp.getTime() - records[0].timestamp.getTime()) >= 59000 && Math.abs(records[1].timestamp.getTime() - records[0].timestamp.getTime()) <= 61000 && (
                             <div className="space-y-2 mb-4">
                                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Opsi Interval Ekspor</div>
