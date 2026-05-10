@@ -467,7 +467,7 @@ export default function SummarizeView() {
                       <h3 className="font-bold text-slate-700">Peta Sebaran Sea Level Trend</h3>
                   </div>
                   <div className="flex flex-col gap-1 items-end">
-                      <span className="font-semibold text-slate-700 text-xs italic">ISSA Trend</span>
+                      <span className="font-semibold text-slate-700 text-xs italic">Iterative SSA Trend (mm/y)</span>
                       <div className="w-24 md:w-48">
                           <div 
                              className="w-full h-3 rounded shadow-sm border border-slate-200/50" 
@@ -477,7 +477,7 @@ export default function SummarizeView() {
                           ></div>
                           <div className="flex justify-between w-full text-[10px] font-medium text-slate-600 mt-1">
                              <span className="">{(trendStats.min * 1000).toFixed(2)}</span>
-                             <span className="">{(trendStats.max * 1000).toFixed(2)} mm/yr</span>
+                             <span className="">{(trendStats.max * 1000).toFixed(2)}</span>
                           </div>
                       </div>
                   </div>
