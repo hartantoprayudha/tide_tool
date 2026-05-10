@@ -1,24 +1,16 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { Upload, Download, Map as MapIcon, X } from 'lucide-react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap, Tooltip as LeafletTooltip } from 'react-leaflet';
-
-function BoundsUpdater({ bounds }: { bounds: L.LatLngBoundsExpression }) {
-  const map = useMap();
-  useEffect(() => {
-    map.fitBounds(bounds);
-  }, [bounds, map]);
-  return null;
-}
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-
-// Fix for icon issues with Leaflet in React
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
+import { Upload, Download, Map as MapIcon, X, Menu } from 'lucide-react';
+import 'ol/ol.css';
+import Map from 'ol/Map';
+import View from 'ol/View';
+import TileLayer from 'ol/layer/Tile';
+import OSM from 'ol/source/OSM';
+import VectorLayer from 'ol/layer/Vector';
+import VectorSource from 'ol/source/Vector';
+import Feature from 'ol/Feature';
+import Point from 'ol/geom/Point';
+import { fromLonLat, transformExtent } from 'ol/proj';
+import { Style, Circle as CircleStyle, Fill, Stroke } from 'ol/style';
 
 interface ParsedSummaryData {
   stationName: string;
@@ -38,44 +30,15 @@ export default function SummarizeView() {
   const [error, setError] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [leftWidth, setLeftWidth] = useState(50);
-  const [isDragging, setIsDragging] = useState(false);
+  const [isTableVisible, setIsTableVisible] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  const mapElementRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<Map | null>(null);
+  const vectorSourceRef = useRef<VectorSource | null>(null);
 
-  const handleMouseDown = () => {
-    setIsDragging(true);
-  };
-
-  useEffect(() => {
-    if (!isDragging) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const percentage = (x / rect.width) * 100;
-      if (percentage >= 15 && percentage <= 85) {
-        setLeftWidth(percentage);
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    
-    // Disable text selection globally while dragging
-    const oldSelect = document.body.style.userSelect;
-    document.body.style.userSelect = 'none';
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.userSelect = oldSelect;
-    };
-  }, [isDragging]);
+  const [hoveredStation, setHoveredStation] = useState<ParsedSummaryData | null>(null);
+  const [selectedStation, setSelectedStation] = useState<ParsedSummaryData | null>(null);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -108,7 +71,6 @@ export default function SummarizeView() {
             setError(`Gagal memparsing beberapa file: ${parsingErrors.slice(0, 3).join(', ')}${parsingErrors.length > 3 ? '...' : ''}`);
           }
           setSummaryData(prev => {
-             // Avoid duplicates by stationName or fileName? Just append for now, but maybe prevent duplicate file names.
              const existingNames = new Set(prev.map(p => p.fileName));
              const uniqueNewData = newData.filter(n => !existingNames.has(n.fileName));
              return [...prev, ...uniqueNewData];
@@ -138,7 +100,6 @@ export default function SummarizeView() {
     let linearTrend = 0;
     let stlTrend = 0; // fallback
 
-    // Helper to find value from line
     const extractVal = (line: string, index: number = 1) => {
       const parts = line.split('\t');
       return parts.length > index ? parts[index].trim() : '';
@@ -201,9 +162,7 @@ export default function SummarizeView() {
   };
 
   const formatSummaryExport = (): string => {
-    // Tab delimited header
     let content = 'Station Name\tLatitude\tLongitude\tTrend (m/year)\tMSL (m)\tHAT (m)\tLAT (m)\tMHWS (m)\tMLWS (m)\n';
-    
     summaryData.forEach(row => {
       content += `${row.stationName}\t${row.latitude}\t${row.longitude}\t${row.stlTrend}\t${row.msl}\t${row.hat}\t${row.lat}\t${row.mhws}\t${row.mlws}\n`;
     });
@@ -224,40 +183,158 @@ export default function SummarizeView() {
     URL.revokeObjectURL(url);
   };
 
-  // Compute color for stlTrend
-  const getColorForTrend = (trend: number) => {
-    // Red for large positive (e.g. > 0.01), Blue for negative (< 0)
-    // using a colormap from dark blue to red
-    // let's define a basic colormap manually
-    // Scale from -0.01 to 0.01
-    const minTrend = -0.01;
-    const maxTrend = +0.01;
-    
-    // Clamp
-    let normalized = (trend - minTrend) / (maxTrend - minTrend);
-    normalized = Math.max(0, Math.min(1, normalized));
-    
-    const r = Math.round(normalized * 255);
-    const b = Math.round((1 - normalized) * 255);
-    const g = Math.round(50 + (1 - Math.abs(normalized - 0.5) * 2) * 100);
-    
-    return `rgb(${r}, ${g}, ${b})`;
-  };
+  const trendStats = useMemo(() => {
+    if (summaryData.length === 0) return { min: -0.01, max: 0.01 };
+    const trends = summaryData.map(d => d.stlTrend);
+    let min = Math.min(...trends);
+    let max = Math.max(...trends);
+    if (min === max) {
+        min -= 0.001;
+        max += 0.001;
+    }
+    return { min, max };
+  }, [summaryData]);
 
-  const mapBounds = useMemo(() => {
-    if (summaryData.length === 0) return [[-10, 95], [10, 140]] as L.LatLngBoundsExpression; // Default Indonesia loosely
+  const mapExtent = useMemo(() => {
+    if (summaryData.length === 0) return { center: [-2.5, 118] as [number, number], minLat: -11, maxLat: 6, minLon: 95, maxLon: 141 };
     const lats = summaryData.map(d => d.latitude).filter(l => !isNaN(l));
     const lons = summaryData.map(d => d.longitude).filter(l => !isNaN(l));
     
-    if (lats.length === 0) return [[-10, 95], [10, 140]] as L.LatLngBoundsExpression;
+    if (lats.length === 0) return { center: [-2.5, 118] as [number, number], minLat: -11, maxLat: 6, minLon: 95, maxLon: 141 };
     
     const minLat = Math.min(...lats);
     const maxLat = Math.max(...lats);
     const minLon = Math.min(...lons);
     const maxLon = Math.max(...lons);
-
-    return [[minLat - 2, minLon - 2], [maxLat + 2, maxLon + 2]] as L.LatLngBoundsExpression;
+    return { center: [(minLat + maxLat) / 2, (minLon + maxLon) / 2] as [number, number], minLat, maxLat, minLon, maxLon };
   }, [summaryData]);
+
+  const mapAspectRatio = useMemo(() => {
+     let w = mapExtent.maxLon - mapExtent.minLon;
+     let h = mapExtent.maxLat - mapExtent.minLat;
+     
+     // default Indonesia aspect ratio if points are identical or empty
+     if (w <= 0.1 || h <= 0.1) {
+         w = 141 - 95;
+         h = 6 - (-11);
+     }
+     // Mercator distortion correction isn't huge at equator, but let's keep it simple
+     let ratio = w / h;
+     // Clamp between a square and a very wide rectangle
+     return Math.max(1, Math.min(3, ratio));
+  }, [mapExtent]);
+
+  const getColorForTrend = useCallback((trend: number) => {
+    const { min, max } = trendStats;
+    let v = (trend - min) / (max - min);
+    v = Math.max(0, Math.min(1, v));
+    
+    const r = Math.max(0, Math.min(1, 1.5 - Math.abs(4 * v - 3)));
+    const g = Math.max(0, Math.min(1, 1.5 - Math.abs(4 * v - 2)));
+    const b = Math.max(0, Math.min(1, 1.5 - Math.abs(4 * v - 1)));
+    
+    return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+  }, [trendStats]);
+
+  useEffect(() => {
+      if (!mapElementRef.current) return;
+      
+      const source = new VectorSource();
+      vectorSourceRef.current = source;
+      const vectorLayer = new VectorLayer({
+          source: source,
+      });
+
+      const initialMap = new Map({
+          target: mapElementRef.current,
+          layers: [
+              new TileLayer({
+                  source: new OSM()
+              }),
+              vectorLayer
+          ],
+          view: new View({
+              center: fromLonLat([mapExtent.center[1], mapExtent.center[0]]),
+              zoom: 5
+          })
+      });
+      mapRef.current = initialMap;
+
+      initialMap.on('pointermove', (e) => {
+         if (e.dragging) return;
+         let hitFeature: any = null;
+         initialMap.forEachFeatureAtPixel(e.pixel, (feature) => {
+             hitFeature = feature;
+             return true;
+         });
+         
+         if (hitFeature) {
+             initialMap.getTargetElement().style.cursor = 'pointer';
+             const station = hitFeature.get('stationData');
+             setHoveredStation(station);
+         } else {
+             initialMap.getTargetElement().style.cursor = '';
+             setHoveredStation(null);
+         }
+      });
+
+      initialMap.on('click', (e) => {
+         let hitFeature: any = null;
+         initialMap.forEachFeatureAtPixel(e.pixel, (feature) => {
+             hitFeature = feature;
+             return true;
+         });
+         
+         if (hitFeature) {
+             const station = hitFeature.get('stationData');
+             setSelectedStation(station);
+         } else {
+             setSelectedStation(null);
+         }
+      });
+
+      return () => {
+          initialMap.setTarget(undefined);
+          mapRef.current = null;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+      if (!vectorSourceRef.current) return;
+      
+      vectorSourceRef.current.clear();
+      
+      const features = summaryData.map(row => {
+          const feature = new Feature({
+              geometry: new Point(fromLonLat([row.longitude, row.latitude])),
+              stationData: row
+          });
+          
+          const isHovered = hoveredStation?.fileName === row.fileName;
+          const color = getColorForTrend(row.stlTrend);
+          
+          feature.setStyle(new Style({
+              image: new CircleStyle({
+                  radius: isHovered ? 10 : 6,
+                  fill: new Fill({ color: color }),
+                  stroke: new Stroke({ color: '#ffffff', width: 2 })
+              }),
+              zIndex: isHovered ? 10 : 1
+          }));
+          
+          return feature;
+      });
+      
+      vectorSourceRef.current.addFeatures(features);
+  }, [summaryData, hoveredStation, getColorForTrend]);
+
+  useEffect(() => {
+     if (!mapRef.current || summaryData.length === 0) return;
+     const extent = [mapExtent.minLon, mapExtent.minLat, mapExtent.maxLon, mapExtent.maxLat];
+     const transformedExtent = transformExtent(extent, 'EPSG:4326', 'EPSG:3857');
+     mapRef.current.getView().fit(transformedExtent, { padding: [50, 50, 50, 50], duration: 1000 });
+  }, [mapExtent, summaryData]);
 
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
@@ -302,17 +379,21 @@ export default function SummarizeView() {
 
       <div 
         ref={containerRef}
-        className="flex-1 overflow-hidden flex flex-col xl:flex-row p-6 gap-6 xl:gap-0"
-        style={{ 
-          '--left-width': `${leftWidth}%`,
-          cursor: isDragging ? 'col-resize' : 'default',
-        } as React.CSSProperties}
+        className="flex-1 overflow-y-auto overflow-x-hidden xl:overflow-hidden flex flex-col xl:flex-row p-6 gap-6"
       >
           {/* Table View */}
-          <div className="w-full xl:w-[calc(var(--left-width)-12px)] flex-none bg-white border border-slate-200 rounded-xl flex flex-col h-[400px] xl:h-full overflow-hidden">
-              <div className="p-4 flex-none bg-slate-50 border-b border-slate-200">
-                  <h3 className="font-bold text-slate-700">Tabel Gabungan Data</h3>
-              </div>
+          {isTableVisible && (
+            <div className="w-full xl:w-1/2 flex-none bg-white border border-slate-200 rounded-xl flex flex-col h-[500px] xl:h-full overflow-hidden shrink-0">
+                <div className="p-4 flex-none bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                    <h3 className="font-bold text-slate-700">Tabel Gabungan Data</h3>
+                    <button 
+                        onClick={() => setIsTableVisible(false)}
+                        className="p-1 text-slate-500 hover:text-slate-700 hover:bg-slate-200 rounded transition"
+                        title="Hide Table"
+                    >
+                        <Menu size={18} />
+                    </button>
+                </div>
               <div className="flex-1 min-h-0 overflow-auto p-0">
                   <table className="w-full text-left text-sm whitespace-nowrap">
                       <thead className="bg-slate-100 sticky top-0 z-10 text-slate-600">
@@ -368,67 +449,85 @@ export default function SummarizeView() {
                   </table>
               </div>
           </div>
-
-          {/* Resizer Handle */}
-          <div 
-            className="hidden xl:flex w-6 cursor-col-resize items-center justify-center group shrink-0"
-            onMouseDown={handleMouseDown}
-          >
-            <div className={`w-1 h-12 rounded-full transition-colors ${isDragging ? 'bg-sky-500' : 'bg-slate-200 group-hover:bg-sky-400'}`} />
-          </div>
+          )}
 
           {/* Map View */}
-          <div className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col h-[400px] xl:h-full">
+          <div className={`min-w-0 bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col shrink-0 ${isTableVisible ? 'xl:w-1/2 flex-none xl:flex-1' : 'w-full flex-1'}`}>
              <div className="p-4 flex-none bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                  <h3 className="font-bold text-slate-700">Peta Sebaran Sea Level Trend</h3>
-                  <div className="text-xs text-slate-500 flex items-center gap-2">
-                     <span>Trend:</span>
-                     <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(-0.01) }}></div> -
-                     <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(0) }}></div> 0
-                     <div className="w-4 h-4 rounded-full" style={{ background: getColorForTrend(0.01) }}></div> +
+                  <div className="flex items-center gap-3">
+                      {!isTableVisible && (
+                          <button 
+                            onClick={() => setIsTableVisible(true)}
+                            className="p-1 text-slate-500 hover:text-slate-700 hover:bg-slate-200 rounded transition"
+                            title="Show Table"
+                          >
+                              <Menu size={18} />
+                          </button>
+                      )}
+                      <h3 className="font-bold text-slate-700">Peta Sebaran Sea Level Trend</h3>
+                  </div>
+                  <div className="flex flex-col gap-1 items-end">
+                      <span className="font-semibold text-slate-700 text-xs italic">ISSA Trend</span>
+                      <div className="w-24 md:w-48">
+                          <div 
+                             className="w-full h-3 rounded shadow-sm border border-slate-200/50" 
+                             style={{ 
+                                 background: 'linear-gradient(to right, rgb(0,0,128), rgb(0,0,255), rgb(0,255,255), rgb(255,255,0), rgb(255,0,0), rgb(128,0,0))'
+                             }}
+                          ></div>
+                          <div className="flex justify-between w-full text-[10px] font-medium text-slate-600 mt-1">
+                             <span className="">{(trendStats.min * 1000).toFixed(2)}</span>
+                             <span className="">{(trendStats.max * 1000).toFixed(2)} mm/yr</span>
+                          </div>
+                      </div>
                   </div>
               </div>
-              <div className="flex-1 min-h-0 relative bg-slate-100">
-                  <MapContainer 
-                    bounds={mapBounds} 
-                    style={{ height: "100%", width: "100%", zIndex: 0 }}
-                    key="shared-map"
-                  >
-                      <BoundsUpdater bounds={mapBounds} />
-                      <TileLayer
-                        attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
-                        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                      />
-                      {summaryData.map((row, idx) => {
-                          const color = getColorForTrend(row.stlTrend);
-                          return (
-                            <CircleMarker 
-                                key={idx} 
-                                center={[row.latitude, row.longitude]} 
-                                radius={8}
-                                pathOptions={{
-                                    color: '#ffffff',
-                                    weight: 2,
-                                    fillColor: color,
-                                    fillOpacity: 0.8
-                                }}
-                            >
-                                <Popup>
-                                    <div className="text-sm font-sans">
-                                        <div className="font-bold text-slate-800 mb-1">{row.stationName}</div>
-                                        <div className="text-slate-600 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
-                                            <span>Lat:</span> <span>{row.latitude.toFixed(5)}</span>
-                                            <span>Lon:</span> <span>{row.longitude.toFixed(5)}</span>
-                                            <span className="font-medium text-slate-800 mt-1">STL Trend:</span> 
-                                            <span className="font-medium text-slate-800 mt-1">{row.stlTrend.toFixed(5)} m/yr</span>
-                                        </div>
-                                    </div>
-                                </Popup>
-                                <LeafletTooltip>{row.stationName}</LeafletTooltip>
-                            </CircleMarker>
-                          );
-                      })}
-                  </MapContainer>
+              <div 
+                  className={`w-full relative bg-slate-100 aspect-[var(--map-aspect)] ${isTableVisible ? 'xl:aspect-auto xl:flex-1 xl:min-h-0' : ''}`}
+                  style={{ '--map-aspect': mapAspectRatio } as React.CSSProperties}
+              >
+                  <div ref={mapElementRef} className="w-full h-full" />
+
+                  {/* Custom Tooltip/Popup for Selection */}
+                  {selectedStation && (
+                     <div className="absolute top-4 left-4 z-50 bg-white/95 backdrop-blur shadow-2xl border border-slate-200 p-4 rounded-2xl min-w-[200px] animate-in fade-in zoom-in duration-200">
+                         <div className="flex justify-between items-start mb-3">
+                             <div className="font-black text-slate-800 text-sm uppercase tracking-tight">{selectedStation.stationName}</div>
+                             <button onClick={() => setSelectedStation(null)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors">
+                                 <X size={16} strokeWidth={3} />
+                             </button>
+                         </div>
+                         <div className="space-y-2 text-[11px]">
+                             <div className="flex justify-between">
+                                 <span className="text-slate-400 font-bold uppercase tracking-wider">Latitude</span>
+                                 <span className="text-slate-900 font-mono font-bold">{selectedStation.latitude.toFixed(5)}</span>
+                             </div>
+                             <div className="flex justify-between">
+                                 <span className="text-slate-400 font-bold uppercase tracking-wider">Longitude</span>
+                                 <span className="text-slate-900 font-mono font-bold">{selectedStation.longitude.toFixed(5)}</span>
+                             </div>
+                             <div className="border-t border-slate-100 my-2 pt-2">
+                                 <div className="flex justify-between">
+                                     <span className="text-slate-400 font-bold uppercase tracking-wider">MSL</span>
+                                     <span className="text-slate-900 font-mono font-bold">{selectedStation.msl.toFixed(3)} m</span>
+                                 </div>
+                                 <div className="flex justify-between items-center mt-1">
+                                     <span className="text-slate-400 font-bold uppercase tracking-wider">ISSA Trend</span>
+                                     <span className="px-2 py-0.5 bg-slate-900 text-white rounded-md font-mono font-bold shadow-sm ring-1 ring-white/10">
+                                         {(selectedStation.stlTrend * 1000).toFixed(2)} mm/yr
+                                     </span>
+                                 </div>
+                             </div>
+                         </div>
+                     </div>
+                  )}
+
+                  {/* Hover Tooltip */}
+                  {hoveredStation && !selectedStation && (
+                      <div className="absolute bottom-4 right-4 z-40 bg-slate-900/90 text-white p-2 rounded-lg text-[10px] font-bold shadow-lg backdrop-blur pointer-events-none">
+                          {hoveredStation.stationName} ({(hoveredStation.stlTrend * 1000).toFixed(2)} mm/yr)
+                      </div>
+                  )}
               </div>
           </div>
       </div>
