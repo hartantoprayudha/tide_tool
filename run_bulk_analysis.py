@@ -426,12 +426,12 @@ def generate_report_text(processed_df, stats, station_id, num_files=1, latitude=
     content += f"Tidal Type (Formzahl)\t{tidalType}\t-\n\n"
     
     content += "--- SEA LEVEL TREND ---\n"
-    content += "Method\tRate\tUnit\n"
+    content += "Method\tRate\tMoE (95% CI)\tUnit\n"
     if stats.get('duration_days', 0) > 365:
-        content += f"STL Decomposition\t{stats.get('stl_rate', 0):.4f}\tm/year\n"
-        content += f"Robust STL\t{stats.get('robust_stl_rate', 0):.4f}\tm/year\n"
-        content += f"Iterative SSA\t{stats.get('ssa_rate', 0):.4f}\tm/year\n"
-    content += f"Linear Regression\t{stats.get('linear_rate', 0):.4f}\tm/year\n\n"
+        content += f"STL Decomposition\t{stats.get('stl_rate', 0):.5f}\t{stats.get('stl_moe', 0):.5f}\tm/year\n"
+        content += f"Robust STL\t{stats.get('robust_stl_rate', 0):.5f}\t{stats.get('robust_stl_moe', 0):.5f}\tm/year\n"
+        content += f"Iterative SSA\t{stats.get('ssa_rate', 0):.5f}\t{stats.get('ssa_moe', 0):.5f}\tm/year\n"
+    content += f"Linear Regression\t{stats.get('linear_rate', 0):.5f}\t{stats.get('linear_moe', 0):.5f}\tm/year\n\n"
     
     content += "--- MODEL ACCURACIES (Harmonic vs Analyzed) ---\n"
     content += "Parameter\tValue\tUnit\n"

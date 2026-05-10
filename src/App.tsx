@@ -121,7 +121,6 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   'P1': { f: 0.041552587, d: 'Solar diurnal' },
   'M4': { f: 0.161022801, d: 'Shallow water overtides of principal lunar' },
   'MS4': { f: 0.163844734, d: 'Shallow water constituent' },
-  // UKHO / Extended Set
   'Q1': { f: 0.037218503, d: 'Larger lunar elliptic diurnal' },
   'J1': { f: 0.043292898, d: 'Smaller lunar elliptic diurnal' },
   'OO1': { f: 0.044830840, d: 'Lunar diurnal' },
@@ -139,7 +138,6 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   'Mm': { f: 0.001512151, d: 'Lunar monthly' },
   'Ssa': { f: 0.000228159, d: 'Solar semi-annual' },
   'Sa': { f: 0.000114079, d: 'Solar annual' },
-  // Adding 8 more to complete 34 UKHO Constants
   'RHO1': { f: 0.034661706, d: 'Larger lunar elliptic diurnal' },
   'M1': { f: 0.040268595, d: 'Smaller lunar elliptic diurnal' },
   'PI1': { f: 0.041438515, d: 'Solar diurnal' },
@@ -148,7 +146,6 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   'M3': { f: 0.120767102, d: 'Lunar terdiurnal' },
   'M8': { f: 0.322045602, d: 'Shallow water eighth diurnal' },
   '2MK3': { f: 0.122292147, d: 'Shallow water terdiurnal' },
-  // Adding 33 more to complete UTide 67 Constants
   'MSM': { f: 0.001309781, d: 'Lunar monthly' },
   'ALP1': { f: 0.034396570, d: 'Diurnal' },
   'SIG1': { f: 0.035908722, d: 'Diurnal' },
@@ -564,7 +561,7 @@ export default function App() {
   const [rmseVal, setRmseVal] = useState<number | null>(null);
   const isProcessing = useRef(false);
   const [z0, setZ0] = useState(0);
-  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, lsqTrend?: { slope: number, intercept: number, rateYear: number }, stlTrend?: { slope: number, intercept: number, rateYear: number }, robustStlTrend?: { slope: number, intercept: number, rateYear: number }, ssaTrend?: { slope: number, intercept: number, rateYear: number }, polyTrend?: { c0: number, c1: number, c2: number } } | null>(null);
+  const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, marginOfError?: number, lsqTrend?: { slope: number, intercept: number, rateYear: number, marginOfError?: number }, stlTrend?: { slope: number, intercept: number, rateYear: number, marginOfError: number }, robustStlTrend?: { slope: number, intercept: number, rateYear: number, marginOfError: number }, ssaTrend?: { slope: number, intercept: number, rateYear: number, marginOfError: number }, polyTrend?: { c0: number, c1: number, c2: number } } | null>(null);
   const [isDeTiding, setIsDeTiding] = useState(true);
   const [isFullAnalysisRun, setIsFullAnalysisRun] = useState(false);
 
@@ -1058,7 +1055,7 @@ export default function App() {
                setAutoDiagnostics({ rayleighPassed: autoComps.length, totalTested: Object.keys(HARMONIC_FREQS).length, snrPassed: 0 });
             }
         }
-        else compsToFit = Object.keys(HARMONIC_FREQS); // UTIDE (All 67)
+        else compsToFit = Object.keys(HARMONIC_FREQS); // UKHO (All 214)
 
         // Make sure we only use constituents that we actually have frequency definitions for
         compsToFit = compsToFit.filter(c => HARMONIC_FREQS[c] !== undefined);
@@ -1353,8 +1350,6 @@ export default function App() {
         setValidCache(updatedCache);
         
         // As requested: Trigger for Combined and Interpolated are from their respective buttons.
-        // So we do NOT automatically recalculate combination and interpolation here.
-        // We just retain them from records (done above) or let them stay NaN.
 
         if (!forceFullAnalysis) {
              requestAnimationFrame(() => {
@@ -1589,7 +1584,7 @@ export default function App() {
             const x = validRecords.map(r => (r.timestamp.getTime() - t0) / 3600000);
             
             // 5a. Linear Regression (Standard)
-            const calculateTrend = (dataX: number[], dataY: number[]) => {
+            const calculateTrend = (dataX: number[], dataY: number[], isLinear: boolean = false) => {
                 const n = dataX.length;
                 let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
                 for (let i = 0; i < n; i++) {
@@ -1598,10 +1593,120 @@ export default function App() {
                     sumXY += dataX[i] * dataY[i];
                     sumX2 += dataX[i] * dataX[i];
                 }
-                const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+                const denominator = (n * sumX2 - sumX * sumX);
+                if (denominator === 0) return { slope: 0, intercept: 0, rateYear: 0, marginOfError: 0 };
+                
+                const slope = (n * sumXY - sumX * sumY) / denominator;
                 const intercept = (sumY - slope * sumX) / n;
                 const rateYear = slope * 24 * 365.25;
-                return { slope, intercept, rateYear };
+                
+                // --- Valid MoE Calculation using Monthly Aggregation ---
+                const BIN_SIZE = 24 * 30.4375; // ~1 month in hours
+                let minX = dataX[0], maxX = dataX[dataX.length - 1];
+                let numBins = Math.max(3, Math.ceil((maxX - minX) / BIN_SIZE) + 1);
+                
+                const binX = new Float64Array(numBins);
+                const binY = new Float64Array(numBins);
+                const binCount = new Int32Array(numBins);
+                
+                for(let i = 0; i < n; i++) {
+                    let b = Math.floor((dataX[i] - minX) / BIN_SIZE);
+                    if(b >= numBins) b = numBins - 1;
+                    if(b < 0) b = 0;
+                    binX[b] += dataX[i];
+                    binY[b] += dataY[i];
+                    binCount[b] += 1;
+                }
+                
+                const aggX: number[] = [];
+                const aggY: number[] = [];
+                for(let b=0; b < numBins; b++) {
+                    if(binCount[b] > 0) {
+                        aggX.push(binX[b] / binCount[b]);
+                        aggY.push(binY[b] / binCount[b]);
+                    }
+                }
+                
+                const nAgg = aggX.length;
+                let marginOfError = 0;
+                
+                if (nAgg > 2) {
+                    let sumX_agg = 0;
+                    for(let i=0; i<nAgg; i++) sumX_agg += aggX[i];
+                    const xMean_agg = sumX_agg / nAgg;
+                    
+                    let ssX_agg = 0;
+                    const e_agg = new Float64Array(nAgg);
+                    let sum_e2 = 0;
+                    
+                    for(let i=0; i<nAgg; i++) {
+                        const yPred = slope * aggX[i] + intercept; 
+                        const e = aggY[i] - yPred;
+                        e_agg[i] = e;
+                        sum_e2 += e * e;
+                        const xCentered = aggX[i] - xMean_agg;
+                        ssX_agg += xCentered * xCentered;
+                    }
+                    
+                    if (isLinear && sum_e2 > 0 && ssX_agg > 0) {
+                        // EDOF NOAA Approach
+                        let sum_e_lag = 0;
+                        for(let i=1; i<nAgg; i++) {
+                            sum_e_lag += e_agg[i] * e_agg[i-1];
+                        }
+                        let r1 = sum_e_lag / sum_e2;
+                        if (r1 < 0) r1 = 0;
+                        if (r1 > 0.99) r1 = 0.99;
+                        
+                        const vif = (1 + r1) / (1 - r1);
+                        const Neff = Math.max(3, nAgg * ((1 - r1) / (1 + r1)));
+                        
+                        const seSlopeSq = (sum_e2 / (nAgg - 2)) / ssX_agg * vif;
+                        const seSlope = Math.sqrt(seSlopeSq);
+                        const seRateYear = seSlope * 24 * 365.25;
+                        
+                        const df = Neff - 2;
+                        let tVal = 1.96;
+                        if (df < 10) tVal = 2.228;
+                        if (df < 5) tVal = 2.776;
+                        if (df <= 2) tVal = 4.303;
+                        
+                        marginOfError = seRateYear * tVal;
+                    } else if (!isLinear) {
+                        // Newey-West HAC estimator
+                        const z_agg = new Float64Array(nAgg);
+                        let Q_agg = 0;
+                        
+                        for(let i=0; i<nAgg; i++) {
+                            const xCentered = aggX[i] - xMean_agg;
+                            z_agg[i] = xCentered * e_agg[i];
+                            Q_agg += z_agg[i] * z_agg[i];
+                        }
+                        
+                        const maxLag = Math.min(12, Math.floor(nAgg / 2));
+                        
+                        for(let l = 1; l <= maxLag; l++) {
+                            const w = 1 - l / (maxLag + 1);
+                            let sumLag = 0;
+                            for(let i = l; i < nAgg; i++) {
+                                sumLag += z_agg[i] * z_agg[i-l];
+                            }
+                            Q_agg += 2 * w * sumLag;
+                        }
+                        
+                        if (Q_agg > 0 && ssX_agg > 0) {
+                            const Q_adj = Q_agg * nAgg / (nAgg - 2);
+                            const varSlope = Q_adj / (ssX_agg * ssX_agg);
+                            const seSlope = Math.sqrt(varSlope);
+                            const seRateYear = seSlope * 24 * 365.25;
+                            
+                            const tVal = nAgg < 10 ? 2.26 : 1.96; 
+                            marginOfError = seRateYear * tVal;
+                        }
+                    }
+                }
+                
+                return { slope, intercept, rateYear, marginOfError };
             };
 
             const calculatePolyTrend = (dataX: number[], dataY: number[]): { c0: number, c1: number, c2: number } | undefined => {
@@ -1664,8 +1769,8 @@ export default function App() {
 
             // Use unified fit values if valid, otherwise fallback to simple regression
             const regTrend = !_isInsufficient 
-                ? { slope: unifiedSlope, intercept: unifiedIntercept, rateYear: unifiedSlope * 24 * 365.25 }
-                : calculateTrend(x, validRecords.map(r => r.filtered));
+                ? calculateTrend(x, validRecords.map(r => r.filtered), true)
+                : calculateTrend(x, validRecords.map(r => r.filtered), true);
             
             const lsqTrend = regTrend;
 
@@ -2666,17 +2771,17 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
       if (linearTrend) {
           content += `\n--- SEA LEVEL TREND ---\n`;
-          content += `Method\tRate\tUnit\n`;
+          content += `Method\tRate\tMoE (95% CI)\tUnit\n`;
           if (linearTrend.stlTrend) {
-              content += `STL Decomposition\t${linearTrend.stlTrend.rateYear.toFixed(4)}\tm/year\n`;
+              content += `STL Decomposition\t${linearTrend.stlTrend.rateYear.toFixed(5)}\t${(linearTrend.stlTrend.marginOfError || 0).toFixed(5)}\tm/year\n`;
           }
           if (linearTrend.robustStlTrend) {
-              content += `Robust STL\t${linearTrend.robustStlTrend.rateYear.toFixed(4)}\tm/year\n`;
+              content += `Robust STL\t${linearTrend.robustStlTrend.rateYear.toFixed(5)}\t${(linearTrend.robustStlTrend.marginOfError || 0).toFixed(5)}\tm/year\n`;
           }
           if (linearTrend.ssaTrend) {
-              content += `Iterative SSA\t${linearTrend.ssaTrend.rateYear.toFixed(4)}\tm/year\n`;
+              content += `Iterative SSA\t${linearTrend.ssaTrend.rateYear.toFixed(5)}\t${(linearTrend.ssaTrend.marginOfError || 0).toFixed(5)}\tm/year\n`;
           }
-          content += `Linear Regression\t${linearTrend.rateYear.toFixed(4)}\tm/year\n`;
+          content += `Linear Regression\t${linearTrend.rateYear.toFixed(5)}\t${(linearTrend.marginOfError || 0).toFixed(5)}\tm/year\n`;
       }
 
       content += `\n--- MODEL ACCURACIES (Harmonic vs Analyzed) ---\n`;

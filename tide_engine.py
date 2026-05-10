@@ -302,18 +302,105 @@ def solve_least_squares(t_hours, y_vals, comps):
     res = np.linalg.lstsq(A, y_vals, rcond=None)[0]
     return res
 
-def calculate_trend(data_x, data_y):
-    if len(data_x) < 2: return 0, 0, 0
+def calculate_trend(data_x, data_y, is_linear=False):
+    valid = ~np.isnan(data_y) & ~np.isnan(data_x)
+    data_x = data_x[valid]
+    data_y = data_y[valid]
+
+    if len(data_x) < 2: return 0, 0, 0, 0
     n = len(data_x)
     sum_x = np.sum(data_x)
     sum_y = np.sum(data_y)
     sum_xy = np.sum(data_x * data_y)
     sum_x2 = np.sum(data_x * data_x)
-    if n * sum_x2 - sum_x * sum_x == 0: return 0, 0, 0
-    slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x)
+    
+    denominator = (n * sum_x2 - sum_x * sum_x)
+    if denominator == 0: return 0, 0, 0, 0
+    
+    slope = (n * sum_xy - sum_x * sum_y) / denominator
     intercept = (sum_y - slope * sum_x) / n
     rate_year = slope * 24 * 365.25
-    return slope, intercept, rate_year
+    
+    # Valid MoE Calculation using Monthly Aggregation
+    BIN_SIZE = 24 * 30.4375
+    min_x, max_x = data_x.min(), data_x.max()
+    num_bins = max(3, int(np.ceil((max_x - min_x) / BIN_SIZE)) + 1)
+    
+    bin_x = np.zeros(num_bins)
+    bin_y = np.zeros(num_bins)
+    bin_count = np.zeros(num_bins)
+    
+    bin_indices = np.floor((data_x - min_x) / BIN_SIZE).astype(int)
+    bin_indices = np.clip(bin_indices, 0, num_bins - 1)
+    
+    np.add.at(bin_x, bin_indices, data_x)
+    np.add.at(bin_y, bin_indices, data_y)
+    np.add.at(bin_count, bin_indices, 1)
+    
+    valid_bins = bin_count > 0
+    agg_x = bin_x[valid_bins] / bin_count[valid_bins]
+    agg_y = bin_y[valid_bins] / bin_count[valid_bins]
+    
+    n_agg = len(agg_x)
+    margin_of_error = 0
+    
+    if n_agg > 2:
+        x_mean_agg = np.mean(agg_x)
+        y_pred = slope * agg_x + intercept
+        e_agg = agg_y - y_pred
+        x_centered = agg_x - x_mean_agg
+        ss_x_agg = np.sum(x_centered**2)
+        sum_e2 = np.sum(e_agg**2)
+        
+        if is_linear and sum_e2 > 0 and ss_x_agg > 0:
+            # EDOF NOAA Approach
+            sum_e_lag = np.sum(e_agg[1:] * e_agg[:-1])
+            r1 = sum_e_lag / sum_e2
+            r1 = max(0, min(r1, 0.99))
+            
+            vif = (1 + r1) / (1 - r1)
+            Neff = max(3, n_agg * ((1 - r1) / (1 + r1)))
+            
+            se_slope_sq = (sum_e2 / (n_agg - 2)) / ss_x_agg * vif
+            if se_slope_sq > 0:
+                se_slope = np.sqrt(se_slope_sq)
+                se_rate_year = se_slope * 24 * 365.25
+                
+                df = Neff - 2
+                if df < 5: t_val = 2.776
+                elif df < 10: t_val = 2.228
+                else: t_val = 1.96
+                
+                # More precise t_val approximation
+                df_int = int(np.floor(df))
+                t_table = [12.71, 4.30, 3.18, 2.78, 2.57, 2.45, 2.36, 2.31, 2.26, 2.23]
+                if 1 <= df_int <= 10:
+                    t_val = t_table[df_int - 1]
+                else:
+                    t_val = 1.96 + 2.4 / df
+
+                margin_of_error = se_rate_year * t_val
+        elif not is_linear:
+            # Newey-West HAC estimator
+            z_agg = x_centered * e_agg
+            max_lag = min(12, n_agg // 2)
+            Q_agg = np.sum(z_agg**2)
+            
+            for l in range(1, max_lag + 1):
+                w = 1 - l / (max_lag + 1)
+                sum_lag = np.sum(z_agg[l:] * z_agg[:-l])
+                Q_agg += 2 * w * sum_lag
+                
+            if Q_agg > 0 and ss_x_agg > 0:
+                Q_adj = Q_agg * n_agg / (n_agg - 2)
+                var_slope = Q_adj / (ss_x_agg**2)
+                if var_slope > 0:
+                    se_slope = np.sqrt(var_slope)
+                    se_rate_year = se_slope * 24 * 365.25
+                    t_val = 2.26 if n_agg < 10 else 1.96
+                    margin_of_error = se_rate_year * t_val
+                
+    return slope, intercept, rate_year, margin_of_error
 
 def iterative_ssa(daily_x, daily_y):
     L = 365
@@ -546,7 +633,7 @@ def run_pipeline(df, sensor_name, config=None):
     
     # ------------------ TREND CALCULATIONS ------------------
     # Calculate Linear Regression
-    lr_slope, lr_intercept, lr_rate = calculate_trend(t_f, y_f)
+    lr_slope, lr_intercept, lr_rate, lr_moe = calculate_trend(t_f, y_f, is_linear=True)
     
     # Daily Resampling for STL and SSA
     t0_dt = df_reg['Timestamp'].iloc[0]
@@ -559,29 +646,29 @@ def run_pipeline(df, sensor_name, config=None):
     window_days_stl = 365
     if len(daily_y) > window_days_stl:
         stl_y = pd.Series(daily_y).rolling(window=window_days_stl, min_periods=1, center=True).mean().values
-        stl_slope, stl_intercept, stl_rate = calculate_trend(daily_x, stl_y)
+        stl_slope, stl_intercept, stl_rate, stl_moe = calculate_trend(daily_x, stl_y)
     else:
-        stl_slope, stl_intercept, stl_rate = 0, 0, 0
+        stl_slope, stl_intercept, stl_rate, stl_moe = 0, 0, 0, 0
 
     # Calculate Robust STL
     if len(daily_y) > window_days_stl:
         rstl_res = robust_stl(daily_x, daily_y)
         if rstl_res:
-             rstl_slope, rstl_intercept, rstl_rate = rstl_res
+             rstl_slope, rstl_intercept, rstl_rate, rstl_moe = rstl_res
         else:
-             rstl_slope, rstl_intercept, rstl_rate = 0, 0, 0
+             rstl_slope, rstl_intercept, rstl_rate, rstl_moe = 0, 0, 0, 0
     else:
-        rstl_slope, rstl_intercept, rstl_rate = 0, 0, 0
+        rstl_slope, rstl_intercept, rstl_rate, rstl_moe = 0, 0, 0, 0
 
     # Calculate Iterative SSA
     if len(daily_y) > 365:
         ssa_res = iterative_ssa(daily_x, daily_y)
         if ssa_res:
-            (ssa_slope, ssa_intercept, ssa_rate), ssa_y = ssa_res
+             (ssa_slope, ssa_intercept, ssa_rate, ssa_moe), ssa_y = ssa_res
         else:
-            ssa_slope, ssa_intercept, ssa_rate = 0, 0, 0
+             ssa_slope, ssa_intercept, ssa_rate, ssa_moe = 0, 0, 0, 0
     else:
-        ssa_slope, ssa_intercept, ssa_rate = 0, 0, 0
+        ssa_slope, ssa_intercept, ssa_rate, ssa_moe = 0, 0, 0, 0
     # --------------------------------------------------------
     
     # Selection based on config
@@ -621,15 +708,19 @@ def run_pipeline(df, sensor_name, config=None):
         'slope': lr_slope,  # using lr_slope for backwards compatibility where slope is used
         'linear_rate': lr_rate,
         'linear_intercept': lr_intercept,
+        'linear_moe': lr_moe,
         'stl_rate': stl_rate,
         'stl_slope': stl_slope,
         'stl_intercept': stl_intercept,
+        'stl_moe': stl_moe,
         'robust_stl_rate': rstl_rate,
         'robust_stl_slope': rstl_slope,
         'robust_stl_intercept': rstl_intercept,
+        'robust_stl_moe': rstl_moe,
         'ssa_rate': ssa_rate,
         'ssa_slope': ssa_slope,
         'ssa_intercept': ssa_intercept,
+        'ssa_moe': ssa_moe,
         'ssa_y': list(ssa_y) if 'ssa_y' in locals() else None,
         'duration_days': float(t_hours.max()) / 24.0,
         'HAT': round(z0 + sum_amp, 4),
