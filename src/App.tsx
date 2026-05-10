@@ -1087,7 +1087,11 @@ export default function App() {
         const roughCompsToFit = autoOutlierComps; 
         
         const validForRough = processed.filter(r => !isNaN(r.raw));
-        const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - (processed[0]?.timestamp?.getTime() || 0)) / 3600000);
+        let baseTimeRaw = processed[0]?.timestamp?.getTime() || 0;
+        if (processed[0]?.timestamp) {
+            baseTimeRaw = new Date(Date.UTC(processed[0].timestamp.getUTCFullYear(), 0, 1, 0, 0, 0)).getTime();
+        }
+        const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - baseTimeRaw) / 3600000);
         const y_vals_raw = validForRough.map(r => r.raw);
         const meanRaw = y_vals_raw.reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1);
         const stdRaw = Math.sqrt(y_vals_raw.map(x => Math.pow(x - meanRaw, 2)).reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1));
@@ -1140,15 +1144,20 @@ export default function App() {
         
         // First pass: compute predicted levels and sum of squared residuals
         processed.forEach(r => {
-            const tHour = (r.timestamp.getTime() - (processed[0]?.timestamp?.getTime() || 0)) / 3600000;
-            let predictedLevel = roughZ0 + roughSlope * tHour;
+            const tHourLinear = (r.timestamp.getTime() - (processed[0]?.timestamp?.getTime() || 0)) / 3600000;
+            let tHourHarmonic = tHourLinear;
+            if (processed[0]?.timestamp) {
+                tHourHarmonic = (r.timestamp.getTime() - new Date(Date.UTC(processed[0].timestamp.getUTCFullYear(), 0, 1, 0, 0, 0)).getTime()) / 3600000;
+            }
+            
+            let predictedLevel = roughZ0 + roughSlope * tHourLinear;
             if (!_isInsufficient && roughSolution.length > 0) {
                 for (let i = 0; i < roughCompsToFit.length; i++) {
                     const comp = roughCompsToFit[i];
                     const freq = HARMONIC_FREQS[comp]?.f || 0;
                     const a = roughSolution[1 + 2 * i] || 0;
                     const b = roughSolution[1 + 2 * i + 1] || 0;
-                    const arg = 2 * Math.PI * freq * tHour;
+                    const arg = 2 * Math.PI * freq * tHourHarmonic;
                     predictedLevel += a * Math.cos(arg) + b * Math.sin(arg);
                 }
             }
@@ -1420,7 +1429,10 @@ export default function App() {
             return;
         }
 
-        const baseTime = harmonicBaseArray[0]?.timestamp?.getTime() || 0;
+        let baseTime = harmonicBaseArray[0]?.timestamp?.getTime() || 0;
+        if (harmonicBaseArray[0]?.timestamp) {
+            baseTime = new Date(Date.UTC(harmonicBaseArray[0].timestamp.getUTCFullYear(), 0, 1, 0, 0, 0)).getTime();
+        }
         const t_hours = validForFinal.map(r => (r.timestamp.getTime() - baseTime) / 3600000);
         const y_vals = validForFinal.map(r => r[yField]);
         
@@ -1581,6 +1593,10 @@ export default function App() {
         let validRecords = processed.filter(r => !isNaN(r.filtered) && !r.isOutlier);
         if (validRecords.length > 1) {
             const t0 = processed[0]?.timestamp?.getTime() || 0;
+            let t0_harmonic = t0;
+            if (processed[0]?.timestamp) {
+                t0_harmonic = new Date(Date.UTC(processed[0].timestamp.getUTCFullYear(), 0, 1, 0, 0, 0)).getTime();
+            }
             const x = validRecords.map(r => (r.timestamp.getTime() - t0) / 3600000);
             
             // 5a. Linear Regression (Standard)
@@ -1795,10 +1811,10 @@ export default function App() {
                     const r = processed[i];
                     if (!isNaN(r.filtered) && !r.isOutlier) {
                         if (useDeTiding && results.length > 0) {
-                            const ti = (r.timestamp.getTime() - t0) / 3600000;
+                            const ti_harmonic = (r.timestamp.getTime() - t0_harmonic) / 3600000;
                             let tideSum = 0;
                             for (let k = 0; k < results.length; k++) {
-                                tideSum += results[k].amp * Math.cos(f_list[k] * ti - results[k].phase * (Math.PI / 180));
+                                tideSum += results[k].amp * Math.cos(f_list[k] * ti_harmonic - results[k].phase * (Math.PI / 180));
                             }
                             yFull[i] = r.filtered - tideSum;
                         } else {
@@ -1999,15 +2015,16 @@ export default function App() {
             const rt0 = processed[0]?.timestamp?.getTime() || 0;
             processed.forEach(r => {
                 if (!r.isOutlier && !isNaN(r.filtered)) {
-                    const rt = (r.timestamp.getTime() - rt0) / 3600000;
+                    const rt_linear = (r.timestamp.getTime() - rt0) / 3600000;
+                    const rt_harmonic = (r.timestamp.getTime() - t0_harmonic) / 3600000;
                     let p = fittedZ0;
                     if (!_isInsufficient) {
-                        p += unifiedSlope * rt;
+                        p += unifiedSlope * rt_linear;
                     }
                     results.forEach(res => {
                         const w = 2 * Math.PI * res.freq;
                         const ph = res.phase * (Math.PI / 180);
-                        p += res.amp * Math.cos(w * rt - ph);
+                        p += res.amp * Math.cos(w * rt_harmonic - ph);
                     });
                     sumSqE += Math.pow(r.filtered - p, 2);
                     countE++;
@@ -2243,19 +2260,24 @@ export default function App() {
 
             const predData = [];
             const t0 = records[0]?.timestamp?.getTime() || 0;
+            let t0_harmonic = t0;
+            if (records[0]?.timestamp) {
+                t0_harmonic = new Date(Date.UTC(records[0].timestamp.getUTCFullYear(), 0, 1, 0, 0, 0)).getTime();
+            }
             const dailyStats: Record<string, any> = {};
 
             const calcValue = (d: Date) => {
-                const t = (d.getTime() - t0) / 3600000;
+                const t_linear = (d.getTime() - t0) / 3600000;
+                const t_harmonic = (d.getTime() - t0_harmonic) / 3600000;
                 let val = z0;
                 harmonicResults.forEach(res => {
                     const w = 2 * Math.PI * res.freq;
                     const ph = res.phase * (Math.PI / 180);
-                    val += res.amp * Math.cos(w * t - ph);
+                    val += res.amp * Math.cos(w * t_harmonic - ph);
                 });
                 if (useTrendInPrediction) {
                     const slopeToUse = linearTrend?.ssaTrend?.slope || linearTrend?.robustStlTrend?.slope || linearTrend?.slope || 0;
-                    val += slopeToUse * t;
+                    val += slopeToUse * t_linear;
                 }
                 return val;
             };
@@ -2693,18 +2715,23 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
     } else {
       // Calculate Stats
       const t0 = records[0].timestamp.getTime();
+      let t0_harmonic = t0;
+      if (records[0]?.timestamp) {
+          t0_harmonic = new Date(Date.UTC(records[0].timestamp.getUTCFullYear(), 0, 1, 0, 0, 0)).getTime();
+      }
       let sumE = 0, sumAbsE = 0, sumSqE = 0, count = 0;
       records.forEach(r => {
         if (!r.isOutlier && !isNaN(r.filtered)) {
-            const t = (r.timestamp.getTime() - t0) / 3600000;
+            const t_linear = (r.timestamp.getTime() - t0) / 3600000;
+            const t_harmonic = (r.timestamp.getTime() - t0_harmonic) / 3600000;
             let p = z0;
             if (linearTrend && linearTrend.lsqTrend) {
-                p += linearTrend.lsqTrend.slope * t;
+                p += linearTrend.lsqTrend.slope * t_linear;
             }
             harmonicResults.forEach(res => {
                 const w = 2 * Math.PI * res.freq;
                 const ph = res.phase * (Math.PI / 180);
-                p += res.amp * Math.cos(w * t - ph);
+                p += res.amp * Math.cos(w * t_harmonic - ph);
             });
             const e = r.filtered - p;
             sumE += e;

@@ -561,7 +561,8 @@ def bulk_process(input_folder="."):
         
         # Calculate trendline
         duration_years = stats.get('duration_days', 0) / 365.25
-        t0 = processed_df['Timestamp'].iloc[0]
+        t0_raw = processed_df['Timestamp'].iloc[0]
+        t0 = pd.Timestamp(year=t0_raw.year, month=1, day=1, tz=t0_raw.tzinfo)
         t_hours = (processed_df['Timestamp'] - t0).dt.total_seconds() / 3600.0
         
         if duration_years > 2 and stats.get('ssa_y') is not None:
@@ -569,10 +570,11 @@ def bulk_process(input_folder="."):
             trend_label = f"Sea Level Trend (Iterative SSA: {trend_val_mm:.2f} mm/year)"
             
             ssa_y = stats['ssa_y']
+            daily_x_start = stats.get('daily_x_start', 12.0)
             N = len(ssa_y)
             trendline = []
             for t in t_hours:
-                day_idx_float = (t - 12.0) / 24.0
+                day_idx_float = (t - daily_x_start) / 24.0
                 idx = int(np.floor(day_idx_float))
                 idx = max(0, min(idx, N - 2))
                 if N > 1:
