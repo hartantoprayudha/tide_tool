@@ -1073,7 +1073,7 @@ export default function App() {
         if (constituentSet === '4') compsToFit = ['M2', 'S2', 'K1', 'O1'];
         else if (constituentSet === '9') compsToFit = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4'];
         else if (constituentSet === 'IHO10') compsToFit = ['M2', 'K1', 'S2', 'O1', 'P1', 'N2', 'K2', 'Q1', 'M4', 'MS4'];
-        else if (constituentSet === 'IHO23') compsToFit = ['Sa', 'Ssa', 'Mm', 'Mf', 'Q1', 'O1', 'P1', 'K1', 'J1', '2N2', 'MU2', 'N2', 'NU2', 'M2', 'L2', 'T2', 'S2', 'R2', 'K2', 'MN4', 'M4', 'MS4', 'M6'];
+        else if (constituentSet === 'IHO23') compsToFit = ['M2', 'K1', 'S2', 'O1', 'P1', 'N2', 'K2', 'Mm', 'Q1', 'NU2', 'J1', 'MU2', 'L2', 'T2', '2N2', 'OO1', 'MSf', 'M3', 'PI1', 'PHI1', 'M1', '2SM2', 'PSI1'];
         else if (constituentSet === 'NOAA') compsToFit = ['Sa', 'Mm', 'Mf', '2Q1', 'Q1', 'O1', 'M1', 'K1', 'J1', 'OO1', '2N2', 'MU2', 'N2', 'NU2', 'M2', 'LAM2', 'L2', 'T2', 'S2', 'R2', 'K2', '2SM2', '2MK3', 'M3', 'MK3', 'MN4', 'M4', 'MS4', 'S4', 'M6', 'S6', 'M8'];
         else if (constituentSet === 'FES2014') compsToFit = ['2N2', 'E2', 'J1', 'K1', 'K2', 'L2', 'La2', 'M2', 'M3', 'M4', 'M6', 'M8', 'Mf', 'MKS2', 'Mm', 'MN4', 'MS4', 'MSf', 'MSqm', 'Mtm', 'Mu2', 'N2', 'N4', 'Nu2', 'O1', 'P1', 'Q1', 'R2', 'S1', 'S2', 'S4', 'Sa', 'Ssa', 'T2'];
         else if (constituentSet === 'ETCPOT') compsToFit = ['Sa', 'Ssa', 'Mnum', 'Mm', 'Msf', 'Mf', 'Mfm', '2Q1', 'Q1', 'rho1', 'O1', 'MP1', 'TAU1', 'NO1', 'chi1', 'pi1', 'P1', 'S1', 'K1', 'psi1', 'phi1', 'th1', 'J1', 'SO1', 'OO1', 'mu2', 'N2', 'nu2', 'M2', 'lambda2', 'L2', 'T2', 'S2', 'K2', 'KJ2', 'M3'];

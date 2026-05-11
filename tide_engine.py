@@ -723,6 +723,18 @@ def run_pipeline(df, sensor_name, config=None):
         final_comps = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4']
     elif c_set == '4':
         final_comps = ['M2', 'S2', 'K1', 'O1']
+    elif c_set == 'IHO10':
+        final_comps = ['M2', 'K1', 'S2', 'O1', 'P1', 'N2', 'K2', 'Q1', 'M4', 'MS4']
+    elif c_set == 'IHO23':
+        final_comps = ['M2', 'K1', 'S2', 'O1', 'P1', 'N2', 'K2', 'Mm', 'Q1', 'NU2', 'J1', 'MU2', 'L2', 'T2', '2N2', 'OO1', 'MSf', 'M3', 'PI1', 'PHI1', 'M1', '2SM2', 'PSI1']
+    elif c_set == 'NOAA':
+        final_comps = ['Sa', 'Mm', 'Mf', '2Q1', 'Q1', 'O1', 'M1', 'K1', 'J1', 'OO1', '2N2', 'MU2', 'N2', 'NU2', 'M2', 'LAM2', 'L2', 'T2', 'S2', 'R2', 'K2', '2SM2', '2MK3', 'M3', 'MK3', 'MN4', 'M4', 'MS4', 'S4', 'M6', 'S6', 'M8']
+    elif c_set == 'FES2014':
+        final_comps = ['2N2', 'E2', 'J1', 'K1', 'K2', 'L2', 'La2', 'M2', 'M3', 'M4', 'M6', 'M8', 'Mf', 'MKS2', 'Mm', 'MN4', 'MS4', 'MSf', 'MSqm', 'Mtm', 'Mu2', 'N2', 'N4', 'Nu2', 'O1', 'P1', 'Q1', 'R2', 'S1', 'S2', 'S4', 'Sa', 'Ssa', 'T2']
+    elif c_set == 'ETCPOT':
+        final_comps = ['Sa', 'Ssa', 'Mnum', 'Mm', 'Msf', 'Mf', 'Mfm', '2Q1', 'Q1', 'rho1', 'O1', 'MP1', 'TAU1', 'NO1', 'chi1', 'pi1', 'P1', 'S1', 'K1', 'psi1', 'phi1', 'th1', 'J1', 'SO1', 'OO1', 'mu2', 'N2', 'nu2', 'M2', 'lambda2', 'L2', 'T2', 'S2', 'K2', 'KJ2', 'M3']
+    elif c_set == 'UKHO':
+        final_comps = ['Sa', 'Ssa', 'Mnum', 'Mm', 'Msf', 'Mf', '2Q1', 'sig1', 'Q1', 'rho1', 'O1', 'MS1', 'MP1', 'NO1', 'chi1', 'pi1', 'P1', 'S1', 'K1', 'psi1', 'phi1', 'th1', 'J1', '2PO1', 'SO1', 'OO1', 'KQ1', '2MN2S2', '3M(SK)2', '2NS2', '3M2S2', 'MNK2', 'MNS2', 'MnuS2', 'MNK2S2', '2MS2K2', '2MK2', '2N2', 'mu2', 'SNK2', 'NA2', 'N2', 'NB2', 'nu2', '2KN2S2', 'MSK2', 'MPS2', 'M2', 'MSP2', 'MKS2', 'M2(KS)2', 'lambda2', 'L2', '2SK2', 'T2', 'S2', 'R2', 'K2', 'MSnu2', 'MSN2', 'KJ2', '2KM(SN)2', '2SM2', '2MS2N2', 'SKM2', '3(SM)N2', 'SKN2', 'MQ3', 'MO3', '2NKM3', '2MS3', '2MP3', 'M3', 'NK3', 'MP3', 'MS3', 'MK3', '2MQ3', 'SP3', 'S3', 'SK3', 'K3', '4MS4', '2MNS4', '3MK4', '2N4', '2NKS4', 'MSNK4', 'MN4', 'Mnu4', 'MNKS4', '2MSK4', 'MA4', 'M4', '2MRS4', '2MKS4', 'SN4', '3MN4', 'NK4', 'M2SK4', 'MT4', 'MS4', 'MR4', 'MK4', '2SNM4', '2MSN4', 'S4', 'SK4', '3SM4', '2SKM4', 'MNO5', '2NKMS5', '3MK5', '2NK5', '3MS5', '3MP5', 'M5', 'MNK5', 'MB5', 'MSO5', '2MS5', '3MO5', '3MQ5', '2(MN)S6', '3MNS6', '4MK6', 'M2N6', '4MS6', '2NMKS6', '2MSNK6', '2MN6', '2Mnu6', '2MNKS6', '3MSK6', 'MA6', 'M6', 'MSN6', '4MN6', 'MNK6', '2(MS)K6', '2MT6', '2MS6', '2MK6', '2SN6', '3MSN6', 'MKL6', '2SM6', 'MSK6', 'S6', '2MNO7', '4MK7', '2NMK7', 'M7', '2MNK7', '2MSO7', 'MSKO7', '5MK8', '2(MN)8', '5MS8', '2(MN)KS8', '3MN8', '3Mnu8', '3MNKS8', '4MSK8', 'MA8', 'M8', '2MSN8', '2MNK8', '3MS8', '3MK8', '2SNM8', 'MSNK8', '2(MS)8', '2MSK8', '3SM8', '2SMK8', 'S8', '3MN09', '2(MN)K9', 'MA9', '3MNK9', '4MK9', '3MSK9', '3M2N10', '6MS10', '3M2NKS10', '4MSNK10', '4MN10', '4Mnu10', '5MSK10', 'M10', '3MSN10', '6MN10', '3MNK10', '4MK10', '2MNSK10', '3M2S10', '4MSK11', '4M2N12', '4M2NKS12', '5MSNK12', '5MN12', '5Mnu12', '6MSK12', 'MA12', 'M12', '4MSN12', '5MS12', '5MK12', '3MNKS12', '4M2S12', '5MSN14', '5MNK14', '6MS14']
     else:
         final_comps = auto_comps # Default to AUTO
         
