@@ -105,6 +105,9 @@ interface ConstituentResult {
   phase: number;
   desc: string;
   freq: number;
+  v0: number;
+  snr?: number;
+  nodal?: { f: number, u: number };
 }
 
 // --- CONSTANTS ---
@@ -381,6 +384,69 @@ function getAstroArgs(year: number) {
   return { tau, s, h, p, N };
 }
 
+function getNodalCorrections(astro: any, name: string) {
+  const N_rad = astro.N * Math.PI / 180;
+  let u = 0;
+  let f = 1;
+  const sinN = Math.sin(N_rad);
+  const cosN = Math.cos(N_rad);
+  const sin2N = Math.sin(2 * N_rad);
+  const cos2N = Math.cos(2 * N_rad);
+
+  if (['O1', 'Q1', '2Q1', 'RHO1', 'SIG1'].includes(name)) {
+      u = 10.8 * sinN - 1.3 * sin2N;
+      f = 1.0089 + 0.1871 * cosN - 0.0147 * cos2N;
+  } else if (['K1', 'J1', 'SO1', 'CHI1'].includes(name)) {
+      u = -8.8 * sinN + 1.1 * sin2N;
+      f = 1.0060 + 0.1150 * cosN - 0.0088 * cos2N;
+  } else if (['OO1'].includes(name)) {
+      u = -10.8 * sinN + 1.3 * sin2N;
+      f = 1.043 + 0.414 * cosN;
+  } else if (['M2', 'N2', '2N2', 'MU2', 'NU2', 'LAM2', 'L2'].includes(name)) {
+      u = -2.1 * sinN;
+      f = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N;
+  } else if (['K2'].includes(name)) {
+      u = -17.7 * sinN + 0.6 * sin2N;
+      f = 1.0241 + 0.2863 * cosN + 0.0083 * cos2N;
+  } else if (['Mm'].includes(name)) {
+      u = 0;
+      f = 1.0000 - 0.1300 * cosN;
+  } else if (['Mf'].includes(name)) {
+      u = -23.7 * sinN + 2.7 * sin2N;
+      f = 1.043 + 0.414 * cosN;
+  } else if (['M3'].includes(name)) {
+      u = -3.1 * sinN;
+      f = 1.0000 - 0.056 * cosN;
+  } else if (['M4', 'MN4'].includes(name)) {
+      u = -4.2 * sinN;
+      const f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N;
+      f = f_m2 * f_m2;
+  } else if (['M6'].includes(name)) {
+      u = -6.3 * sinN;
+      const f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N;
+      f = Math.pow(f_m2, 3);
+  } else if (['M8'].includes(name)) {
+      u = -8.4 * sinN;
+      const f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N;
+      f = Math.pow(f_m2, 4);
+  } else if (['MS4'].includes(name)) {
+      u = -2.1 * sinN;
+      f = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N;
+  } else if (['MK3'].includes(name)) {
+      u = -2.1 * sinN - 8.8 * sinN + 1.1 * sin2N;
+      const f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N;
+      const f_k1 = 1.0060 + 0.1150 * cosN - 0.0088 * cos2N;
+      f = f_m2 * f_k1;
+  } else if (['2MK3'].includes(name)) {
+      u = -4.2 * sinN - 8.8 * sinN + 1.1 * sin2N;
+      const f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N;
+      const f_k1 = 1.0060 + 0.1150 * cosN - 0.0088 * cos2N;
+      f = f_m2 * f_m2 * f_k1;
+  }
+
+  return { f, u };
+}
+
 function getV0(freq: number, astro: any, name: string) {
   const rates = [
     14.4920521 / 360,
@@ -401,7 +467,7 @@ function getV0(freq: number, astro: any, name: string) {
   const shifts: Record<string, number> = {
       'K1': -90, 'O1': 90, 'P1': 90, 'Q1': 90, 'J1': -90, 'OO1': -90,
       'M1': -90, 'PI1': 90, 'RHO1': 90, '2Q1': 90, 'SIG1': 90, 
-      'TAU1': -90, 'CHI1': -90, 'THE1': -90, 'SO1': 90
+      'TAU1': -90, 'CHI1': -90, 'THE1': -90, 'SO1': 90, 'L2': 180
   };
   v0 += shifts[name] || 0;
   return v0 % 360;
@@ -1517,13 +1583,15 @@ export default function App() {
                     }
                     const a = (2 / n) * sumCos;
                     const b = (2 / n) * sumSin;
-                    const amp = Math.sqrt(a * a + b * b);
+                    const amp_ls = Math.sqrt(a * a + b * b);
                     let phase_ls = Math.atan2(b, a) * (180 / Math.PI);
                     const v0 = getV0(f, astroRef, c);
-                    let phase = (v0 + phase_ls) % 360;
+                    const nodal = getNodalCorrections(astroRef, c);
+                    const amp = amp_ls / nodal.f;
+                    let phase = (phase_ls + v0 + nodal.u) % 360;
                     if (phase < 0) phase += 360;
                     
-                    return { c, a, b, amp, phase, v0, f };
+                    return { c, a, b, amp, phase, v0, f, nodal };
                 });
                 
                 let residualVariance = 0;
@@ -1587,12 +1655,14 @@ export default function App() {
                 results = compsToFit.map((c, i) => {
                     const a = solution[1 + 2 * i] || 0;
                     const b = solution[1 + 2 * i + 1] || 0;
-                    const amp = Math.sqrt(a * a + b * b);
+                    const amp_ls = Math.sqrt(a * a + b * b);
                     let phase_ls = Math.atan2(b, a) * (180 / Math.PI);
                     
                     const freq = HARMONIC_FREQS[c].f;
                     const v0 = getV0(freq, astroRef, c);
-                    let phase = (v0 + phase_ls) % 360;
+                    const nodal = getNodalCorrections(astroRef, c);
+                    const amp = amp_ls / nodal.f;
+                    let phase = (phase_ls + v0 + nodal.u) % 360;
                     if (phase < 0) phase += 360;
                     
                     let snr = 0;
@@ -2309,9 +2379,12 @@ export default function App() {
                 const t = (d.getTime() - t0) / 3600000;
                 const tRef = (d.getTime() - baseTimeRef) / 3600000;
                 let val = z0;
+                const astroPred = getAstroArgs(d.getUTCFullYear());
+                
                 harmonicResults.forEach(res => {
                     const w = 2 * Math.PI * res.freq;
-                    val += res.amp * Math.cos(w * tRef + (res.v0 - res.phase) * (Math.PI / 180));
+                    const nodal = getNodalCorrections(astroPred, res.comp);
+                    val += res.amp * nodal.f * Math.cos(w * tRef + (res.v0 + nodal.u - res.phase) * (Math.PI / 180));
                 });
                 if (useTrendInPrediction) {
                     const slopeToUse = linearTrend?.ssaTrend?.slope || linearTrend?.robustStlTrend?.slope || linearTrend?.slope || 0;
@@ -4619,7 +4692,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.80} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
               
               <Brush 
-                data={brushData}
+                {...{data: brushData} as any}
                 dataKey="timeMs" 
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
                 height={30} 
@@ -5455,7 +5528,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
               ) : null}
 
               <Brush 
-                data={predBrushData}
+                {...{data: predBrushData} as any}
                 dataKey="timeMs" 
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
                 height={30} 

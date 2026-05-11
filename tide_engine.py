@@ -322,10 +322,71 @@ def get_v0(freq, tau, s, h, p, N, name):
     shifts = {
         'K1': -90.0, 'O1': 90.0, 'P1': 90.0, 'Q1': 90.0, 'J1': -90.0, 'OO1': -90.0,
         'M1': -90.0, 'PI1': 90.0, 'RHO1': 90.0, '2Q1': 90.0, 'SIG1': 90.0, 
-        'TAU1': -90.0, 'CHI1': -90.0, 'THE1': -90.0, 'SO1': 90.0
+        'TAU1': -90.0, 'CHI1': -90.0, 'THE1': -90.0, 'SO1': 90.0, 'L2': 180.0
     }
     v0 += shifts.get(name, 0.0)
     return v0 % 360.0
+
+def get_nodal_corrections(N, name):
+    N_rad = N * np.pi / 180.0
+    u = 0.0
+    f = 1.0
+    sinN = np.sin(N_rad)
+    cosN = np.cos(N_rad)
+    sin2N = np.sin(2 * N_rad)
+    cos2N = np.cos(2 * N_rad)
+    
+    if name in ['O1', 'Q1', '2Q1', 'RHO1', 'SIG1']:
+        u = 10.8 * sinN - 1.3 * sin2N
+        f = 1.0089 + 0.1871 * cosN - 0.0147 * cos2N
+    elif name in ['K1', 'J1', 'SO1', 'CHI1']:
+        u = -8.8 * sinN + 1.1 * sin2N
+        f = 1.0060 + 0.1150 * cosN - 0.0088 * cos2N
+    elif name == 'OO1':
+        u = -10.8 * sinN + 1.3 * sin2N
+        f = 1.043 + 0.414 * cosN
+    elif name in ['M2', 'N2', '2N2', 'MU2', 'NU2', 'LAM2', 'L2']:
+        u = -2.1 * sinN
+        f = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N
+    elif name == 'K2':
+        u = -17.7 * sinN + 0.6 * sin2N
+        f = 1.0241 + 0.2863 * cosN + 0.0083 * cos2N
+    elif name == 'Mm':
+        u = 0.0
+        f = 1.0000 - 0.1300 * cosN
+    elif name == 'Mf':
+        u = -23.7 * sinN + 2.7 * sin2N
+        f = 1.043 + 0.414 * cosN
+    elif name == 'M3':
+        u = -3.1 * sinN
+        f = 1.0000 - 0.056 * cosN
+    elif name in ['M4', 'MN4']:
+        u = -4.2 * sinN
+        f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N
+        f = f_m2 * f_m2
+    elif name == 'M6':
+        u = -6.3 * sinN
+        f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N
+        f = f_m2 ** 3
+    elif name == 'M8':
+        u = -8.4 * sinN
+        f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N
+        f = f_m2 ** 4
+    elif name == 'MS4':
+        u = -2.1 * sinN
+        f = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N
+    elif name == 'MK3':
+        u = -2.1 * sinN - 8.8 * sinN + 1.1 * sin2N
+        f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N
+        f_k1 = 1.0060 + 0.1150 * cosN - 0.0088 * cos2N
+        f = f_m2 * f_k1
+    elif name == '2MK3':
+        u = -4.2 * sinN - 8.8 * sinN + 1.1 * sin2N
+        f_m2 = 1.0004 - 0.0373 * cosN + 0.0002 * cos2N
+        f_k1 = 1.0060 + 0.1150 * cosN - 0.0088 * cos2N
+        f = f_m2 * f_m2 * f_k1
+        
+    return f, u
 
 def solve_least_squares(t_hours, y_vals, comps):
     """Matrix solver for harmonic analysis (OLS)"""
@@ -745,17 +806,19 @@ def run_pipeline(df, sensor_name, config=None):
     for idx, c in enumerate(final_comps):
         a = final_sol[2 + 2*idx]
         b = final_sol[2 + 2*idx + 1]
-        amp = np.sqrt(a*a + b*b)
+        amp_ls = np.sqrt(a*a + b*b)
         
         # Calculate Phase from LS
         phase_ls = np.degrees(np.arctan2(b, a))
         
         # Calculate astronomical phase V0
         v0 = get_v0(HARMONIC_FREQS[c]['f'], tau, s, h, p, n_astro, c)
+        f_nodal, u_nodal = get_nodal_corrections(n_astro, c)
+        
+        amp = amp_ls / f_nodal
         
         # Greenwich Phase g = V0 + u - (-Phase_ls) = V0 + u + phase_ls
-        # Note: here we simplify u ~ 0 for this engine
-        g = (v0 + phase_ls) % 360.0
+        g = (v0 + u_nodal + phase_ls) % 360.0
         if g < 0: g += 360.0
         
         harmonic_results.append({
