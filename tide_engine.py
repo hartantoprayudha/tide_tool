@@ -524,9 +524,7 @@ def run_pipeline(df, sensor_name, config=None):
     if valid_idx.sum() < 2:
         return df_reg, None, "Insufficient data"
         
-    t0_dt_raw = df_reg['Timestamp'].iloc[0]
-    t0_dt = pd.Timestamp(year=t0_dt_raw.year, month=1, day=1, tz=t0_dt_raw.tzinfo)
-    t_hours = (df_reg['Timestamp'] - t0_dt).dt.total_seconds() / 3600.0
+    t_hours = (df_reg['Timestamp'] - df_reg['Timestamp'].iloc[0]).dt.total_seconds() / 3600.0
     y_raw = df_reg['raw'].values
     
     # Rayleigh selection for AUTO
@@ -638,8 +636,7 @@ def run_pipeline(df, sensor_name, config=None):
     lr_slope, lr_intercept, lr_rate, lr_moe = calculate_trend(t_f, y_f, is_linear=True)
     
     # Daily Resampling for STL and SSA
-    t0_dt_raw = df_reg['Timestamp'].iloc[0]
-    t0_dt = pd.Timestamp(year=t0_dt_raw.year, month=1, day=1, tz=t0_dt_raw.tzinfo)
+    t0_dt = df_reg['Timestamp'].iloc[0]
     df_daily = df_reg.set_index('Timestamp')['Filtered'].resample('D').mean()
     daily_x_hours = (df_daily.index - t0_dt).total_seconds() / 3600.0 + 12.0
     daily_y = df_daily.interpolate(limit_direction='both').fillna(0).values
@@ -725,7 +722,6 @@ def run_pipeline(df, sensor_name, config=None):
         'ssa_intercept': ssa_intercept,
         'ssa_moe': ssa_moe,
         'ssa_y': list(ssa_y) if 'ssa_y' in locals() else None,
-        'daily_x_start': float(daily_x_hours[0]) if len(daily_x_hours) > 0 else 0.0,
         'duration_days': float(t_hours.max()) / 24.0,
         'HAT': round(z0 + sum_amp, 4),
         'LAT': round(z0 - sum_amp, 4),
