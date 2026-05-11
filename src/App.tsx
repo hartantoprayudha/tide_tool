@@ -359,6 +359,54 @@ const HARMONIC_FREQS: Record<string, { f: number, d: string }> = {
   '6MS14': { f: 0.566401737, d: '6MS14' },
 };
 
+function getAstroArgs(year: number) {
+  const target = Date.UTC(year, 0, 1, 0, 0, 0);
+  const epoch = Date.UTC(2000, 0, 1, 12, 0, 0);
+  const d = (target - epoch) / 86400000;
+  const T = d / 36525;
+  
+  let s = (218.3164 + 481267.8813 * T) % 360;
+  let h = (280.4661 + 36000.7698 * T) % 360;
+  let p = (83.3535 + 4069.0137 * T) % 360;
+  let N = (125.0445 - 1934.1363 * T) % 360;
+  
+  if (s < 0) s += 360;
+  if (h < 0) h += 360;
+  if (p < 0) p += 360;
+  if (N < 0) N += 360;
+  
+  let tau = (180 + h - s) % 360;
+  if (tau < 0) tau += 360;
+
+  return { tau, s, h, p, N };
+}
+
+function getV0(freq: number, astro: any, name: string) {
+  const rates = [
+    14.4920521 / 360,
+    0.5490165 / 360,
+    0.0410686 / 360,
+    0.0046418 / 360,
+    -0.0022064 / 360
+  ];
+  let rem = freq;
+  let v0 = 0;
+  const args = [astro.tau, astro.s, astro.h, astro.p, astro.N];
+  for (let i = 0; i < 5; i++) {
+    const d = Math.round(rem / rates[i]);
+    rem -= d * rates[i];
+    v0 += d * args[i];
+  }
+  
+  const shifts: Record<string, number> = {
+      'K1': -90, 'O1': 90, 'P1': 90, 'Q1': 90, 'J1': -90, 'OO1': -90,
+      'M1': -90, 'PI1': 90, 'RHO1': 90, '2Q1': 90, 'SIG1': 90, 
+      'TAU1': -90, 'CHI1': -90, 'THE1': -90, 'SO1': 90
+  };
+  v0 += shifts[name] || 0;
+  return v0 % 360;
+}
+
 const getMoonEvents = (data: any[]) => {
   const events = [];
   let lastPhaseType = -1;
@@ -1086,8 +1134,12 @@ export default function App() {
         
         const roughCompsToFit = autoOutlierComps; 
         
+        const yearRef = processed[0]?.timestamp?.getUTCFullYear() || new Date().getUTCFullYear();
+        const baseTimeRef = Date.UTC(yearRef, 0, 1, 0, 0, 0);
+        const astroRef = getAstroArgs(yearRef);
+        
         const validForRough = processed.filter(r => !isNaN(r.raw));
-        const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - (processed[0]?.timestamp?.getTime() || 0)) / 3600000);
+        const t_hours_raw = validForRough.map(r => (r.timestamp.getTime() - baseTimeRef) / 3600000);
         const y_vals_raw = validForRough.map(r => r.raw);
         const meanRaw = y_vals_raw.reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1);
         const stdRaw = Math.sqrt(y_vals_raw.map(x => Math.pow(x - meanRaw, 2)).reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1));
@@ -1140,7 +1192,7 @@ export default function App() {
         
         // First pass: compute predicted levels and sum of squared residuals
         processed.forEach(r => {
-            const tHour = (r.timestamp.getTime() - (processed[0]?.timestamp?.getTime() || 0)) / 3600000;
+            const tHour = (r.timestamp.getTime() - baseTimeRef) / 3600000;
             let predictedLevel = roughZ0 + roughSlope * tHour;
             if (!_isInsufficient && roughSolution.length > 0) {
                 for (let i = 0; i < roughCompsToFit.length; i++) {
@@ -1227,7 +1279,7 @@ export default function App() {
                 cleanedInput[idx] = validUnfiltered[idx];
             } else {
                 // Temporary fill for filter stability - using linear trend or roughZ0
-                const tHour = ((processed[idx]?.timestamp?.getTime() || 0) - (processed[0]?.timestamp?.getTime() || 0)) / 3600000;
+                const tHour = ((processed[idx]?.timestamp?.getTime() || 0) - baseTimeRef) / 3600000;
                 cleanedInput[idx] = roughZ0 + roughSlope * tHour; 
             }
         }
@@ -1244,7 +1296,7 @@ export default function App() {
                 const gapLength = endGap - startGap;
                 
                 const getTrendVal = (idx: number) => {
-                    const tH = ((processed[idx]?.timestamp?.getTime() || 0) - (processed[0]?.timestamp?.getTime() || 0)) / 3600000;
+                    const tH = ((processed[idx]?.timestamp?.getTime() || 0) - baseTimeRef) / 3600000;
                     return roughZ0 + roughSlope * tH;
                 };
 
@@ -1420,7 +1472,7 @@ export default function App() {
             return;
         }
 
-        const baseTime = harmonicBaseArray[0]?.timestamp?.getTime() || 0;
+        const baseTime = baseTimeRef; // use the same Jan 1st ref
         const t_hours = validForFinal.map(r => (r.timestamp.getTime() - baseTime) / 3600000);
         const y_vals = validForFinal.map(r => r[yField]);
         
@@ -1466,10 +1518,12 @@ export default function App() {
                     const a = (2 / n) * sumCos;
                     const b = (2 / n) * sumSin;
                     const amp = Math.sqrt(a * a + b * b);
-                    let phase = Math.atan2(b, a) * (180 / Math.PI);
+                    let phase_ls = Math.atan2(b, a) * (180 / Math.PI);
+                    const v0 = getV0(f, astroRef, c);
+                    let phase = (v0 + phase_ls) % 360;
                     if (phase < 0) phase += 360;
                     
-                    return { c, a, b, amp, phase, f };
+                    return { c, a, b, amp, phase, v0, f };
                 });
                 
                 let residualVariance = 0;
@@ -1497,6 +1551,7 @@ export default function App() {
                         comp: res.c,
                         amp: res.amp,
                         phase: res.phase,
+                        v0: res.v0,
                         desc: HARMONIC_FREQS[res.c].d,
                         freq: res.f,
                         snr: constituentSet === 'AUTO' ? snr : undefined
@@ -1533,7 +1588,11 @@ export default function App() {
                     const a = solution[1 + 2 * i] || 0;
                     const b = solution[1 + 2 * i + 1] || 0;
                     const amp = Math.sqrt(a * a + b * b);
-                    let phase = Math.atan2(b, a) * (180 / Math.PI);
+                    let phase_ls = Math.atan2(b, a) * (180 / Math.PI);
+                    
+                    const freq = HARMONIC_FREQS[c].f;
+                    const v0 = getV0(freq, astroRef, c);
+                    let phase = (v0 + phase_ls) % 360;
                     if (phase < 0) phase += 360;
                     
                     let snr = 0;
@@ -1546,6 +1605,7 @@ export default function App() {
                       comp: c,
                       amp,
                       phase,
+                      v0,
                       desc: HARMONIC_FREQS[c].d,
                       freq: HARMONIC_FREQS[c].f,
                       snr: constituentSet === 'AUTO' ? snr : undefined
@@ -1795,10 +1855,10 @@ export default function App() {
                     const r = processed[i];
                     if (!isNaN(r.filtered) && !r.isOutlier) {
                         if (useDeTiding && results.length > 0) {
-                            const ti = (r.timestamp.getTime() - t0) / 3600000;
+                            const tiRef = (r.timestamp.getTime() - baseTimeRef) / 3600000;
                             let tideSum = 0;
                             for (let k = 0; k < results.length; k++) {
-                                tideSum += results[k].amp * Math.cos(f_list[k] * ti - results[k].phase * (Math.PI / 180));
+                                tideSum += results[k].amp * Math.cos(f_list[k] * tiRef + (results[k].v0 - results[k].phase) * (Math.PI / 180));
                             }
                             yFull[i] = r.filtered - tideSum;
                         } else {
@@ -1996,18 +2056,16 @@ export default function App() {
             
             // Calculate RMSE
             let sumSqE = 0, countE = 0;
-            const rt0 = processed[0]?.timestamp?.getTime() || 0;
             processed.forEach(r => {
                 if (!r.isOutlier && !isNaN(r.filtered)) {
-                    const rt = (r.timestamp.getTime() - rt0) / 3600000;
+                    const rtRef = (r.timestamp.getTime() - baseTimeRef) / 3600000;
                     let p = fittedZ0;
                     if (!_isInsufficient) {
-                        p += unifiedSlope * rt;
+                        p += unifiedSlope * rtRef;
                     }
                     results.forEach(res => {
                         const w = 2 * Math.PI * res.freq;
-                        const ph = res.phase * (Math.PI / 180);
-                        p += res.amp * Math.cos(w * rt - ph);
+                        p += res.amp * Math.cos(w * rtRef + (res.v0 - res.phase) * (Math.PI / 180));
                     });
                     sumSqE += Math.pow(r.filtered - p, 2);
                     countE++;
@@ -2243,15 +2301,17 @@ export default function App() {
 
             const predData = [];
             const t0 = records[0]?.timestamp?.getTime() || 0;
+            const yearRef = records[0]?.timestamp?.getUTCFullYear() || new Date().getUTCFullYear();
+            const baseTimeRef = Date.UTC(yearRef, 0, 1, 0, 0, 0);
             const dailyStats: Record<string, any> = {};
 
             const calcValue = (d: Date) => {
                 const t = (d.getTime() - t0) / 3600000;
+                const tRef = (d.getTime() - baseTimeRef) / 3600000;
                 let val = z0;
                 harmonicResults.forEach(res => {
                     const w = 2 * Math.PI * res.freq;
-                    const ph = res.phase * (Math.PI / 180);
-                    val += res.amp * Math.cos(w * t - ph);
+                    val += res.amp * Math.cos(w * tRef + (res.v0 - res.phase) * (Math.PI / 180));
                 });
                 if (useTrendInPrediction) {
                     const slopeToUse = linearTrend?.ssaTrend?.slope || linearTrend?.robustStlTrend?.slope || linearTrend?.slope || 0;
@@ -2693,18 +2753,20 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
     } else {
       // Calculate Stats
       const t0 = records[0].timestamp.getTime();
+      const yearRef = records[0].timestamp.getUTCFullYear();
+      const baseTimeRef = Date.UTC(yearRef, 0, 1, 0, 0, 0);
       let sumE = 0, sumAbsE = 0, sumSqE = 0, count = 0;
       records.forEach(r => {
         if (!r.isOutlier && !isNaN(r.filtered)) {
             const t = (r.timestamp.getTime() - t0) / 3600000;
+            const tRef = (r.timestamp.getTime() - baseTimeRef) / 3600000;
             let p = z0;
             if (linearTrend && linearTrend.lsqTrend) {
                 p += linearTrend.lsqTrend.slope * t;
             }
             harmonicResults.forEach(res => {
                 const w = 2 * Math.PI * res.freq;
-                const ph = res.phase * (Math.PI / 180);
-                p += res.amp * Math.cos(w * t - ph);
+                p += res.amp * Math.cos(w * tRef + (res.v0 - res.phase) * (Math.PI / 180));
             });
             const e = r.filtered - p;
             sumE += e;
@@ -4557,6 +4619,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               <Line hide={hiddenLines.filtered} type="monotone" dataKey="filtered" stroke="#ec7017" strokeOpacity={0.80} strokeWidth={2.5} dot={false} name="Valid" isAnimationActive={false} />
               
               <Brush 
+                data={brushData}
                 dataKey="timeMs" 
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
                 height={30} 
@@ -5115,42 +5178,13 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
   const [vZoom, setVZoom] = useState(1);
 
   const displayPredsRaw = useMemo(() => {
-    // 366 days safe threshold for leap years
-    const oneYearHours = 366 * 24;
-    
-    if (predictions.length <= oneYearHours) {
-      return predictions.map((p: any) => {
-          const { timestamp, ...rest } = p;
-          return {
-              ...rest,
-              timeMs: timestamp.getTime()
-          };
-      });
-    } else {
-      // If > 1 year: Show entire duration as monthly means
-      const monthlyData: Record<string, { sum: number, count: number, date: Date, max: number, min: number }> = {};
-      
-      predictions.forEach((p: any) => {
-          const monthKey = formatUTC(p.timestamp, 'yyyy-MM');
-          if (!monthlyData[monthKey]) {
-              monthlyData[monthKey] = { sum: 0, count: 0, date: p.timestamp, max: -Infinity, min: Infinity };
-          }
-          monthlyData[monthKey].sum += p.value;
-          monthlyData[monthKey].count += 1;
-          if (p.value > monthlyData[monthKey].max) monthlyData[monthKey].max = p.value;
-          if (p.value < monthlyData[monthKey].min) monthlyData[monthKey].min = p.value;
-      });
-
-      return Object.values(monthlyData).map((m: any) => ({
-          time: formatUTC(m.date, 'MMM yy'),
-          fullTime: formatUTC(m.date, 'MMMM yyyy'),
-          value: parseFloat((m.sum / m.count).toFixed(3)),
-          timeMs: m.date.getTime(),
-          dayMax: m.max,
-          dayMin: m.min,
-          isMonthlyMean: true
-      }));
-    }
+    return predictions.map((p: any) => {
+        const { timestamp, ...rest } = p;
+        return {
+            ...rest,
+            timeMs: timestamp.getTime()
+        };
+    });
   }, [predictions]);
 
   const predBrushData = useMemo(() => {
@@ -5174,7 +5208,24 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
     
     if (sliced.length > 2500) {
         const step = Math.ceil(sliced.length / 2500);
-        return sliced.filter((_, i) => i % step === 0);
+        const sampled = [];
+        for (let i = 0; i < sliced.length; i += step) {
+            const chunk = sliced.slice(i, i + step);
+            let min = Infinity, max = -Infinity, sum = 0;
+            chunk.forEach(c => {
+                if (c.value < min) min = c.value;
+                if (c.value > max) max = c.value;
+                sum += c.value;
+            });
+            const meanVal = sum / chunk.length;
+            const midNode = chunk[Math.floor(chunk.length / 2)];
+            sampled.push({
+                ...midNode,
+                value: parseFloat(meanVal.toFixed(3)),
+                range: [parseFloat(min.toFixed(3)), parseFloat(max.toFixed(3))]
+            });
+        }
+        return sampled;
     }
     return sliced;
   }, [displayPredsRaw, zoomDomain]);
@@ -5374,6 +5425,19 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <ReferenceLine key={i} x={me.time} stroke="none" label={{ position: 'top', value: me.symbol, fontSize: 16 }} />
               ))}
 
+              {displayPreds.length > 0 && displayPreds[0].range && (
+                <Area 
+                  type="monotone" 
+                  dataKey="range" 
+                  stroke="none" 
+                  fill="#bae6fd" 
+                  fillOpacity={0.5} 
+                  animationDuration={0} 
+                  isAnimationActive={false}
+                  connectNulls 
+                />
+              )}
+
               <Area 
                 type="monotone" 
                 dataKey="value" 
@@ -5391,6 +5455,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
               ) : null}
 
               <Brush 
+                data={predBrushData}
                 dataKey="timeMs" 
                 tickFormatter={(val: number) => formatUTC(new Date(val), 'MMM yyyy')}
                 height={30} 

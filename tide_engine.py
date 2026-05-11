@@ -288,6 +288,45 @@ def parse_dates(ts_col):
                 
     return parsed
 
+def get_astronomical_args(year):
+    # centuries from J2000 (2000-01-01 12:00:00 UTC)
+    target = datetime(year, 1, 1, 0, 0, 0)
+    epoch = datetime(2000, 1, 1, 12, 0, 0)
+    d = (target - epoch).total_seconds() / 86400.0
+    T = d / 36525.0
+    
+    s = (218.3164 + 481267.8813 * T) % 360.0
+    h = (280.4661 + 36000.7698 * T) % 360.0
+    p = (83.3535 + 4069.0137 * T) % 360.0
+    N = (125.0445 - 1934.1363 * T) % 360.0
+    
+    tau = (180.0 + h - s) % 360.0
+    return tau, s, h, p, N
+
+def get_v0(freq, tau, s, h, p, N, name):
+    rates = [
+        14.4920521 / 360.0,
+        0.5490165 / 360.0,
+        0.0410686 / 360.0,
+        0.0046418 / 360.0,
+        -0.0022064 / 360.0
+    ]
+    rem = freq
+    v0 = 0.0
+    args = [tau, s, h, p, N]
+    for i in range(5):
+        d = round(rem / rates[i])
+        rem -= d * rates[i]
+        v0 += d * args[i]
+        
+    shifts = {
+        'K1': -90.0, 'O1': 90.0, 'P1': 90.0, 'Q1': 90.0, 'J1': -90.0, 'OO1': -90.0,
+        'M1': -90.0, 'PI1': 90.0, 'RHO1': 90.0, '2Q1': 90.0, 'SIG1': 90.0, 
+        'TAU1': -90.0, 'CHI1': -90.0, 'THE1': -90.0, 'SO1': 90.0
+    }
+    v0 += shifts.get(name, 0.0)
+    return v0 % 360.0
+
 def solve_least_squares(t_hours, y_vals, comps):
     """Matrix solver for harmonic analysis (OLS)"""
     n = len(t_hours)
@@ -524,7 +563,14 @@ def run_pipeline(df, sensor_name, config=None):
     if valid_idx.sum() < 2:
         return df_reg, None, "Insufficient data"
         
-    t_hours = (df_reg['Timestamp'] - df_reg['Timestamp'].iloc[0]).dt.total_seconds() / 3600.0
+    # Set time reference to January 1st 00:00:00 of the starting year
+    start_time = df_reg['Timestamp'].iloc[0]
+    ref_time = pd.Timestamp(year=start_time.year, month=1, day=1, hour=0, minute=0, second=0)
+    
+    # Calculate tau, s, h, p, N at reference time (Greenwich)
+    tau, s, h, p, n_astro = get_astronomical_args(start_time.year)
+
+    t_hours = (df_reg['Timestamp'] - ref_time).dt.total_seconds() / 3600.0
     y_raw = df_reg['raw'].values
     
     # Rayleigh selection for AUTO
@@ -688,12 +734,22 @@ def run_pipeline(df, sensor_name, config=None):
         a = final_sol[2 + 2*idx]
         b = final_sol[2 + 2*idx + 1]
         amp = np.sqrt(a*a + b*b)
-        phase = np.degrees(np.arctan2(b, a))
-        if phase < 0: phase += 360
+        
+        # Calculate Phase from LS
+        phase_ls = np.degrees(np.arctan2(b, a))
+        
+        # Calculate astronomical phase V0
+        v0 = get_v0(HARMONIC_FREQS[c]['f'], tau, s, h, p, n_astro, c)
+        
+        # Greenwich Phase g = V0 + u - (-Phase_ls) = V0 + u + phase_ls
+        # Note: here we simplify u ~ 0 for this engine
+        g = (v0 + phase_ls) % 360.0
+        if g < 0: g += 360.0
+        
         harmonic_results.append({
             'name': c,
             'amplitude': round(amp, 4),
-            'phase': round(phase, 2),
+            'phase': round(g, 2),
             'frequency': HARMONIC_FREQS[c]['f']
         })
         
