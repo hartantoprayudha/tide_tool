@@ -556,6 +556,7 @@ def bulk_process(input_folder="."):
         processed_df.to_csv(export_csv_path, index=False)
         
         const_df = pd.DataFrame(stats['constituents'])
+        const_df['amplitude'] = const_df['amplitude'].map(lambda x: f"{x:.5f}")
         const_csv_path = os.path.join(base_out, "constants", f"harmonic_constants_{station_id}.csv")
         const_df.to_csv(const_csv_path, index=False)
         

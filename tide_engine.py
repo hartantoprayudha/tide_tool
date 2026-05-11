@@ -748,8 +748,8 @@ def run_pipeline(df, sensor_name, config=None):
         
         harmonic_results.append({
             'name': c,
-            'amplitude': round(amp, 4),
-            'phase': round(g, 2),
+            'amplitude': round(amp, 5),
+            'phase': round(g, 3),
             'frequency': HARMONIC_FREQS[c]['f']
         })
         

@@ -4990,7 +4990,7 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
     csv += `# RMSE,${rmse !== undefined && rmse !== null ? rmse.toFixed(4) : 'N/A'}\n\n`;
     csv += "Component,Definition,Frequency (cph),Amplitude (m),Phase (deg)\n";
     [...results].sort((a: any, b: any) => b.amp - a.amp).forEach((r: any) => {
-      csv += `${r.comp},${r.desc},${r.freq.toFixed(8)},${r.amp.toFixed(3)},${r.phase.toFixed(3)}\n`;
+      csv += `${r.comp},${r.desc},${r.freq.toFixed(8)},${r.amp.toFixed(5)},${r.phase.toFixed(3)}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     download(blob, 'Harmonic_Constants.csv');
