@@ -403,6 +403,8 @@ def solve_least_squares(t_hours, y_vals, comps):
     return res
 
 def calculate_trend(data_x, data_y, is_linear=False):
+    data_x = np.asarray(data_x)
+    data_y = np.asarray(data_y)
     valid = ~np.isnan(data_y) & ~np.isnan(data_x)
     data_x = data_x[valid]
     data_y = data_y[valid]
@@ -433,9 +435,9 @@ def calculate_trend(data_x, data_y, is_linear=False):
     bin_indices = np.floor((data_x - min_x) / BIN_SIZE).astype(int)
     bin_indices = np.clip(bin_indices, 0, num_bins - 1)
     
-    np.add.at(bin_x, bin_indices, data_x)
-    np.add.at(bin_y, bin_indices, data_y)
-    np.add.at(bin_count, bin_indices, 1)
+    np.add.at(bin_x, bin_indices.astype(np.intp), data_x)
+    np.add.at(bin_y, bin_indices.astype(np.intp), data_y)
+    np.add.at(bin_count, bin_indices.astype(np.intp), 1)
     
     valid_bins = bin_count > 0
     agg_x = bin_x[valid_bins] / bin_count[valid_bins]
