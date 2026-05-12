@@ -2036,7 +2036,7 @@ export default function App() {
                 if(dailyX.length > 2) robustStlTrendData = calculateTrend(dailyX, robustTrendY);
 
                 // Iterative SSA (First Principal Component)
-                const L = 365;
+                const L = 2 * 365;
                 const N = dailyY.length;
                 const K = N - L + 1;
                 if (K > 0) {

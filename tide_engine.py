@@ -503,7 +503,7 @@ def calculate_trend(data_x, data_y, is_linear=False):
     return slope, intercept, rate_year, margin_of_error
 
 def iterative_ssa(daily_x, daily_y):
-    L = 365
+    L = 2 * 365
     N = len(daily_y)
     K = N - L + 1
     if K <= 0: return None
