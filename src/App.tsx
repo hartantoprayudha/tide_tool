@@ -65,9 +65,22 @@ import { jsPDF } from 'jspdf';
 
 // --- UTILS ---
 const formatUTC = (date: Date, fmt: string) => {
-  // Offset the date so that format() outputs UTC components
-  const utcTime = date.getTime() + date.getTimezoneOffset() * 60000;
-  return format(new Date(utcTime), fmt);
+  if (isNaN(date.getTime())) return "Invalid Date";
+  // Always use UTC components to avoid timezone interference
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  const hh = String(date.getUTCHours()).padStart(2, '0');
+  const mm = String(date.getUTCMinutes()).padStart(2, '0');
+  const ss = String(date.getUTCSeconds()).padStart(2, '0');
+
+  return fmt
+    .replace('yyyy', String(y))
+    .replace('MM', m)
+    .replace('dd', d)
+    .replace('HH', hh)
+    .replace('mm', mm)
+    .replace('ss', ss);
 };
 
 const CustomXAxisTick = ({ x, y, payload }: any) => {
@@ -1914,7 +1927,7 @@ export default function App() {
             
             if (durationHours >= 17520) { // >= 2 years
                 const dt_ms = (tEnd - t0) / (processed.length - 1);
-                const windowSize = Math.max(1, Math.round((365.25 * 24 * 3600 * 1000) / dt_ms));
+                const windowSize = Math.max(1, Math.round((2 * 365.25 * 24 * 3600 * 1000) / dt_ms));
                 const halfWindow = Math.floor(windowSize / 2);
     
                 const yFull = new Float64Array(processed.length);
@@ -2023,9 +2036,9 @@ export default function App() {
                     }
                 }
 
-                // Robust STL (1-Year Moving Median)
+                // Robust STL (2-Year Moving Median)
                 const robustTrendY: number[] = [];
-                const windowDays = 365;
+                const windowDays = 2 * 365;
                 const halfWindowDays = Math.floor(windowDays/2);
                 for(let i=0; i<dailyY.length; i++) {
                     const start = Math.max(0, i - halfWindowDays);
@@ -2591,9 +2604,7 @@ export default function App() {
 
     // Build Fast UTC Formatter for dd/MM/yyyy HH:mm:ss
     const formatTimestamp = (date: Date) => {
-        const utcTime = date.getTime() + date.getTimezoneOffset() * 60000;
-        const d = new Date(utcTime);
-        return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+        return formatUTC(date, 'dd/MM/yyyy HH:mm:ss');
     };
 
     exportRecords.forEach(r => {
@@ -2658,7 +2669,7 @@ export default function App() {
     let logContent = "=========================================================\n";
     logContent += "       BIG TIDAL ANALYSIS - DATA MANIPULATION LOG        \n";
     logContent += "=========================================================\n\n";
-    logContent += `Waktu Ekspor      : ${formatUTC(new Date(), 'yyyy-MM-dd HH:mm:ss')} UTC\n`;
+    logContent += `Waktu Ekspor      : ${formatUTC(new Date(), 'yyyy-MM-dd HH:mm:ss')} (UTC)\n`;
     logContent += `Nama File Asli    : ${fileName || 'Tidak ada file'}\n`;
     logContent += `Sensor Dipilih    : ${sensorKey || 'Otomatis'} ${isCurrentCm ? '(dikonversi dari cm ke m)' : '(m)'}\n\n`;
     logContent += "---------------------------------------------------------\n";
@@ -2671,12 +2682,12 @@ export default function App() {
     
     logContent += `2. Local Offset     : ${offsetMods.length} koreksi\n`;
     offsetMods.forEach((m, i) => {
-      logContent += `   - Offset [${i+1}]: ${m.offset} m pada sensor target [${m.sensor}] (${formatUTC(new Date(m.startMs), 'yyyy-MM-dd HH:mm')} sd ${formatUTC(new Date(m.endMs), 'yyyy-MM-dd HH:mm')})\n`;
+      logContent += `   - Offset [${i+1}]: ${m.offset} m pada sensor target [${m.sensor}] (${formatUTC(new Date(m.startMs), 'yyyy-MM-dd HH:mm')} sd ${formatUTC(new Date(m.endMs), 'yyyy-MM-dd HH:mm')} UTC)\n`;
     });
 
     logContent += `3. Scaling Factor   : ${scaleMods.length} koreksi\n`;
     scaleMods.forEach((m, i) => {
-      logContent += `   - Scaling [${i+1}]: multiplier x${m.scale.toFixed(4)} (Referensi: [${m.referenceSensor || 'TBA'}] -> Target: [${m.sensor}]) (${formatUTC(new Date(m.startMs), 'yyyy-MM-dd HH:mm')} sd ${formatUTC(new Date(m.endMs), 'yyyy-MM-dd HH:mm')})\n`;
+      logContent += `   - Scaling [${i+1}]: multiplier x${m.scale.toFixed(4)} (Referensi: [${m.referenceSensor || 'TBA'}] -> Target: [${m.sensor}]) (${formatUTC(new Date(m.startMs), 'yyyy-MM-dd HH:mm')} sd ${formatUTC(new Date(m.endMs), 'yyyy-MM-dd HH:mm')} UTC)\n`;
     });
 
     logContent += `4. Time Offset      : ${timeOffset} jam\n`;
@@ -2704,7 +2715,7 @@ export default function App() {
     logContent += `Data Terdeteksi Outlier          : ${outlierCount}\n`;
     logContent += `Total Data Valid (Analyzed Data) : ${validCount}\n`;
     if (records.length > 0) {
-        logContent += `Periode Data                     : ${formatUTC(records[0].timestamp, 'yyyy-MM-dd HH:mm:ss')} sd ${formatUTC(records[records.length - 1].timestamp, 'yyyy-MM-dd HH:mm:ss')}\n`;
+        logContent += `Periode Data                     : ${formatUTC(records[0].timestamp, 'yyyy-MM-dd HH:mm:ss')} sd ${formatUTC(records[records.length - 1].timestamp, 'yyyy-MM-dd HH:mm:ss')} (UTC)\n`;
     }
     logContent += `Status Peringatan                : ${dataLengthWarning ? dataLengthWarning : 'Aman (Durasi mencukupi)'}\n`;
     logContent += "=========================================================\n";
@@ -2865,11 +2876,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
           const tStart = records[0].timestamp;
           const tEnd = records[records.length - 1].timestamp;
           const durationDays = (tEnd.getTime() - tStart.getTime()) / (1000 * 60 * 60 * 24);
-          content += `Data Start\t${tStart.toLocaleString()}\n`;
-          content += `Data End\t${tEnd.toLocaleString()}\n`;
+          content += `Data Start\t${formatUTC(tStart, 'M/d/yyyy, HH:mm:ss')} (UTC)\n`;
+          content += `Data End\t${formatUTC(tEnd, 'M/d/yyyy, HH:mm:ss')} (UTC)\n`;
           content += `Data Duration\t${durationDays.toFixed(2)} days\n`;
       }
-      content += `Generated\t${new Date().toLocaleString()}\n\n`;
+      content += `Generated\t${formatUTC(new Date(), 'M/d/yyyy, HH:mm:ss')} (UTC)\n\n`;
 
       content += `--- CHART DATUMS & TIDAL RANGES ---\n`;
       content += `Parameter\tValue\tUnit\n`;
@@ -4315,7 +4326,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none"
                 onChange={(e) => {
                    if (e.target.value) {
-                       const start = new Date(e.target.value).getTime();
+                       const start = new Date(e.target.value + 'Z').getTime();
                        setZoomDomain(prev => prev ? { ...prev, start } : { start, end: records[records.length-1]?.timestamp.getTime() || start });
                    }
                 }}
@@ -4326,7 +4337,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none"
                 onChange={(e) => {
                    if (e.target.value) {
-                       const end = new Date(e.target.value).getTime();
+                       const end = new Date(e.target.value + 'Z').getTime();
                        setZoomDomain(prev => prev ? { ...prev, end } : { start: records[0]?.timestamp.getTime() || end, end });
                    }
                 }}

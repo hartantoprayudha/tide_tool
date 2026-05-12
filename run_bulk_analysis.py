@@ -342,7 +342,7 @@ def generate_log_text(df_raw, processed_df, config, sensor, dt_start, dt_end, gr
     logContent = "=========================================================\n"
     logContent += "       BIG TIDAL ANALYSIS - DATA MANIPULATION LOG        \n"
     logContent += "=========================================================\n\n"
-    logContent += f"Waktu Ekspor      : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+    logContent += f"Waktu Ekspor      : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} (UTC)\n"
     logContent += f"Nama File         : Merged Data ({station_id})\n"
     logContent += f"Sensor Dipilih    : {sensor} {'(dikonversi dari cm ke m)' if is_cm else '(m)'}\n\n"
     logContent += "---------------------------------------------------------\n"
@@ -368,7 +368,7 @@ def generate_log_text(df_raw, processed_df, config, sensor, dt_start, dt_end, gr
     logContent += f"Data Gross Error (Invalid/NaN)   : {gross_errors}\n"
     logContent += f"Data Terdeteksi Outlier          : {outliers_count}\n"
     logContent += f"Total Data Valid (Analyzed Data) : {valid_count}\n"
-    logContent += f"Periode Data                     : {dt_start} sd {dt_end}\n"
+    logContent += f"Periode Data                     : {dt_start} sd {dt_end} (UTC)\n"
     logContent += f"Status Peringatan                : Aman (Durasi mencukupi)\n"
     logContent += "=========================================================\n"
     
@@ -385,13 +385,14 @@ def generate_report_text(processed_df, stats, station_id, num_files=1, latitude=
     tEnd = processed_df['Timestamp'].iloc[-1]
     durationDays = (tEnd - tStart).total_seconds() / (3600 * 24)
     
-    def to_js_locale_string(dt):
-        return f"{dt.month}/{dt.day}/{dt.year}, {dt.strftime('%I:%M:%S %p').lstrip('0')}"
+    def to_js_locale_string_utc(dt):
+        # We assume dt is UTC or convert it to UTC for display consistency
+        return f"{dt.month}/{dt.day}/{dt.year}, {dt.strftime('%H:%M:%S')} (UTC)"
         
-    content += f"Data Start\t{to_js_locale_string(tStart)}\n"
-    content += f"Data End\t{to_js_locale_string(tEnd)}\n"
+    content += f"Data Start\t{to_js_locale_string_utc(tStart)}\n"
+    content += f"Data End\t{to_js_locale_string_utc(tEnd)}\n"
     content += f"Data Duration\t{durationDays:.2f} days\n"
-    content += f"Generated\t{to_js_locale_string(datetime.now())}\n\n"
+    content += f"Generated\t{to_js_locale_string_utc(datetime.now(timezone.utc))}\n\n"
     
     content += "--- CHART DATUMS & TIDAL RANGES ---\n"
     content += "Parameter\tValue\tUnit\n"
@@ -427,10 +428,15 @@ def generate_report_text(processed_df, stats, station_id, num_files=1, latitude=
     
     content += "--- SEA LEVEL TREND ---\n"
     content += "Method\tRate\tMoE (95% CI)\tUnit\n"
-    if stats.get('duration_days', 0) > 365:
+    if stats.get('duration_days', 0) >= 2 * 365:
         content += f"STL Decomposition\t{stats.get('stl_rate', 0):.5f}\t{stats.get('stl_moe', 0):.5f}\tm/year\n"
         content += f"Robust STL\t{stats.get('robust_stl_rate', 0):.5f}\t{stats.get('robust_stl_moe', 0):.5f}\tm/year\n"
         content += f"Iterative SSA\t{stats.get('ssa_rate', 0):.5f}\t{stats.get('ssa_moe', 0):.5f}\tm/year\n"
+    elif stats.get('duration_days', 0) >= 365:
+        # If between 1 and 2 years, we might still show STL if L was 365, but since it's 2*365 now, we hide it or show N/A
+        content += f"STL Decomposition\tN/A (<2 years)\t-\tm/year\n"
+        content += f"Robust STL\tN/A (<2 years)\t-\tm/year\n"
+        content += f"Iterative SSA\tN/A (<2 years)\t-\tm/year\n"
     content += f"Linear Regression\t{stats.get('linear_rate', 0):.5f}\t{stats.get('linear_moe', 0):.5f}\tm/year\n\n"
     
     content += "--- MODEL ACCURACIES (Harmonic vs Analyzed) ---\n"

@@ -540,7 +540,8 @@ def iterative_ssa(daily_x, daily_y):
 
 def robust_stl(daily_x, daily_y):
     robust_trend_y = []
-    half_window = 365 // 2
+    window = 2 * 365
+    half_window = window // 2
     n = len(daily_y)
     for i in range(n):
         start = max(0, i - half_window)
@@ -750,7 +751,7 @@ def run_pipeline(df, sensor_name, config=None):
     daily_x = daily_x_hours.values
     
     # Calculate STL Trend Data (using a basic moving average as a proxy for STL decomp's trend)
-    window_days_stl = 365
+    window_days_stl = 2 * 365
     if len(daily_y) > window_days_stl:
         stl_y = pd.Series(daily_y).rolling(window=window_days_stl, min_periods=1, center=True).mean().values
         stl_slope, stl_intercept, stl_rate, stl_moe = calculate_trend(daily_x, stl_y)
@@ -768,7 +769,7 @@ def run_pipeline(df, sensor_name, config=None):
         rstl_slope, rstl_intercept, rstl_rate, rstl_moe = 0, 0, 0, 0
 
     # Calculate Iterative SSA
-    if len(daily_y) > 365:
+    if len(daily_y) >= 2 * 365:
         ssa_res = iterative_ssa(daily_x, daily_y)
         if ssa_res:
              (ssa_slope, ssa_intercept, ssa_rate, ssa_moe), ssa_y = ssa_res
