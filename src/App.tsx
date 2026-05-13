@@ -2514,9 +2514,16 @@ export default function App() {
   const exportHYDRAS = () => {
     if (!records.length) return;
     
-    const selectedKeys = Object.keys(exportSelections).filter(k => exportSelections[k]);
+    const orderedAllKeys: string[] = [
+        ...availableSensors,
+        ...availableSensors.map(s => `${s} (Valid)`),
+        ...availableSensors.map(s => `${s} (Combined)`),
+        ...availableSensors.map(s => `${s} (Interpolated)`),
+    ];
+    const selectedKeys = orderedAllKeys.filter(k => exportSelections[k]);
+    
     if (selectedKeys.length === 0) {
-        alert("Pilih setidaknya satu kolom data untuk diekspor.");
+        alert("Pilih setidaknya satu kolom data sensor untuk diekspor.");
         return;
     }
 
