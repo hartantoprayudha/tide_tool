@@ -75,7 +75,15 @@ async function startServer() {
               query += ` WHERE ${conditions.join(' AND ')}`;
           }
           
-          query += ` ORDER BY TimeStamp DESC`;
+          if (table === 'validdata') {
+              query += ` ORDER BY RecId DESC`;
+          } else {
+              query += ` ORDER BY TimeStamp DESC`;
+          }
+      }
+      
+      if (req.body.limit) {
+          query += ` LIMIT ${parseInt(req.body.limit, 10)}`;
       }
       
       const [rows] = await connection.execute(query, params);
