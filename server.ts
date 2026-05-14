@@ -75,10 +75,12 @@ async function startServer() {
               query += ` WHERE ${conditions.join(' AND ')}`;
           }
           
-          query += ` ORDER BY TimeStamp DESC`;
+          // Removed ORDER BY TimeStamp DESC because validdata has a TEXT column (Remark)
+          // which forces MySQL to use a slow on-disk temporary table for sorting.
+          // The frontend already sorts the data chronologically in ConnectView.tsx anyway.
       }
       
-      const [rows] = await connection.execute(query, params);
+      const [rows] = await connection.query(query, params);
       
       res.json({ success: true, data: rows });
     } catch (error: any) {
