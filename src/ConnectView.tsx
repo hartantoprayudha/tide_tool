@@ -184,7 +184,7 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
         mappedData.sort((a: any, b: any) => {
             const tsA = typeof a.Timestamp === 'string' ? a.Timestamp : String(a.Timestamp || '');
             const tsB = typeof b.Timestamp === 'string' ? b.Timestamp : String(b.Timestamp || '');
-            return tsA.localeCompare(tsB);
+            return tsA < tsB ? -1 : (tsA > tsB ? 1 : 0);
         });
 
         // Call station meta loader if we found a station ID and mapping
