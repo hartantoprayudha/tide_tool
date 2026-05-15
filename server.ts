@@ -53,6 +53,9 @@ async function startServer() {
       });
 
       let query = `SELECT * FROM \`${table}\``;
+      if (table === 'validdata') {
+        query = `SELECT StationId, DATE_FORMAT(TimeStamp, '%Y-%m-%dT%H:%i:%s.000Z') as TimeStamp, Interpolation as Intp FROM \`${table}\``;
+      }
       const params: any[] = [];
       const conditions: string[] = [];
 

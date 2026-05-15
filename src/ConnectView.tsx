@@ -177,16 +177,6 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
              }
           });
           
-          // Specific ValidData Table
-          if (selectedTable === 'validdata') {
-              if (row.combination !== undefined && row.combination !== null) {
-                  newRow['Combination'] = row.combination;
-              }
-              if (row.Interpolation !== undefined && row.Interpolation !== null) {
-                  newRow['Interpolation'] = row.Interpolation;
-              }
-          }
-          
           return newRow;
         });
 
