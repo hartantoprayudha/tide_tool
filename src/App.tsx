@@ -1223,7 +1223,7 @@ export default function App() {
         const meanRaw = y_vals_raw.reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1);
         const stdRaw = Math.sqrt(y_vals_raw.map(x => Math.pow(x - meanRaw, 2)).reduce((a, b) => a + b, 0) / (y_vals_raw.length || 1));
 
-        const _isInsufficient = durationHoursCheck < 29 * 24;
+        const _isInsufficient = durationHoursCheck < 14 * 24;
         
         let roughZ0 = meanRaw;
         let roughHAT = meanRaw + 3 * stdRaw; // fallback
@@ -1262,7 +1262,7 @@ export default function App() {
             }
             setDataLengthWarning(null);
         } else {
-            setDataLengthWarning("Warning: Panjang data Anda kurang dari 29 piantan (hari). Analisis harmonik dan prediksi pasut tidak dapat dilakukan.");
+            setDataLengthWarning("Warning: Panjang data Anda kurang dari 14 piantan (hari). Analisis harmonik penuh mungkin tidak akurat, menggunakan model perkiraan kasar.");
         }
 
         // Calculate predicted levels based on rough solution to detect outliers (and store in cache)
