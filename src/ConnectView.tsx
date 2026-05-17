@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download, ChevronDown, Search } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subHours, subDays, subMonths, startOfDay, endOfDay } from 'date-fns';
 
 export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onDataLoaded: (data: any[], selectedSensorName?: string) => void, onStationMetaLoaded: (name: string, lat: string, lon: string) => void }) {
   const [host, setHost] = useState('10.10.140.19');
@@ -22,6 +22,7 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [connStatus, setConnStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [timePresetMenuPos, setTimePresetMenuPos] = useState<{ x: number, y: number } | null>(null);
 
   // Load saved credentials on mount
   useEffect(() => {
@@ -37,6 +38,108 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
       } catch (e) {}
     }
   }, []);
+
+  useEffect(() => {
+      const handleClickOutside = () => setTimePresetMenuPos(null);
+      window.addEventListener('click', handleClickOutside);
+      return () => window.removeEventListener('click', handleClickOutside);
+  }, []);
+
+  const handleTimeContextMenu = (e: React.MouseEvent) => {
+      e.preventDefault();
+      
+      const menuWidth = 192; // 48 * 4 (w-48)
+      const menuHeight = 360; // Approximate height of the menu
+      
+      let x = e.clientX;
+      let y = e.clientY;
+      
+      if (x + menuWidth > window.innerWidth) {
+          x = window.innerWidth - menuWidth - 10;
+      }
+      
+      if (y + menuHeight > window.innerHeight) {
+          y = window.innerHeight - menuHeight - 10;
+      }
+      
+      setTimePresetMenuPos({ x, y });
+  };
+
+  const applyTimePreset = (preset: string) => {
+      const now = new Date();
+      let start: Date | null = null;
+      let end: Date | null = now;
+
+      try {
+          switch(preset) {
+              case '24h':
+                  start = subHours(now, 24);
+                  break;
+              case '1w':
+                  start = subDays(now, 7);
+                  break;
+              case '1m':
+                  start = subMonths(now, 1);
+                  break;
+              case 'today':
+                  start = startOfDay(now);
+                  end = endOfDay(now);
+                  break;
+              case 'this_week':
+                  start = startOfWeek(now, { weekStartsOn: 1 });
+                  end = endOfWeek(now, { weekStartsOn: 1 });
+                  break;
+              case 'this_month':
+                  start = startOfMonth(now);
+                  end = endOfMonth(now);
+                  break;
+              case 'this_year':
+                  start = startOfYear(now);
+                  end = endOfYear(now);
+                  break;
+              case 'specific_day': {
+                  const input = prompt("Masukkan tanggal (YYYY-MM-DD):", format(now, 'yyyy-MM-dd'));
+                  if (!input) return;
+                  const d = new Date(input + "T00:00:00");
+                  if (!isNaN(d.getTime())) {
+                      start = startOfDay(d);
+                      end = endOfDay(d);
+                  }
+                  break;
+              }
+              case 'specific_month': {
+                  const input = prompt("Masukkan bulan (YYYY-MM):", format(now, 'yyyy-MM'));
+                  if (!input) return;
+                  const [y, m] = input.split('-');
+                  const d = new Date(Number(y), Number(m) - 1, 1);
+                  if (!isNaN(d.getTime())) {
+                      start = startOfMonth(d);
+                      end = endOfMonth(d);
+                  }
+                  break;
+              }
+              case 'specific_year': {
+                  const input = prompt("Masukkan tahun (YYYY):", format(now, 'yyyy'));
+                  if (!input) return;
+                  const d = new Date(Number(input), 0, 1);
+                  if (!isNaN(d.getTime())) {
+                      start = startOfYear(d);
+                      end = endOfYear(d);
+                  }
+                  break;
+              }
+              default: return;
+          }
+          
+          if (start && end) {
+              setStartDate(format(start, "yyyy-MM-dd'T'HH:mm"));
+              setEndDate(format(end, "yyyy-MM-dd'T'HH:mm"));
+          }
+      } catch (err) {
+          console.warn("Invalid preset selection");
+      }
+      setTimePresetMenuPos(null);
+  };
 
   const saveCredentials = () => {
     localStorage.setItem('tide_db_credentials', JSON.stringify({ host, port, user, password, database }));
@@ -347,7 +450,7 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
               )}
             </div>
 
-            <div className="md:col-span-1">
+            <div className="md:col-span-1" onContextMenu={handleTimeContextMenu}>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Mulai Tanggal <span className="text-slate-400 font-normal lowercase tracking-normal">(Opsional)</span></label>
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -355,7 +458,7 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
               </div>
             </div>
 
-            <div className="md:col-span-1">
+            <div className="md:col-span-1" onContextMenu={handleTimeContextMenu}>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sampai Tanggal <span className="text-slate-400 font-normal lowercase tracking-normal">(Opsional)</span></label>
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -398,6 +501,35 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
           
         </div>
       </div>
+      
+      {/* Context Menu for Time Preset */}
+      {timePresetMenuPos && (
+          <div 
+            className="fixed z-50 bg-white border border-slate-200 rounded-lg shadow-xl w-48 text-sm overflow-hidden flex flex-col"
+            style={{ top: timePresetMenuPos.y, left: timePresetMenuPos.x }}
+            onClick={e => e.stopPropagation()}
+          >
+              <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 font-bold text-slate-500 text-xs tracking-widest uppercase flex items-center justify-center">
+                  Pilih Waktu
+              </div>
+              <div className="py-1">
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('24h')}>24 jam terakhir</button>
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('1w')}>1 minggu terakhir</button>
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('1m')}>1 Bulan terakhir</button>
+              </div>
+              <div className="border-t border-slate-100 py-1">
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('today')}>Hari ini</button>
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('this_week')}>Pekan ini</button>
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('this_month')}>Bulan ini</button>
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('this_year')}>Tahun ini</button>
+              </div>
+              <div className="border-t border-slate-100 py-1">
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('specific_day')}>Satu Hari Tertentu</button>
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('specific_month')}>Satu Bulan Tertentu</button>
+                  <button className="w-full text-left px-4 py-1.5 hover:bg-sky-50 text-slate-700 transition" onClick={() => applyTimePreset('specific_year')}>Satu Tahun Tertentu</button>
+              </div>
+          </div>
+      )}
     </div>
   );
 }
