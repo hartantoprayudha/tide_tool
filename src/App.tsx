@@ -31,11 +31,13 @@ import {
   ChevronRight,
   PanelRightClose,
   PanelRightOpen,
-  Wrench
+  Wrench,
+  Globe
 } from 'lucide-react';
 import ConnectView from './ConnectView';
 import SummarizeView from './SummarizeView';
 import UtilitiesView from './UtilitiesView';
+import ModelsView from './ModelsView';
 
 import { 
   ComposedChart,
@@ -2982,7 +2984,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
         </div>
         
         <nav className="flex-1 space-y-1 w-full">
-          {['dashboard', 'connect', 'validate', 'harmonic', 'predictions', 'summarize', 'utilities', 'about'].map((tab) => (
+          {['dashboard', 'connect', 'validate', 'harmonic', 'predictions', 'models', 'summarize', 'utilities', 'about'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -3000,10 +3002,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
               {tab === 'validate' && <Search size={18} />}
               {tab === 'harmonic' && <Piano size={18} />}
               {tab === 'predictions' && <TrendingUp size={18} />}
+              {tab === 'models' && <Globe size={18} />}
               {tab === 'summarize' && <MapIcon size={18} />}
               {tab === 'utilities' && <Wrench size={18} />}
               {tab === 'about' && <Info size={18} />}
-              {isSidebarOpen && <span className="capitalize">{tab}</span>}
+              {isSidebarOpen && <span className="capitalize">{tab === 'models' ? 'Tide Models' : tab}</span>}
             </button>
           ))}
         </nav>
@@ -3172,7 +3175,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             </div>
         )}
 
-        {!records.length && (activeTab !== 'readme' && activeTab !== 'about' && activeTab !== 'summarize' && activeTab !== 'connect' && activeTab !== 'utilities') && !isLoading ? (
+        {!records.length && (activeTab !== 'readme' && activeTab !== 'about' && activeTab !== 'models' && activeTab !== 'summarize' && activeTab !== 'connect' && activeTab !== 'utilities') && !isLoading ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-2xl border border-[#e2e8f0] p-12 text-center gap-6 shadow-sm">
             <div className="w-20 h-20 bg-sky-50 rounded-3xl flex items-center justify-center text-[#0284c7] rotate-3 hover:rotate-0 transition-transform duration-300">
               <Waves size={40} />
@@ -3216,6 +3219,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     </div>
                 </div>
             )}
+            {activeTab === 'models' && <ModelsView />}
             {activeTab === 'summarize' && <SummarizeView />}
             {activeTab === 'utilities' && <UtilitiesView />}
             {activeTab === 'connect' && (
@@ -4085,11 +4089,28 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             </div>
             <StatCard 
               label="HAT / LAT" 
-              value={`${datums ? datums.hat.toFixed(2) : '--'} / ${datums ? datums.lat.toFixed(2) : '--'}`} 
+              value={
+                <div className="flex flex-col items-center justify-center w-full">
+                  <span className="block leading-[1.1] pb-0.5">{datums ? datums.hat.toFixed(2) : '--'}</span>
+                  <div className="w-12 border-t-2 border-indigo-100 my-1" />
+                  <span className="block leading-[1.1] pt-0.5">{datums ? datums.lat.toFixed(2) : '--'}</span>
+                </div>
+              }
               trend="Highest/Lowest" 
-              valueClassName="pl-[3px] pr-[4px]"
+              valueClassName="text-3xl xl:text-3xl 2xl:text-4xl"
             />
-            <StatCard label="MHWS / MLWS" value={`${datums ? datums.mhws.toFixed(2) : '--'} / ${datums ? datums.mlws.toFixed(2) : '--'}`} trend="High/Low Springs" />
+            <StatCard 
+              label="MHWS / MLWS" 
+              value={
+                <div className="flex flex-col items-center justify-center w-full">
+                  <span className="block leading-[1.1] pb-0.5">{datums ? datums.mhws.toFixed(2) : '--'}</span>
+                  <div className="w-12 border-t-2 border-indigo-100 my-1" />
+                  <span className="block leading-[1.1] pt-0.5">{datums ? datums.mlws.toFixed(2) : '--'}</span>
+                </div>
+              }
+              trend="High/Low Springs"
+              valueClassName="text-3xl xl:text-3xl 2xl:text-4xl"
+            />
           </div>
 
           <div className={cn("bg-white rounded-2xl border border-slate-200 shadow-sm transition-all duration-300", isControlsOpen ? "w-full xl:w-80 p-5 space-y-4" : "w-full xl:w-16 p-2 h-20 overflow-hidden flex flex-col items-center")}>
@@ -5087,6 +5108,20 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
     download(blob, 'Harmonic_Constants.csv');
   };
 
+  const handleDownloadTXT = () => {
+    if (!results || results.length === 0) return;
+    let txt = `# Data Selection: ${dataSelection}\n`;
+    txt += `# Metode Analisis: ${harmonicMethod}\n`;
+    txt += `# Constituent Set: ${constituentSet}\n`;
+    txt += `# RMSE: ${rmse !== undefined && rmse !== null ? rmse.toFixed(4) : 'N/A'}\n\n`;
+    txt += "Component\tDefinition\tFrequency(cph)\tAmplitude(m)\tPhase(deg)\n";
+    [...results].sort((a: any, b: any) => b.amp - a.amp).forEach((r: any) => {
+      txt += `${r.comp}\t${r.desc}\t${r.freq.toFixed(8)}\t${r.amp.toFixed(5)}\t${r.phase.toFixed(3)}\n`;
+    });
+    const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' });
+    download(blob, 'Harmonic_Constants.txt');
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm overflow-hidden flex flex-col gap-6">
        <div className="flex flex-col gap-4 w-full">
@@ -5164,9 +5199,14 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
              </button>
 
              {results.length > 0 && (
-               <button onClick={handleDownloadCSV} className="px-4 h-11 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors">
-                 <Download size={14} /> CSV
-               </button>
+               <div className="flex gap-2">
+                 <button onClick={handleDownloadCSV} className="px-4 h-11 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors">
+                   <Download size={14} /> CSV
+                 </button>
+                 <button onClick={handleDownloadTXT} className="px-4 h-11 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors">
+                   <Download size={14} /> TXT
+                 </button>
+               </div>
              )}
           </div>
        </div>
@@ -5664,7 +5704,7 @@ function CombinationModal({ availableSensors, onApply, onCancel, currentSettings
     );
 }
 
-function StatCard({ label, value, trend, trendColor, valueClassName }: { label: string, value: string, trend: string, trendColor?: string, valueClassName?: string }) {
+function StatCard({ label, value, trend, trendColor, valueClassName }: { label: string, value: React.ReactNode, trend: string, trendColor?: string, valueClassName?: string }) {
   return (
     <div className="relative h-full min-h-[140px] overflow-hidden bg-white p-5 lg:p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-lg transition-all flex flex-col items-center justify-center gap-1 group text-center">
       <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-sky-100/50 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
