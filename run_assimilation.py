@@ -320,6 +320,14 @@ def spatial_train_test_split(stations_data, train_ratio=0.7):
     """
     print(f"\n[*] Membagi dataset menjadi Train-Test dengan rasio {train_ratio*100:.0f}:{100-train_ratio*100:.0f} (Spatial Stratified)")
     
+    total_stations = len(stations_data)
+    num_train = int(round(total_stations * train_ratio))
+    num_test = total_stations - num_train
+    
+    if num_test == 0 and total_stations > 1:
+        num_test = 1
+        num_train = total_stations - 1
+        
     # Kelompokkan stasiun ke dalam grid 5x5 derajat
     grid_buckets = {}
     for st in stations_data:
@@ -332,19 +340,45 @@ def spatial_train_test_split(stations_data, train_ratio=0.7):
             grid_buckets[grid_key] = []
         grid_buckets[grid_key].append(st)
         
+    # Shuffle isi masing-masing bucket
+    for key in grid_buckets:
+        random.shuffle(grid_buckets[key])
+        
     train_stations = []
     test_stations = []
     
-    for key, bucket in grid_buckets.items():
-        random.shuffle(bucket)
-        split_idx = max(1, int(len(bucket) * train_ratio))
-        
-        # Jika hanya ada 1 stasiun di grid ini, masukkan ke train set
-        if len(bucket) == 1:
-            train_stations.extend(bucket)
-        else:
-            train_stations.extend(bucket[:split_idx])
-            test_stations.extend(bucket[split_idx:])
+    remaining_buckets = {k: list(v) for k, v in grid_buckets.items()}
+    
+    # Tahap 1: Ambil test_stations dari bucket yang memiliki lebih dari 1 stasiun
+    # (agar setidaknya 1 stasiun dari tiap grid tetap ada di asimilasi jika memungkinkan)
+    keys_cycle = list(remaining_buckets.keys())
+    random.shuffle(keys_cycle)
+    
+    while len(test_stations) < num_test:
+        added_in_round = False
+        for k in list(keys_cycle):
+            if len(test_stations) >= num_test:
+                break
+            if len(remaining_buckets[k]) > 1: # Sisakan minimal 1 untuk train
+                test_stations.append(remaining_buckets[k].pop(0))
+                added_in_round = True
+                
+        if not added_in_round:
+            break # Semua bucket tinggal maksimal 1 atau sudah diproses
+            
+    # Tahap 2: Jika kuota test test_stations belum terpenuhi, terpaksa ambil dari bucket yang isinya cuma 1
+    if len(test_stations) < num_test:
+        keys_cycle = list(remaining_buckets.keys())
+        random.shuffle(keys_cycle)
+        for k in list(keys_cycle):
+            if len(test_stations) >= num_test:
+                break
+            if len(remaining_buckets[k]) == 1:
+                test_stations.append(remaining_buckets[k].pop(0))
+                
+    # Sisa data masuk ke train set
+    for k, v in remaining_buckets.items():
+        train_stations.extend(v)
             
     print(f"    -> Total Stasiun Asimilasi (Train) : {len(train_stations)}")
     print(f"    -> Total Stasiun Evaluasi (Test)   : {len(test_stations)}")
