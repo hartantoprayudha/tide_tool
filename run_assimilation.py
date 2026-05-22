@@ -442,6 +442,7 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         mse_amp = np.mean((model_amp - y_obs_amp)**2)
         rmse_amp = np.sqrt(mse_amp)
         corr_amp, _ = pearsonr(model_amp, y_obs_amp)
+        r2_amp = corr_amp ** 2
         
         # Metrik Fase (menangani wrap-around 360 derajat)
         diff_pha = model_pha - y_obs_pha
@@ -452,18 +453,19 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         
         # Korelasi linear sederhana untuk fase terkadang ambigu, tetapi kita gunakan standar
         corr_pha, _ = pearsonr(model_pha, y_obs_pha)
+        r2_pha = corr_pha ** 2
         
         all_metrics[const] = {
             'RMSE_Amp (m)': rmse_amp,
             'MAE_Amp (m)': mae_amp,
-            'Corr_Amp': corr_amp,
+            'R2_Amp': r2_amp,
             'RMSE_Pha (deg)': rmse_pha,
             'MAE_Pha (deg)': mae_pha,
-            'Corr_Pha': corr_pha
+            'R2_Pha': r2_pha
         }
         
-        print(f"    [ {const} ] Amplitudo -> RMSE: {rmse_amp:.4f} m, MAE: {mae_amp:.4f} m, R: {corr_amp:.4f}")
-        print(f"    [ {const} ] Fase      -> RMSE: {rmse_pha:.4f} deg, MAE: {mae_pha:.4f} deg, R: {corr_pha:.4f}")
+        print(f"    [ {const} ] Amplitudo -> RMSE: {rmse_amp:.5f} m, MAE: {mae_amp:.5f} m, R2: {r2_amp:.5f}")
+        print(f"    [ {const} ] Fase      -> RMSE: {rmse_pha:.5f} deg, MAE: {mae_pha:.5f} deg, R2: {r2_pha:.5f}")
         
     return all_metrics
 
@@ -615,7 +617,7 @@ def run_pipeline(input_patterns):
         save_evaluation_metrics(metrics, "regional_tide_model_metrics.txt")
     
     # 7. Ekspor model hasil asimilasi ke format NetCDF (.nc)
-    output_nc = "regional_tide_model_indonesia_15N_15S_90E_150E.nc"
+    output_nc = "regional_tide_model_indonesia_EOT20.nc"
     try:
         updated_model.to_netcdf(output_nc)
         print("=====================================================================")

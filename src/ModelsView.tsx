@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FileText, Globe, Layers, Settings2, Play, Download, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from './lib/utils';
 import Map from 'ol/Map';
@@ -11,6 +11,9 @@ import Feature from 'ol/Feature';
 import Polygon from 'ol/geom/Polygon';
 import { Style, Stroke, Fill } from 'ol/style';
 import { fromLonLat, transformExtent } from 'ol/proj';
+import ImageLayer from 'ol/layer/Image';
+import ImageStatic from 'ol/source/ImageStatic';
+import { NetCDFReader } from 'netcdfjs';
 
 export default function ModelsView() {
   const [selectedModel, setSelectedModel] = useState('TPXO9');
@@ -18,6 +21,9 @@ export default function ModelsView() {
   const [isAssimilating, setIsAssimilating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<null | { rmse: number, improvement: number, coverage: string }>(null);
+  const [ncModelData, setNcModelData] = useState<{name: string, min: number, max: number, dataUrl: string, extent: number[]} | null>(null);
+  const [ncFileName, setNcFileName] = useState('');
+  const imageLayerRef = useRef<ImageLayer<ImageStatic> | null>(null);
   
   const mapElementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
@@ -71,6 +77,135 @@ export default function ModelsView() {
       mapRef.current.getView().fit(boundaryExtent, { padding: [50, 50, 50, 50] });
     }
   }, []);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    
+    if (imageLayerRef.current) {
+        mapRef.current.removeLayer(imageLayerRef.current);
+        imageLayerRef.current = null;
+    }
+    
+    if (ncModelData) {
+        const imageExtent = transformExtent(ncModelData.extent, 'EPSG:4326', 'EPSG:3857');
+        const imgLayer = new ImageLayer({
+            source: new ImageStatic({
+                url: ncModelData.dataUrl,
+                imageExtent: imageExtent
+            }),
+            opacity: 0.8
+        });
+        mapRef.current.addLayer(imgLayer);
+        imageLayerRef.current = imgLayer;
+        
+        mapRef.current.getView().fit(imageExtent, { padding: [50, 50, 50, 50], duration: 1000 });
+    }
+  }, [ncModelData]);
+
+  const handleUploadNCModel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      
+      setNcFileName(file.name);
+      try {
+          const buffer = await file.arrayBuffer();
+          const reader = new NetCDFReader(buffer);
+          
+          let lats: number[] = [];
+          let lons: number[] = [];
+          
+          const vars = reader.variables.map((v: any) => v.name);
+          if (vars.includes('lat')) lats = reader.getDataVariable('lat') as number[];
+          if (vars.includes('lon')) lons = reader.getDataVariable('lon') as number[];
+          
+          if (lats.length === 0 || lons.length === 0) {
+              alert('File NetCDF tidak memiliki variabel lat/lon.');
+              return;
+          }
+          
+          const ampVar = vars.find((v: string) => v.startsWith('amp_') || v.includes('amplitude'));
+          if (!ampVar) {
+              alert('Tidak ditemukan variabel amplitudo pada file ini.');
+              return;
+          }
+          
+          const ampData = reader.getDataVariable(ampVar) as number[];
+          
+          let minAmp = Infinity;
+          let maxAmp = -Infinity;
+          for (let i = 0; i < ampData.length; i++) {
+              if (ampData[i] > -999 && !isNaN(ampData[i])) {
+                  if (ampData[i] < minAmp) minAmp = ampData[i];
+                  if (ampData[i] > maxAmp) maxAmp = ampData[i];
+              }
+          }
+          if (minAmp === Infinity) minAmp = 0;
+          if (maxAmp === -Infinity) maxAmp = 1;
+          
+          const numLats = lats.length;
+          const numLons = lons.length;
+          const canvas = document.createElement('canvas');
+          canvas.width = numLons;
+          canvas.height = numLats;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          const imgData = ctx.createImageData(numLons, numLats);
+          
+          const getColorForVal = (val: number) => {
+              let v = (val - minAmp) / (maxAmp - minAmp);
+              v = Math.max(0, Math.min(1, v));
+              const r = Math.max(0, Math.min(1, 1.5 - Math.abs(4 * v - 3)));
+              const g = Math.max(0, Math.min(1, 1.5 - Math.abs(4 * v - 2)));
+              const b = Math.max(0, Math.min(1, 1.5 - Math.abs(4 * v - 1)));
+              return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+          };
+          
+          const isLatAscending = lats.length > 1 && lats[1] > lats[0];
+          
+          for (let r = 0; r < numLats; r++) {
+              for (let c = 0; c < numLons; c++) {
+                  const idx = r * numLons + c;
+                  const val = ampData[idx];
+                  
+                  let canvasY = r;
+                  if (isLatAscending) {
+                      canvasY = numLats - 1 - r;
+                  }
+                  
+                  const pIdx = (canvasY * numLons + c) * 4;
+                  
+                  if (isNaN(val) || val === 0 || val < -99) {
+                     imgData.data[pIdx+3] = 0;
+                  } else {
+                     const color = getColorForVal(val);
+                     imgData.data[pIdx] = color[0];
+                     imgData.data[pIdx+1] = color[1];
+                     imgData.data[pIdx+2] = color[2];
+                     imgData.data[pIdx+3] = 180;
+                  }
+              }
+          }
+          
+          ctx.putImageData(imgData, 0, 0);
+          const dataUrl = canvas.toDataURL();
+          
+          const minLat = Math.min(...lats);
+          const maxLat = Math.max(...lats);
+          const minLon = Math.min(...lons);
+          const maxLon = Math.max(...lons);
+          
+          setNcModelData({
+             name: ampVar,
+             min: minAmp,
+             max: maxAmp,
+             dataUrl,
+             extent: [minLon, minLat, maxLon, maxLat]
+          });
+          
+      } catch (err: any) {
+          alert('Error membaca NetCDF: ' + err.message);
+      }
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -240,6 +375,22 @@ export default function ModelsView() {
                  </h3>
                  <p className="text-xs text-slate-500 mt-0.5">Memvisualisasikan luasan dan titik stasiun pasut assimilasi.</p>
                </div>
+               <div className="flex gap-2 relative">
+                  <input
+                    type="file"
+                    accept=".nc"
+                    onChange={handleUploadNCModel}
+                    className="hidden"
+                    id="nc-model-upload"
+                  />
+                  <label 
+                     htmlFor="nc-model-upload" 
+                     className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-sky-600 text-white rounded-lg font-bold text-xs hover:bg-sky-700 transition shadow-sm"
+                  >
+                     <Upload size={14} />
+                     Lihat File (.nc)
+                  </label>
+               </div>
             </div>
 
             {/* Progress Overlay */}
@@ -263,6 +414,31 @@ export default function ModelsView() {
 
             {/* Map Container */}
             <div ref={mapElementRef} className="flex-1 w-full bg-slate-100" />
+            
+            {/* Colorbar legend for NC data */}
+            {ncModelData && (
+               <div className="absolute top-20 right-4 z-10 bg-white/90 backdrop-blur px-3 py-3 border border-slate-200 rounded-xl shadow-md text-xs font-medium text-slate-600 flex flex-col gap-2 w-48">
+                  <div className="font-bold text-slate-800 uppercase tracking-tight flex justify-between items-center">
+                     <span>Amplitudo (m)</span>
+                     <span className="text-[10px] text-sky-600 font-black">{ncModelData.name.replace('amp_','')}</span>
+                  </div>
+                  <div className="w-full">
+                     <div 
+                        className="w-full h-3 rounded shadow-sm border border-slate-200/50" 
+                        style={{ 
+                            background: 'linear-gradient(to right, rgb(0,0,128), rgb(0,0,255), rgb(0,255,255), rgb(255,255,0), rgb(255,0,0), rgb(128,0,0))'
+                        }}
+                     ></div>
+                     <div className="flex justify-between w-full text-[10px] font-bold text-slate-500 mt-1">
+                        <span>{ncModelData.min.toFixed(2)}</span>
+                        <span>{ncModelData.max.toFixed(2)}</span>
+                     </div>
+                  </div>
+                  <div className="text-[9px] text-slate-400 mt-1 leading-tight border-t border-slate-100 pt-1">
+                     File: <span className="font-mono">{ncFileName}</span>
+                  </div>
+               </div>
+            )}
             
             {/* Legend overlay */}
             <div className="absolute bottom-4 left-4 z-10 bg-white/90 backdrop-blur px-3 py-2 border border-slate-200 rounded-lg shadow-sm text-xs font-medium text-slate-600 flex flex-col gap-1.5">
