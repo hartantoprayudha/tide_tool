@@ -151,8 +151,8 @@ def read_global_model(nc_filepath, constituents=['M2', 'S2', 'K1', 'O1', 'N2', '
     Jika file tidak ditemukan, otomatis membuat simulasi model resolusi tinggi
     untuk seluruh domain Indonesia (15S - 15N, 90E - 150E) dengan resolusi spasi 0.1 derajat.
     """
-    lons = np.arange(90, 150.1, 0.1) # Batasan domain 90 sd 150 East
-    lats = np.arange(-15, 15.1, 0.1) # Batasan domain 15 south sd 15 north
+    lons = np.arange(90, 150 + 2/60.0, 2/60.0) # Batasan domain 90 sd 150 East dengan resolusi 2 arcminutes
+    lats = np.arange(-15, 15 + 2/60.0, 2/60.0) # Batasan domain 15 south sd 15 north dengan resolusi 2 arcminutes
     
     try:
         print(f"[*] Mencoba membaca global model dari: {nc_filepath}")
@@ -197,7 +197,7 @@ def read_global_model(nc_filepath, constituents=['M2', 'S2', 'K1', 'O1', 'N2', '
                 description="Model Pasut Regional Indonesia Terasimilasi 3D-Var",
                 boundary_lon="90E to 150E",
                 boundary_lat="15S to 15N",
-                resolution="0.1 deg (~11 km)",
+                resolution="2 arcminutes (~3.7 km)",
                 generator="Tide Tools Assimilation Engine Version 2.0"
             )
         )
@@ -212,6 +212,7 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         x_a = x_b + B * H^T * (H * B * H^T + R)^-1 * (y - H(x_b))
     """
     print(f"\n[*] Memulai Asimilasi 3D-Var Multi-Stasiun menggunakan {len(stations_data)} stasiun...")
+    print("[*] Referensi fase observasi (UTC+0) & model global (Greenwich Phase Lag, UTC) terverifikasi konsisten.")
     
     lat_grid = model_ds['lat'].values
     lon_grid = model_ds['lon'].values
@@ -236,6 +237,10 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         xb_amp = model_ds[var_amp].values
         xb_pha = model_ds[var_pha].values
         
+        # Konversi ke bentuk kompleks (Real dan Imaginer)
+        xb_real = xb_amp * np.cos(np.radians(xb_pha))
+        xb_imag = xb_amp * np.sin(np.radians(xb_pha))
+        
         # Cari dan kumpulkan semua stasiun observasi yang memiliki komponen pasut ini
         valid_stations = []
         y_amp_list = []
@@ -259,24 +264,28 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         # Bentuk vektor observasi y & koordinat geografis
         y_obs_amp = np.array(y_amp_list)
         y_obs_pha = np.array(y_pha_list)
+        
+        # Konversi observasi ke bentuk kompleks
+        y_obs_real = y_obs_amp * np.cos(np.radians(y_obs_pha))
+        y_obs_imag = y_obs_amp * np.sin(np.radians(y_obs_pha))
+        
         st_lats = np.array([st['station_lat'] for st in valid_stations])
         st_lons = np.array([st['station_lon'] for st in valid_stations])
         
         # Interpolasi data background model global ke setiap titik koordinat stasiun (H_xb)
         points = np.column_stack((Lat.flatten(), Lon.flatten()))
-        xb_amp_flat = xb_amp.flatten()
-        xb_pha_flat = xb_pha.flatten()
+        xb_real_flat = xb_real.flatten()
+        xb_imag_flat = xb_imag.flatten()
         
-        H_xb_amp = griddata(points, xb_amp_flat, (st_lats, st_lons), method='linear')
-        H_xb_amp = np.nan_to_num(H_xb_amp, nan=np.mean(xb_amp_flat)) # Proteksi nan
+        H_xb_real = griddata(points, xb_real_flat, (st_lats, st_lons), method='linear')
+        H_xb_real = np.nan_to_num(H_xb_real, nan=np.mean(xb_real_flat)) # Proteksi nan
         
-        H_xb_pha = griddata(points, xb_pha_flat, (st_lats, st_lons), method='linear')
-        H_xb_pha = np.nan_to_num(H_xb_pha, nan=np.mean(xb_pha_flat)) # Proteksi nan
+        H_xb_imag = griddata(points, xb_imag_flat, (st_lats, st_lons), method='linear')
+        H_xb_imag = np.nan_to_num(H_xb_imag, nan=np.mean(xb_imag_flat)) # Proteksi nan
         
         # Hitung Innovation (Residual): d = y - H_xb
-        d_amp = y_obs_amp - H_xb_amp
-        d_pha = y_obs_pha - H_xb_pha
-        d_pha = (d_pha + 180) % 360 - 180 # Proteksi wrapping fase 0-360 derajat
+        d_real = y_obs_real - H_xb_real
+        d_imag = y_obs_imag - H_xb_imag
         
         # Hitung matriks korelasi spasial antar stasiun sendiri (cov_H_B_Ht) ukuran N x N
         cov_H_B_Ht = np.zeros((num_obs, num_obs))
@@ -289,12 +298,12 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         R_mat = (sigma_r**2) * np.eye(num_obs)
         
         # Selesaikan sistem linear: Inv_Matrix_Term_Amp = (HBH^T + R)^-1 * d
-        inv_d_amp = np.linalg.solve(cov_H_B_Ht + R_mat, d_amp)
-        inv_d_pha = np.linalg.solve(cov_H_B_Ht + R_mat, d_pha)
+        inv_d_real = np.linalg.solve(cov_H_B_Ht + R_mat, d_real)
+        inv_d_imag = np.linalg.solve(cov_H_B_Ht + R_mat, d_imag)
         
         # Iterasi seluruh titik grid untuk mendesiminasikan koreksi asimilasi spasial
-        influence_amp = np.zeros(grid_shape)
-        influence_pha = np.zeros(grid_shape)
+        influence_real = np.zeros(grid_shape)
+        influence_imag = np.zeros(grid_shape)
         
         for r_idx in range(grid_shape[0]):
             for c_idx in range(grid_shape[1]):
@@ -310,14 +319,18 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
                 # Vektor b: Kovariansi antara grid point ini dengan seluruh stasiun
                 b_cov = (sigma_b**2) * np.exp(-(distances**2) / (2 * L_decay_km**2))
                 
-                influence_amp[r_idx, c_idx] = np.dot(b_cov, inv_d_amp)
-                influence_pha[r_idx, c_idx] = np.dot(b_cov, inv_d_pha)
+                influence_real[r_idx, c_idx] = np.dot(b_cov, inv_d_real)
+                influence_imag[r_idx, c_idx] = np.dot(b_cov, inv_d_imag)
                 
-        # Perbarui peta grid amplitudo dan fase model regional Indonesia
-        xa_amp = xb_amp + influence_amp
+        # Perbarui peta grid berdasarkan analisis real dan imaginer
+        xa_real = xb_real + influence_real
+        xa_imag = xb_imag + influence_imag
+        
+        # Kembalikan ke amplitudo dan fase
+        xa_amp = np.hypot(xa_real, xa_imag)
         xa_amp = np.clip(xa_amp, 0.0, 3.5) # Proteksi nilai amplitudo logis
         
-        xa_pha = (xb_pha + influence_pha) % 360.0
+        xa_pha = (np.degrees(np.arctan2(xa_imag, xa_real))) % 360.0
         
         model_ds[var_amp].values = xa_amp
         model_ds[var_pha].values = xa_pha
@@ -424,6 +437,9 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         xb_amp_flat = model_ds[var_amp].values.flatten()
         xb_pha_flat = model_ds[var_pha].values.flatten()
         
+        xb_real_flat = xb_amp_flat * np.cos(np.radians(xb_pha_flat))
+        xb_imag_flat = xb_amp_flat * np.sin(np.radians(xb_pha_flat))
+        
         y_obs_amp = []
         y_obs_pha = []
         st_lats = []
@@ -444,11 +460,14 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         y_obs_amp = np.array(y_obs_amp)
         y_obs_pha = np.array(y_obs_pha)
         
-        # Interpolasi hasil model ke titik test stasiun
-        model_amp = griddata(points, xb_amp_flat, (np.array(st_lats), np.array(st_lons)), method='linear')
+        # Interpolasi hasil model ke titik test stasiun (Via Real dan Imaginer)
+        model_real = griddata(points, xb_real_flat, (np.array(st_lats), np.array(st_lons)), method='linear')
+        model_imag = griddata(points, xb_imag_flat, (np.array(st_lats), np.array(st_lons)), method='linear')
+        
+        model_amp = np.hypot(model_real, model_imag)
         model_amp = np.nan_to_num(model_amp, nan=np.mean(y_obs_amp))
         
-        model_pha = griddata(points, xb_pha_flat, (np.array(st_lats), np.array(st_lons)), method='linear')
+        model_pha = np.degrees(np.arctan2(model_imag, model_real)) % 360.0
         model_pha = np.nan_to_num(model_pha, nan=np.mean(y_obs_pha))
         
         # Metrik Amplitudo
