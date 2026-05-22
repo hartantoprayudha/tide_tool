@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from scipy.interpolate import griddata
 from scipy.stats import pearsonr
+from scipy.ndimage import gaussian_filter
 
 try:
     import cupy as cp
@@ -180,18 +181,11 @@ def read_global_model(nc_filepath, constituents=['M2', 'S2', 'K1', 'O1', 'N2', '
         dataset = dataset.interp(lon=lons, lat=lats, method='linear')
         print("[+] Regridding selesai.")
         
-        # Pengecekan satuan amplitudo dan konversi ke meter jika perlu
+        # Konversi satuan amplitudo model global dari cm ke meter
         for var in dataset.data_vars:
             if 'amp' in var.lower():
-                max_val = float(dataset[var].max(skipna=True))
-                if max_val > 1500.0:
-                    print(f"    -> [!] Variabel {var} sepertinya menggunakan satuan mm (maks={max_val:.2f}). Mengonversi ke meter (m)...")
-                    dataset[var] = dataset[var] / 1000.0
-                elif max_val > 15.0:
-                    print(f"    -> [!] Variabel {var} sepertinya menggunakan satuan cm (maks={max_val:.2f}). Mengonversi ke meter (m)...")
-                    dataset[var] = dataset[var] / 100.0
-                else:
-                    print(f"    -> Variabel {var} diasumsikan sudah dalam meter (m) (maks={max_val:.2f}).")
+                print(f"    -> Mengonversi amplitudo {var} dari konstanta global pasut (cm) ke meter (m)...")
+                dataset[var] = dataset[var] / 100.0
                     
         return dataset
     except Exception as e:
@@ -285,67 +279,46 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         d_real = y_obs_real - H_xb_real
         d_imag = y_obs_imag - H_xb_imag
         
-        # Hitung matriks korelasi spasial antar stasiun sendiri (cov_H_B_Ht) ukuran N x N
-        cov_H_B_Ht = np.zeros((num_obs, num_obs))
-        for i in range(num_obs):
-            for j in range(num_obs):
-                distance = vincenty_distance(st_lats[i], st_lons[i], st_lats[j], st_lons[j])
-                cov_H_B_Ht[i, j] = (sigma_b**2) * np.exp(-(distance**2) / (2 * L_decay_km**2))
+        # --- Metode Interpolasi Spasial: Spline / Cubic Interpolation ---
+        # Menambahkan "dummy boundary points" di sekeliling region dengan residual = 0
+        # agar koreksi (residual) melemah ke angka 0 di laut lepas (kembali ke model global)
+        print(f"      [*] Menerapkan koreksi spasial menggunakan metode Spline (Cubic Interpolation)...")
+        bnd_lats = np.concatenate([
+            np.full(10, lat_grid[0]), np.full(10, lat_grid[-1]),
+            np.linspace(lat_grid[0], lat_grid[-1], 10), np.linspace(lat_grid[0], lat_grid[-1], 10)
+        ])
+        bnd_lons = np.concatenate([
+            np.linspace(lon_grid[0], lon_grid[-1], 10), np.linspace(lon_grid[0], lon_grid[-1], 10),
+            np.full(10, lon_grid[0]), np.full(10, lon_grid[-1])
+        ])
+        bnd_d_real = np.zeros(len(bnd_lats))
+        bnd_d_imag = np.zeros(len(bnd_lats))
+        
+        # Gabungkan titik stasiun asli dengan boundary points
+        all_lats = np.concatenate([st_lats, bnd_lats])
+        all_lons = np.concatenate([st_lons, bnd_lons])
+        all_d_real = np.concatenate([d_real, bnd_d_real])
+        all_d_imag = np.concatenate([d_imag, bnd_d_imag])
+        
+        # Lakukan cubic spline (Clough-Tocher) interpolation untuk surface residual
+        pts = np.column_stack((all_lats, all_lons))
+        target_pts = np.column_stack((Lat.flatten(), Lon.flatten()))
+        
+        influence_real_flat = griddata(pts, all_d_real, target_pts, method='cubic', fill_value=0.0)
+        influence_imag_flat = griddata(pts, all_d_imag, target_pts, method='cubic', fill_value=0.0)
+        
+        influence_real = influence_real_flat.reshape(grid_shape)
+        influence_imag = influence_imag_flat.reshape(grid_shape)
                 
-        # Matriks Varians Observasi R
-        R_mat = (sigma_r**2) * np.eye(num_obs)
-        
-        # Selesaikan sistem linear: Inv_Matrix_Term_Amp = (HBH^T + R)^-1 * d
-        inv_d_real = np.linalg.solve(cov_H_B_Ht + R_mat, d_real)
-        inv_d_imag = np.linalg.solve(cov_H_B_Ht + R_mat, d_imag)
-        
-        # Desiminasikan koreksi asimilasi spasial secara Vectorized (Bisa dengan GPU atau CPU)
-        if HAS_GPU:
-            xp = cp
-            print(f"      [GPU] Menjalankan matriks asimilasi pada GPU (CuPy)...")
-        else:
-            xp = np
-            print(f"      [CPU] Menjalankan matriks asimilasi tervektorisasi pada CPU...")
-            
-        # Pindahkan data ke dalam struktur Array XP (GPU/CPU)
-        xp_Lat = xp.array(Lat)
-        xp_Lon = xp.array(Lon)
-        xp_st_lats = xp.array(st_lats)
-        xp_st_lons = xp.array(st_lons)
-        xp_inv_d_real = xp.array(inv_d_real)
-        xp_inv_d_imag = xp.array(inv_d_imag)
-        
-        # Formula Haversine Vectorized
-        dLat = xp.radians(xp_Lat[:, :, xp.newaxis] - xp_st_lats)
-        dLon = xp.radians(xp_Lon[:, :, xp.newaxis] - xp_st_lons)
-        lat1 = xp.radians(xp_Lat[:, :, xp.newaxis])
-        lat2 = xp.radians(xp_st_lats)
-        
-        a_geo = xp.sin(dLat/2)**2 + xp.cos(lat1) * xp.cos(lat2) * xp.sin(dLon/2)**2
-        c_geo = 2 * xp.arctan2(xp.sqrt(a_geo), xp.sqrt(1-a_geo))
-        distances = 6371.0 * c_geo 
-        
-        # Vektor b: Kovariansi antara grid point ini dengan seluruh stasiun
-        b_cov = (sigma_b**2) * xp.exp(-(distances**2) / (2 * L_decay_km**2))
-        
-        xp_influence_real = xp.dot(b_cov, xp_inv_d_real)
-        xp_influence_imag = xp.dot(b_cov, xp_inv_d_imag)
-        
-        if HAS_GPU:
-            influence_real = xp_influence_real.get()
-            influence_imag = xp_influence_imag.get()
-            
-            # Bersihkan memori GPU untuk batch selanjutnya
-            del xp_Lat, xp_Lon, xp_st_lats, xp_st_lons, xp_inv_d_real, xp_inv_d_imag
-            del dLat, dLon, lat1, lat2, a_geo, c_geo, distances, b_cov, xp_influence_real, xp_influence_imag
-            cp.get_default_memory_pool().free_all_blocks()
-        else:
-            influence_real = xp_influence_real
-            influence_imag = xp_influence_imag
-                
-        # Perbarui peta grid berdasarkan analisis real dan imaginer
+        # Perbarui peta grid berdasarkan analisis real dan imaginer (Model + Interpolated Residuals)
         xa_real = xb_real + influence_real
         xa_imag = xb_imag + influence_imag
+        
+        # Terapkan Smoothing 2D (Gaussian Filter) pada hasil asimilasi untuk menghaluskan pola 
+        # (seperti noise spasial atau jejak asimilasi / satelit altimetri)
+        print(f"      [*] Menerapkan Gaussian Filter (Smoothing) spasial 2D untuk menghilangkan noise (sigma=2.0)...")
+        xa_real = gaussian_filter(xa_real, sigma=2.0)
+        xa_imag = gaussian_filter(xa_imag, sigma=2.0)
         
         # Kembalikan ke amplitudo dan fase
         xa_amp = np.hypot(xa_real, xa_imag)
