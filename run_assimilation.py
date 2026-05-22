@@ -115,7 +115,7 @@ def load_harmonic_constants(filepath):
         # Coba petakan nama kolom alternatif
         rename_map = {}
         for col in df.columns:
-            if col.lower() in ['component', 'constituents', 'comp']:
+            if col.lower() in ['component', 'constituents', 'comp','name']:
                 rename_map[col] = 'Component'
             elif 'amplitude' in col.lower() or 'amp' in col.lower():
                 rename_map[col] = 'Amplitude(m)'
@@ -433,6 +433,69 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         
     return all_metrics
 
+def save_evaluation_metrics(metrics, output_filepath="evaluation_metrics.txt"):
+    """
+    Menyimpan hasil metrik ketelitian model (RMSE, MAE, R) ke dalam file TXT.
+    """
+    if not metrics:
+        return
+        
+    print(f"\n[*] Menyimpan ringkasan metrik evaluasi ke {output_filepath}")
+    
+    # Konversi dictionary metrik ke dalam list of dictionaries
+    metrics_list = []
+    for const, vals in metrics.items():
+        row = {'Component': const}
+        row.update(vals)
+        metrics_list.append(row)
+        
+    df_metrics = pd.DataFrame(metrics_list)
+    df_metrics.to_csv(output_filepath, index=False, sep='\t')
+    print(f"    -> File metrik berhasil disimpan: {output_filepath}")
+
+def merge_constituent_netcdfs(input_dir, output_filepath):
+    """
+    Menggabungkan beberapa file NetCDF yang masing-masing berisi 1 konstanta harmonik 
+    menjadi 1 file NetCDF gabungan.
+    """
+    print(f"\n[*] Mencari file NetCDF model harmonik terpisah di folder: {input_dir}")
+    nc_files = glob.glob(os.path.join(input_dir, "*.nc"))
+    
+    if not nc_files:
+        print("[-] Tidak ditemukan file .nc di direktori tersebut.")
+        return
+        
+    print(f"[*] Ditemukan {len(nc_files)} file. Memulai penggabungan...")
+    datasets = []
+    
+    for file in nc_files:
+        filename = os.path.basename(file)
+        # Asumsikan format penamaan FES2014_M2.nc -> Konstanta = "M2"
+        konstanta = filename.split('_')[-1].replace('.nc', '').upper()
+        
+        print(f"    -> Memproses {filename} (Konstanta: {konstanta})")
+        ds = xr.open_dataset(file)
+        
+        # Pisahkan nama variabel menjadi spesifik per konstanta jika belum ada
+        rename_dict = {}
+        for var in ds.data_vars:
+            if 'amp' in var.lower() and konstanta not in var.upper():
+                rename_dict[var] = f'amp_{konstanta}'
+            elif 'pha' in var.lower() and konstanta not in var.upper():
+                rename_dict[var] = f'pha_{konstanta}'
+        
+        if rename_dict:
+            ds = ds.rename(rename_dict)
+            
+        datasets.append(ds)
+        
+    print("[*] Menggabungkan (Merging) seluruh dataset...")
+    combined_ds = xr.merge(datasets, compat='override')
+    
+    print(f"[*] Menyimpan hasil gabungan ke: {output_filepath}")
+    combined_ds.to_netcdf(output_filepath)
+    print("[SUCCESS] Penggabungan model konstanta harmonik berhasil!\n")
+
 def run_pipeline(input_patterns):
     print("=====================================================================")
     print("           TIDE REGIONAL ASSIMILATION & MODELING SYSTEM              ")
@@ -497,7 +560,14 @@ def run_pipeline(input_patterns):
     print(f"[*] Total Komponen Pasut Unik yang ditemukan untuk Asimilasi: {constituents_list}")
     
     # 3. Muat berkas global model dasar
-    model = read_global_model("global_model_base.nc", constituents=constituents_list)
+    global_model_file = "global_model_base.nc"
+    input_model_folder = "data_models"
+    
+    # Jika model dasar belum digabung tapi folder data_models ada
+    if not os.path.exists(global_model_file) and os.path.exists(input_model_folder):
+        merge_constituent_netcdfs(input_model_folder, global_model_file)
+
+    model = read_global_model(global_model_file, constituents=constituents_list)
     
     # 4. Bagi data stasiun 70:30 secara spasial
     train_stations, test_stations = spatial_train_test_split(stations_data, train_ratio=0.7)
@@ -507,6 +577,8 @@ def run_pipeline(input_patterns):
     
     # 6. Hitung Metrik Ketelitian terhadap stasiun uji
     metrics = evaluate_metrics(updated_model, test_stations, constituents=constituents_list)
+    if metrics:
+        save_evaluation_metrics(metrics, "regional_tide_model_metrics.txt")
     
     # 7. Ekspor model hasil asimilasi ke format NetCDF (.nc)
     output_nc = "regional_tide_model_indonesia_15N_15S_90E_150E.nc"
@@ -518,7 +590,7 @@ def run_pipeline(input_patterns):
         print(f"          Geom Boundaries: 15°N - 15°S, 90°E - 150°E")
         print(f"          Grid Points   : {len(updated_model.lat)}x{len(updated_model.lon)}")
         if test_stations:
-             print("          Metrik Evaluasi telah tercetak di layar.")
+             print("          Metrik Evaluasi telah tercetak di layar dan diekspor ke TXT.")
         print("=====================================================================")
     except Exception as e:
         print(f"[ERROR] Gagal menyimpan file NetCDF: {e}")
