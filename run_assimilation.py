@@ -9,6 +9,15 @@ import numpy as np
 from scipy.interpolate import griddata
 from scipy.stats import pearsonr
 
+try:
+    import cupy as cp
+    HAS_GPU = True
+except ImportError:
+    HAS_GPU = False
+    cp = np
+
+print(f"[*] Deteksi Modul GPU (CuPy): {'Aktif (Tersedia)' if HAS_GPU else 'Tidak Tersedia (Gunakan numpy CPU)'}")
+
 def vincenty_distance(lat1, lon1, lat2, lon2):
     """
     Menghitung jarak antara dua titik koordinat menggunakan parameter ellipsoid WGS84
@@ -148,16 +157,28 @@ def load_harmonic_constants(filepath):
 def read_global_model(nc_filepath, constituents=['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4']):
     """
     Membaca base model dalam format NetCDF (misal: TPXO, EOT, DTU, dsb).
-    Jika file tidak ditemukan, otomatis membuat simulasi model resolusi tinggi
-    untuk seluruh domain Indonesia (15S - 15N, 90E - 150E) dengan resolusi spasi 0.1 derajat.
+    Meregrid model menjadi resolusi yang disyaratkan yaitu 2 arcminutes x 2 arcminutes.
     """
     lons = np.arange(90, 150 + 2/60.0, 2/60.0) # Batasan domain 90 sd 150 East dengan resolusi 2 arcminutes
     lats = np.arange(-15, 15 + 2/60.0, 2/60.0) # Batasan domain 15 south sd 15 north dengan resolusi 2 arcminutes
     
     try:
         print(f"[*] Mencoba membaca global model dari: {nc_filepath}")
+        if not os.path.exists(nc_filepath):
+            raise FileNotFoundError(f"File {nc_filepath} tidak ditemukan. Silakan tambahkan file model global terlebih dahulu.")
+            
         dataset = xr.open_dataset(nc_filepath)
         print("[+] Sukses membaca global model.")
+        
+        # Standardize lon and lat naming
+        if 'longitude' in dataset.dims: dataset = dataset.rename({'longitude': 'lon'})
+        if 'latitude' in dataset.dims: dataset = dataset.rename({'latitude': 'lat'})
+        
+        # Jika lon 0-360, adjust ke -180 - 180 jika diperlukan, atau sebaliknya. Domain target 90 sd 150 (aman)
+        
+        print(f"[*] Melakukan Regridding Spasial ke resolusi 2 arcminutes (15S - 15N, 90E - 150E)...")
+        dataset = dataset.interp(lon=lons, lat=lats, method='linear')
+        print("[+] Regridding selesai.")
         
         # Pengecekan satuan amplitudo dan konversi ke meter jika perlu
         for var in dataset.data_vars:
@@ -174,34 +195,11 @@ def read_global_model(nc_filepath, constituents=['M2', 'S2', 'K1', 'O1', 'N2', '
                     
         return dataset
     except Exception as e:
-        print(f"[!] File '{nc_filepath}' tidak ditemukan atau tidak valid. Membuat template grid domain regional Indonesia (15S - 15N, 90E - 150E)...")
-        
-        data_vars = {}
-        for const in constituents:
-            # Mengenerate amplitude & phase berdistribusi spasial sinusoidal yang realistis
-            Lat_grid, Lon_grid = np.meshgrid(lats, lons)
-            sim_amp = 0.6 + 0.4 * np.sin(Lon_grid / 12.0) * np.cos(Lat_grid / 6.0) + np.random.normal(0, 0.03, Lon_grid.shape)
-            sim_amp = np.clip(sim_amp, 0.05, 2.5) # Amplitudo aman
-            sim_pha = (180.0 + 120.0 * np.sin(Lon_grid / 10.0) + np.random.normal(0, 4, Lon_grid.shape)) % 360.0
-            
-            data_vars[f'amp_{const}'] = (["lat", "lon"], sim_amp.T)
-            data_vars[f'pha_{const}'] = (["lat", "lon"], sim_pha.T)
-            
-        dataset = xr.Dataset(
-            data_vars=data_vars,
-            coords=dict(
-                lon=(["lon"], lons),
-                lat=(["lat"], lats),
-            ),
-            attrs=dict(
-                description="Model Pasut Regional Indonesia Terasimilasi 3D-Var",
-                boundary_lon="90E to 150E",
-                boundary_lat="15S to 15N",
-                resolution="2 arcminutes (~3.7 km)",
-                generator="Tide Tools Assimilation Engine Version 2.0"
-            )
-        )
-        return dataset
+        print(f"\n[ERROR] Gagal memuat atau memproses interpolasi '{nc_filepath}'.")
+        print(f"        Alasan: {e}")
+        print(f"        Harap pastikan Model Global telah berada pada direktori yang sama dengan nama '{nc_filepath}'.")
+        print(f"        (Hasil plot sebelumnya yang terlihat seperti pola sinus merupakan dummy data akibat file tidak ditemukan!)")
+        sys.exit(1)
 
 def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4']):
     """
@@ -301,26 +299,49 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         inv_d_real = np.linalg.solve(cov_H_B_Ht + R_mat, d_real)
         inv_d_imag = np.linalg.solve(cov_H_B_Ht + R_mat, d_imag)
         
-        # Iterasi seluruh titik grid untuk mendesiminasikan koreksi asimilasi spasial
-        influence_real = np.zeros(grid_shape)
-        influence_imag = np.zeros(grid_shape)
+        # Desiminasikan koreksi asimilasi spasial secara Vectorized (Bisa dengan GPU atau CPU)
+        if HAS_GPU:
+            xp = cp
+            print(f"      [GPU] Menjalankan matriks asimilasi pada GPU (CuPy)...")
+        else:
+            xp = np
+            print(f"      [CPU] Menjalankan matriks asimilasi tervektorisasi pada CPU...")
+            
+        # Pindahkan data ke dalam struktur Array XP (GPU/CPU)
+        xp_Lat = xp.array(Lat)
+        xp_Lon = xp.array(Lon)
+        xp_st_lats = xp.array(st_lats)
+        xp_st_lons = xp.array(st_lons)
+        xp_inv_d_real = xp.array(inv_d_real)
+        xp_inv_d_imag = xp.array(inv_d_imag)
         
-        for r_idx in range(grid_shape[0]):
-            for c_idx in range(grid_shape[1]):
-                g_lat = lat_grid[r_idx]
-                g_lon = lon_grid[c_idx]
-                
-                # Jarak dari koordinat grid point ke seluruh stasiun observasi
-                distances = np.array([
-                    vincenty_distance(g_lat, g_lon, st_lats[s], st_lons[s])
-                    for s in range(num_obs)
-                ])
-                
-                # Vektor b: Kovariansi antara grid point ini dengan seluruh stasiun
-                b_cov = (sigma_b**2) * np.exp(-(distances**2) / (2 * L_decay_km**2))
-                
-                influence_real[r_idx, c_idx] = np.dot(b_cov, inv_d_real)
-                influence_imag[r_idx, c_idx] = np.dot(b_cov, inv_d_imag)
+        # Formula Haversine Vectorized
+        dLat = xp.radians(xp_Lat[:, :, xp.newaxis] - xp_st_lats)
+        dLon = xp.radians(xp_Lon[:, :, xp.newaxis] - xp_st_lons)
+        lat1 = xp.radians(xp_Lat[:, :, xp.newaxis])
+        lat2 = xp.radians(xp_st_lats)
+        
+        a_geo = xp.sin(dLat/2)**2 + xp.cos(lat1) * xp.cos(lat2) * xp.sin(dLon/2)**2
+        c_geo = 2 * xp.arctan2(xp.sqrt(a_geo), xp.sqrt(1-a_geo))
+        distances = 6371.0 * c_geo 
+        
+        # Vektor b: Kovariansi antara grid point ini dengan seluruh stasiun
+        b_cov = (sigma_b**2) * xp.exp(-(distances**2) / (2 * L_decay_km**2))
+        
+        xp_influence_real = xp.dot(b_cov, xp_inv_d_real)
+        xp_influence_imag = xp.dot(b_cov, xp_inv_d_imag)
+        
+        if HAS_GPU:
+            influence_real = xp_influence_real.get()
+            influence_imag = xp_influence_imag.get()
+            
+            # Bersihkan memori GPU untuk batch selanjutnya
+            del xp_Lat, xp_Lon, xp_st_lats, xp_st_lons, xp_inv_d_real, xp_inv_d_imag
+            del dLat, dLon, lat1, lat2, a_geo, c_geo, distances, b_cov, xp_influence_real, xp_influence_imag
+            cp.get_default_memory_pool().free_all_blocks()
+        else:
+            influence_real = xp_influence_real
+            influence_imag = xp_influence_imag
                 
         # Perbarui peta grid berdasarkan analisis real dan imaginer
         xa_real = xb_real + influence_real
@@ -530,19 +551,32 @@ def merge_constituent_netcdfs(input_dir, output_filepath):
     print(f"\n[*] Mencari file NetCDF model harmonik terpisah di folder: {input_dir}")
     nc_files = glob.glob(os.path.join(input_dir, "*.nc"))
     
+    # Kecualikan file output atau base agar tidak terjadi circular merge
+    nc_files = [f for f in nc_files if 'global_model_base' not in os.path.basename(f) and 'regional_tide_model' not in os.path.basename(f)]
+    
     if not nc_files:
-        print("[-] Tidak ditemukan file .nc di direktori tersebut.")
+        print("[-] Tidak ditemukan file .nc satuan konstanta di direktori tersebut.")
         return
         
     print(f"[*] Ditemukan {len(nc_files)} file. Memulai penggabungan...")
     datasets = []
     
+    known_consts = ['M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'SA', 'SSA']
+    
     for file in nc_files:
         filename = os.path.basename(file)
-        # Asumsikan format penamaan FES2014_M2.nc -> Konstanta = "M2"
-        konstanta = filename.split('_')[-1].replace('.nc', '').upper()
         
-        print(f"    -> Memproses {filename} (Konstanta: {konstanta})")
+        # Cari konstanta dari nama file
+        konstanta = "UNKNOWN"
+        for c in known_consts:
+            if f"_{c.lower()}" in filename.lower() or f"{c.lower()}_" in filename.lower() or filename.lower().startswith(c.lower()) or filename.lower() == f"{c.lower()}.nc":
+                konstanta = c
+                break
+                
+        if konstanta == "UNKNOWN":
+            konstanta = filename.split('_')[-1].replace('.nc', '').upper()
+            
+        print(f"    -> Memproses {filename} (Konstanta Terdeteksi: {konstanta})")
         ds = xr.open_dataset(file)
         
         # Pisahkan nama variabel menjadi spesifik per konstanta jika belum ada
@@ -557,6 +591,9 @@ def merge_constituent_netcdfs(input_dir, output_filepath):
             ds = ds.rename(rename_dict)
             
         datasets.append(ds)
+        
+    if not datasets:
+        return
         
     print("[*] Menggabungkan (Merging) seluruh dataset...")
     combined_ds = xr.merge(datasets, compat='override')
@@ -630,11 +667,11 @@ def run_pipeline(input_patterns):
     
     # 3. Muat berkas global model dasar
     global_model_file = "global_model_base.nc"
-    input_model_folder = "data_models"
     
-    # Jika model dasar belum digabung tapi folder data_models ada
-    if not os.path.exists(global_model_file) and os.path.exists(input_model_folder):
-        merge_constituent_netcdfs(input_model_folder, global_model_file)
+    # Jika model dasar belum digabung, coba scan di folder saat ini (.) 
+    if not os.path.exists(global_model_file):
+        print("[*] File global_model_base.nc tidak ditemukan di working directory, mencoba mendeteksi file NC model satuan...")
+        merge_constituent_netcdfs(".", global_model_file)
 
     model = read_global_model(global_model_file, constituents=constituents_list)
     
