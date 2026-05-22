@@ -158,6 +158,20 @@ def read_global_model(nc_filepath, constituents=['M2', 'S2', 'K1', 'O1', 'N2', '
         print(f"[*] Mencoba membaca global model dari: {nc_filepath}")
         dataset = xr.open_dataset(nc_filepath)
         print("[+] Sukses membaca global model.")
+        
+        # Pengecekan satuan amplitudo dan konversi ke meter jika perlu
+        for var in dataset.data_vars:
+            if 'amp' in var.lower():
+                max_val = float(dataset[var].max(skipna=True))
+                if max_val > 1500.0:
+                    print(f"    -> [!] Variabel {var} sepertinya menggunakan satuan mm (maks={max_val:.2f}). Mengonversi ke meter (m)...")
+                    dataset[var] = dataset[var] / 1000.0
+                elif max_val > 15.0:
+                    print(f"    -> [!] Variabel {var} sepertinya menggunakan satuan cm (maks={max_val:.2f}). Mengonversi ke meter (m)...")
+                    dataset[var] = dataset[var] / 100.0
+                else:
+                    print(f"    -> Variabel {var} diasumsikan sudah dalam meter (m) (maks={max_val:.2f}).")
+                    
         return dataset
     except Exception as e:
         print(f"[!] File '{nc_filepath}' tidak ditemukan atau tidak valid. Membuat template grid domain regional Indonesia (15S - 15N, 90E - 150E)...")
