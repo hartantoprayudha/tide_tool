@@ -442,7 +442,7 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         mse_amp = np.mean((model_amp - y_obs_amp)**2)
         rmse_amp = np.sqrt(mse_amp)
         corr_amp, _ = pearsonr(model_amp, y_obs_amp)
-        r2_amp = corr_amp ** 2
+        r2_amp = corr_amp**2
         
         # Metrik Fase (menangani wrap-around 360 derajat)
         diff_pha = model_pha - y_obs_pha
@@ -453,7 +453,7 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         
         # Korelasi linear sederhana untuk fase terkadang ambigu, tetapi kita gunakan standar
         corr_pha, _ = pearsonr(model_pha, y_obs_pha)
-        r2_pha = corr_pha ** 2
+        r2_pha = corr_pha**2
         
         all_metrics[const] = {
             'RMSE_Amp (m)': rmse_amp,
@@ -464,8 +464,8 @@ def evaluate_metrics(model_ds, test_stations, constituents):
             'R2_Pha': r2_pha
         }
         
-        print(f"    [ {const} ] Amplitudo -> RMSE: {rmse_amp:.5f} m, MAE: {mae_amp:.5f} m, R2: {r2_amp:.5f}")
-        print(f"    [ {const} ] Fase      -> RMSE: {rmse_pha:.5f} deg, MAE: {mae_pha:.5f} deg, R2: {r2_pha:.5f}")
+        print(f"    [ {const} ] Amplitudo -> RMSE: {rmse_amp:.5f} m, MAE: {mae_amp:.5f} m, R square: {r2_amp:.5f}")
+        print(f"    [ {const} ] Fase      -> RMSE: {rmse_pha:.5f} deg, MAE: {mae_pha:.5f} deg, R square: {r2_pha:.5f}")
         
     return all_metrics
 
@@ -486,7 +486,7 @@ def save_evaluation_metrics(metrics, output_filepath="evaluation_metrics.txt"):
         metrics_list.append(row)
         
     df_metrics = pd.DataFrame(metrics_list)
-    df_metrics.to_csv(output_filepath, index=False, sep='\t')
+    df_metrics.to_csv(output_filepath, index=False, sep='\t', float_format='%.5f')
     print(f"    -> File metrik berhasil disimpan: {output_filepath}")
 
 def merge_constituent_netcdfs(input_dir, output_filepath):
