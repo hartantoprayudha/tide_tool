@@ -290,8 +290,15 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
             match = df_c[df_c['Component'].astype(str).str.upper() == const.upper()]
             if not match.empty:
                 valid_stations.append(st)
-                y_amp_list.append(match.iloc[0]['Amplitude(m)'])
-                y_pha_list.append(match.iloc[0]['Phase(deg)'])
+                
+                amp_val = match.iloc[0]['Amplitude(m)']
+                if isinstance(amp_val, pd.Series): amp_val = amp_val.iloc[0]
+                
+                pha_val = match.iloc[0]['Phase(deg)']
+                if isinstance(pha_val, pd.Series): pha_val = pha_val.iloc[0]
+                
+                y_amp_list.append(float(amp_val))
+                y_pha_list.append(float(pha_val))
                 
         num_obs = len(valid_stations)
         if num_obs == 0:
@@ -535,8 +542,14 @@ def evaluate_metrics(model_ds, test_stations, constituents):
             df_c = st['constituents']
             match = df_c[df_c['Component'].astype(str).str.upper() == const.upper()]
             if not match.empty:
-                y_obs_amp.append(match.iloc[0]['Amplitude(m)'])
-                y_obs_pha.append(match.iloc[0]['Phase(deg)'])
+                amp_val = match.iloc[0]['Amplitude(m)']
+                if isinstance(amp_val, pd.Series): amp_val = amp_val.iloc[0]
+                
+                pha_val = match.iloc[0]['Phase(deg)']
+                if isinstance(pha_val, pd.Series): pha_val = pha_val.iloc[0]
+                
+                y_obs_amp.append(float(amp_val))
+                y_obs_pha.append(float(pha_val))
                 st_lats.append(st['station_lat'])
                 st_lons.append(st['station_lon'])
                 
