@@ -570,11 +570,14 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         model_pha = np.nan_to_num(model_pha, nan=np.mean(y_obs_pha))
         
         # Metrik Amplitudo
-        mae_amp = np.mean(np.abs(model_amp - y_obs_amp))
-        mse_amp = np.mean((model_amp - y_obs_amp)**2)
+        diff_amp = model_amp - y_obs_amp
+        mae_amp = np.mean(np.abs(diff_amp))
+        mse_amp = np.mean(diff_amp**2)
         rmse_amp = np.sqrt(mse_amp)
         corr_amp, _ = pearsonr(model_amp, y_obs_amp)
         r2_amp = corr_amp**2
+        max_res_amp = np.max(diff_amp)
+        min_res_amp = np.min(diff_amp)
         
         # Metrik Fase (menangani wrap-around 360 derajat)
         diff_pha = model_pha - y_obs_pha
@@ -582,6 +585,8 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         mae_pha = np.mean(np.abs(diff_pha))
         mse_pha = np.mean(diff_pha**2)
         rmse_pha = np.sqrt(mse_pha)
+        max_res_pha = np.max(diff_pha)
+        min_res_pha = np.min(diff_pha)
         
         # Korelasi linear sederhana untuk fase terkadang ambigu, tetapi kita gunakan standar
         corr_pha, _ = pearsonr(model_pha, y_obs_pha)
@@ -591,9 +596,13 @@ def evaluate_metrics(model_ds, test_stations, constituents):
             'RMSE_Amp (m)': rmse_amp,
             'MAE_Amp (m)': mae_amp,
             'R2_Amp': r2_amp,
+            'Max_Res_Amp (m)': max_res_amp,
+            'Min_Res_Amp (m)': min_res_amp,
             'RMSE_Pha (deg)': rmse_pha,
             'MAE_Pha (deg)': mae_pha,
-            'R2_Pha': r2_pha
+            'R2_Pha': r2_pha,
+            'Max_Res_Pha (deg)': max_res_pha,
+            'Min_Res_Pha (deg)': min_res_pha
         }
         
         print(f"    [ {const} ] Amplitudo -> RMSE: {rmse_amp:.5f} m, MAE: {mae_amp:.5f} m, R square: {r2_amp:.5f}")
@@ -601,9 +610,10 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         
     return all_metrics
 
-def save_evaluation_metrics(metrics, output_filepath="evaluation_metrics.txt"):
+def save_evaluation_metrics(metrics, output_filepath="evaluation_metrics.txt", log_info=""):
     """
-    Menyimpan hasil metrik ketelitian model (RMSE, MAE, R) ke dalam file TXT.
+    Menyimpan hasil metrik ketelitian model (RMSE, MAE, R, Max/Min Residue) ke dalam file TXT.
+    Juga menambahkan keterangan log tentang konfigurasi pengujian.
     """
     if not metrics:
         return
@@ -618,7 +628,13 @@ def save_evaluation_metrics(metrics, output_filepath="evaluation_metrics.txt"):
         metrics_list.append(row)
         
     df_metrics = pd.DataFrame(metrics_list)
-    df_metrics.to_csv(output_filepath, index=False, sep='\t', float_format='%.5f')
+    df_metrics_str = df_metrics.to_csv(index=False, sep='\t', float_format='%.5f')
+    
+    with open(output_filepath, 'w', encoding='utf-8') as f:
+        if log_info:
+            f.write(log_info + "\n\n")
+        f.write(df_metrics_str)
+        
     print(f"    -> File metrik berhasil disimpan: {output_filepath}")
 
 def merge_constituent_netcdfs(input_dir, output_filepath):
@@ -762,7 +778,15 @@ def run_pipeline(input_patterns):
     # 6. Hitung Metrik Ketelitian terhadap stasiun uji
     metrics = evaluate_metrics(updated_model, test_stations, constituents=constituents_list)
     if metrics:
-        save_evaluation_metrics(metrics, "tide_model_ina_metrics.txt")
+        log_txt = f"=== METRIK EVALUASI MODEL PASUT (ASIMILASI 3D-VAR) ===\n" \
+                  f"Total Stasiun Observasi : {len(stations_data)}\n" \
+                  f"Jumlah Data Latih (Train) : {len(train_stations)}\n" \
+                  f"Jumlah Data Uji (Test)    : {len(test_stations)}\n" \
+                  f"File Model Base           : {global_model_file}\n" \
+                  f"Data Stasiun Latih        : {', '.join([st['station_name'] for st in train_stations])}\n" \
+                  f"Data Stasiun Uji          : {', '.join([st['station_name'] for st in test_stations])}"
+        
+        save_evaluation_metrics(metrics, "tide_model_ina_metrics.txt", log_info=log_txt)
     
     # 7. Ekspor model hasil asimilasi ke format NetCDF (.nc)
     output_nc = "tide_model_ina_FES2022.nc"
