@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from scipy.interpolate import griddata
 from scipy.stats import pearsonr
+from scipy.ndimage import gaussian_filter, median_filter, uniform_filter
 
 try:
     import cupy as cp
@@ -230,6 +231,11 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
     USE_BATHYMETRY_WEIGHTING = os.path.exists(BATHYMETRY_PATH)
     depth_decay_meters = 50.0         # Skala korelasi kedalaman (misal 50 meter)
     
+    # Opsi Smoothing / Penghilangan Artefak
+    SMOOTHING_METHOD = "gaussian"     # Opsi: "gaussian", "median", "uniform", atau "none"
+    SMOOTHING_SIGMA = 2.0             # Parameter untuk filter Gaussian
+    SMOOTHING_SIZE = 5                # Parameter ukuran kernel untuk median atau uniform filter
+    
     if USE_BATHYMETRY_WEIGHTING:
         print(f"\n[*] Modul Pembobotan Batimetri (Depth Constraint): AKTIF")
         print(f"    -> Membaca dari: {BATHYMETRY_PATH}")
@@ -414,6 +420,19 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         else:
             influence_real = xp_influence_real
             influence_imag = xp_influence_imag
+            
+        # [Penghilangan Artefak Bintik / Smoothing]
+        # Aplikasikan spatial filter pada peta increment (influence) sebelum dijumlahkan
+        # Ini akan memperhalus batas tajam dan efek bintik-bintik ("bullseye") akibat L_decay_km yang kecil (~20km)
+        if SMOOTHING_METHOD == "gaussian":
+            influence_real = gaussian_filter(influence_real, sigma=SMOOTHING_SIGMA)
+            influence_imag = gaussian_filter(influence_imag, sigma=SMOOTHING_SIGMA)
+        elif SMOOTHING_METHOD == "median":
+            influence_real = median_filter(influence_real, size=SMOOTHING_SIZE)
+            influence_imag = median_filter(influence_imag, size=SMOOTHING_SIZE)
+        elif SMOOTHING_METHOD == "uniform":
+            influence_real = uniform_filter(influence_real, size=SMOOTHING_SIZE)
+            influence_imag = uniform_filter(influence_imag, size=SMOOTHING_SIZE)
                 
         # Perbarui peta grid berdasarkan analisis real dan imaginer
         xa_real = xb_real + influence_real
