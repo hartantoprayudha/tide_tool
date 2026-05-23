@@ -6,7 +6,7 @@ import random
 import xarray as xr
 import pandas as pd
 import numpy as np
-from scipy.interpolate import griddata
+from scipy.interpolate import griddata, RectBivariateSpline
 from scipy.stats import pearsonr
 from scipy.ndimage import gaussian_filter, median_filter, uniform_filter
 
@@ -232,9 +232,9 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
     depth_decay_meters = 50.0         # Skala korelasi kedalaman (misal 50 meter)
     
     # Opsi Smoothing / Penghilangan Artefak
-    SMOOTHING_METHOD = "gaussian"     # Opsi: "gaussian", "median", "uniform", atau "none"
-    SMOOTHING_SIGMA = 2.0             # Parameter untuk filter Gaussian
-    SMOOTHING_SIZE = 5                # Parameter ukuran kernel untuk median atau uniform filter
+    SMOOTHING_METHOD = "spline"       # Opsi: "gaussian", "spline", "median", "uniform", atau "none"
+    SMOOTHING_SIGMA = 2.0             # Parameter sigma untuk filter Gaussian
+    SMOOTHING_SIZE = 5                # Parameter ukuran kernel (median/uniform) atau smoothness factor (spline)
     
     if USE_BATHYMETRY_WEIGHTING:
         print(f"\n[*] Modul Pembobotan Batimetri (Depth Constraint): AKTIF")
@@ -420,6 +420,18 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         if SMOOTHING_METHOD == "gaussian":
             influence_real = gaussian_filter(influence_real, sigma=SMOOTHING_SIGMA)
             influence_imag = gaussian_filter(influence_imag, sigma=SMOOTHING_SIGMA)
+        elif SMOOTHING_METHOD == "spline":
+            # Pendekatan Spline in Tension / Spline Smoothing untuk grid 2D
+            # Menggunakan RectBivariateSpline dengan faktor kehalusan (s)
+            x_idx = np.arange(influence_real.shape[0])
+            y_idx = np.arange(influence_real.shape[1])
+            s_val = SMOOTHING_SIZE * influence_real.size * 0.05
+            
+            spline_r = RectBivariateSpline(x_idx, y_idx, influence_real, s=s_val)
+            influence_real = spline_r(x_idx, y_idx)
+            
+            spline_i = RectBivariateSpline(x_idx, y_idx, influence_imag, s=s_val)
+            influence_imag = spline_i(x_idx, y_idx)
         elif SMOOTHING_METHOD == "median":
             influence_real = median_filter(influence_real, size=SMOOTHING_SIZE)
             influence_imag = median_filter(influence_imag, size=SMOOTHING_SIZE)
@@ -435,7 +447,12 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         xa_amp = np.hypot(xa_real, xa_imag)
         xa_amp = np.clip(xa_amp, 0.0, 3.5) # Proteksi nilai amplitudo logis
         
-        xa_pha = (np.degrees(np.arctan2(xa_imag, xa_real))) % 360.0
+        # Phase Unwrapping: rentang disamakan dengan base model (xb_pha) 
+        # sehingga tidak ada transisi jomplang akibat offset periodik
+        xa_pha_raw = np.degrees(np.arctan2(xa_imag, xa_real))
+        diff_pha = (xa_pha_raw - xb_pha) % 360.0
+        diff_pha[diff_pha > 180] -= 360.0
+        xa_pha = xb_pha + diff_pha
         
         model_ds[var_amp].values = xa_amp
         model_ds[var_pha].values = xa_pha
