@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 from scipy.interpolate import griddata
 from scipy.stats import pearsonr
-from scipy.ndimage import gaussian_filter
 
 try:
     import cupy as cp
@@ -214,7 +213,55 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
     # Kovariansi & Parameter kesalahan
     sigma_b = 0.15          # Standar deviasi kesalahan grid model (~15 cm)
     sigma_r = 0.03          # Standar deviasi kesalahan observasi (~3 cm)
-    L_decay_km = 180.0      # Radius Korelasi spasial asimilasi (180 km)
+    
+    # Satelit altimetri memiliki ketelitian yang rendah di perairan dangkal dan sempit, 
+    # terutama pada jarak ~20 km dari garis pantai akibat land contamination dan pasut perairan dangkal.
+    # Oleh karena itu, radius korelasi spasial (L_decay_km) difokuskan pada 20 km untuk 
+    # merepresentasikan area koreksi maksimal oleh tide gauge pesisir.
+    L_decay_km = 20.0       # Radius Korelasi spasial asimilasi (20 km)
+    
+    # Opsi Penggunaan Batimetri / DEM (Depth/Elevation Constraint)
+    # Jika tersedia file batimetri (misal GEBCO/ETOPO), perbedaan kedalaman 
+    # antara titik observasi dan grid dapat ditambahkan sebagai penalti bobot.
+    BATHYMETRY_DIR = "../../GEBCO"              # Folder tempat file DEM/Batimetri berada
+    BATHYMETRY_FILE = "gebco_2026_n15.0_s-15.0_w90.0_e150.0.nc"           # Nama file DEM/Batimetri
+    BATHYMETRY_PATH = os.path.join(BATHYMETRY_DIR, BATHYMETRY_FILE)
+    
+    USE_BATHYMETRY_WEIGHTING = os.path.exists(BATHYMETRY_PATH)
+    depth_decay_meters = 50.0         # Skala korelasi kedalaman (misal 50 meter)
+    
+    if USE_BATHYMETRY_WEIGHTING:
+        print(f"\n[*] Modul Pembobotan Batimetri (Depth Constraint): AKTIF")
+        print(f"    -> Membaca dari: {BATHYMETRY_PATH}")
+        try:
+            bathy_ds = xr.open_dataset(BATHYMETRY_PATH)
+            elev_var = None
+            for var in bathy_ds.data_vars:
+                if 'elev' in var.lower() or 'depth' in var.lower() or 'z' in var.lower() or 'elevation' in var.lower():
+                    elev_var = var
+                    break
+            
+            if elev_var is None:
+                raise ValueError("Variabel elevasi/kedalaman tidak ditemukan di file batimetri.")
+            
+            if 'longitude' in bathy_ds.dims: bathy_ds = bathy_ds.rename({'longitude': 'lon'})
+            if 'latitude' in bathy_ds.dims: bathy_ds = bathy_ds.rename({'latitude': 'lat'})
+            
+            print("    -> Melakukan interpolasi/regridding data batimetri ke domain model pasut...")
+            bathy_ds_interp = bathy_ds.interp(lon=lon_grid, lat=lat_grid, method='nearest')
+            grid_depth = bathy_ds_interp[elev_var].values
+            grid_depth = np.nan_to_num(grid_depth, nan=0.0)
+            print("    -> Batimetri berhasil dipetakan.")
+        except Exception as e:
+            print(f"    -> [!] Gagal membaca dataset batimetri: {e}.")
+            print("    -> Pembobotan batimetri akan diabaikan.")
+            USE_BATHYMETRY_WEIGHTING = False
+            grid_depth = np.zeros(grid_shape)
+    else:
+        print(f"\n[*] Modul Pembobotan Batimetri (Depth Constraint): NONAKTIF")
+        print(f"    -> File tidak ditemukan di {BATHYMETRY_PATH}")
+        print("    -> Anda dapat menempatkan file NC batimetri di lokasi tersebut untuk mengaktifkan fitur ini.")
+        grid_depth = np.zeros(grid_shape)
     
     # Loop untuk setiap komponen pasut yang terdeteksi
     for const in constituents:
@@ -269,6 +316,13 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         xb_real_flat = xb_real.flatten()
         xb_imag_flat = xb_imag.flatten()
         
+        # [Opsi Batimetri] Ekstrak kedalaman di tiap stasiun dari grid_depth
+        st_depths = np.zeros(num_obs)
+        if USE_BATHYMETRY_WEIGHTING:
+            grid_depth_flat = grid_depth.flatten()
+            st_depths = griddata(points, grid_depth_flat, (st_lats, st_lons), method='nearest')
+            st_depths = np.nan_to_num(st_depths, nan=0.0)
+        
         H_xb_real = griddata(points, xb_real_flat, (st_lats, st_lons), method='linear')
         H_xb_real = np.nan_to_num(H_xb_real, nan=np.mean(xb_real_flat)) # Proteksi nan
         
@@ -279,46 +333,84 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
         d_real = y_obs_real - H_xb_real
         d_imag = y_obs_imag - H_xb_imag
         
-        # --- Metode Interpolasi Spasial: Spline / Cubic Interpolation ---
-        # Menambahkan "dummy boundary points" di sekeliling region dengan residual = 0
-        # agar koreksi (residual) melemah ke angka 0 di laut lepas (kembali ke model global)
-        print(f"      [*] Menerapkan koreksi spasial menggunakan metode Spline (Cubic Interpolation)...")
-        bnd_lats = np.concatenate([
-            np.full(10, lat_grid[0]), np.full(10, lat_grid[-1]),
-            np.linspace(lat_grid[0], lat_grid[-1], 10), np.linspace(lat_grid[0], lat_grid[-1], 10)
-        ])
-        bnd_lons = np.concatenate([
-            np.linspace(lon_grid[0], lon_grid[-1], 10), np.linspace(lon_grid[0], lon_grid[-1], 10),
-            np.full(10, lon_grid[0]), np.full(10, lon_grid[-1])
-        ])
-        bnd_d_real = np.zeros(len(bnd_lats))
-        bnd_d_imag = np.zeros(len(bnd_lats))
-        
-        # Gabungkan titik stasiun asli dengan boundary points
-        all_lats = np.concatenate([st_lats, bnd_lats])
-        all_lons = np.concatenate([st_lons, bnd_lons])
-        all_d_real = np.concatenate([d_real, bnd_d_real])
-        all_d_imag = np.concatenate([d_imag, bnd_d_imag])
-        
-        # Lakukan cubic spline (Clough-Tocher) interpolation untuk surface residual
-        pts = np.column_stack((all_lats, all_lons))
-        target_pts = np.column_stack((Lat.flatten(), Lon.flatten()))
-        
-        influence_real_flat = griddata(pts, all_d_real, target_pts, method='cubic', fill_value=0.0)
-        influence_imag_flat = griddata(pts, all_d_imag, target_pts, method='cubic', fill_value=0.0)
-        
-        influence_real = influence_real_flat.reshape(grid_shape)
-        influence_imag = influence_imag_flat.reshape(grid_shape)
+        # Hitung matriks korelasi spasial antar stasiun sendiri (cov_H_B_Ht) ukuran N x N
+        cov_H_B_Ht = np.zeros((num_obs, num_obs))
+        for i in range(num_obs):
+            for j in range(num_obs):
+                distance = vincenty_distance(st_lats[i], st_lons[i], st_lats[j], st_lons[j])
+                spatial_cov = (sigma_b**2) * np.exp(-(distance**2) / (2 * L_decay_km**2))
                 
-        # Perbarui peta grid berdasarkan analisis real dan imaginer (Model + Interpolated Residuals)
+                # [Opsi Batimetri] 
+                if USE_BATHYMETRY_WEIGHTING:
+                    depth_diff = abs(st_depths[i] - st_depths[j])
+                    bathy_penalty = np.exp(-(depth_diff**2) / (2 * depth_decay_meters**2))
+                    cov_H_B_Ht[i, j] = spatial_cov * bathy_penalty
+                else:
+                    cov_H_B_Ht[i, j] = spatial_cov
+                
+        # Matriks Varians Observasi R
+        R_mat = (sigma_r**2) * np.eye(num_obs)
+        
+        # Selesaikan sistem linear: Inv_Matrix_Term_Amp = (HBH^T + R)^-1 * d
+        inv_d_real = np.linalg.solve(cov_H_B_Ht + R_mat, d_real)
+        inv_d_imag = np.linalg.solve(cov_H_B_Ht + R_mat, d_imag)
+        
+        # Desiminasikan koreksi asimilasi spasial secara Vectorized (Bisa dengan GPU atau CPU)
+        if HAS_GPU:
+            xp = cp
+            print(f"      [GPU] Menjalankan matriks asimilasi pada GPU (CuPy)...")
+        else:
+            xp = np
+            print(f"      [CPU] Menjalankan matriks asimilasi tervektorisasi pada CPU...")
+            
+        # Pindahkan data ke dalam struktur Array XP (GPU/CPU)
+        xp_Lat = xp.array(Lat)
+        xp_Lon = xp.array(Lon)
+        xp_st_lats = xp.array(st_lats)
+        xp_st_lons = xp.array(st_lons)
+        xp_inv_d_real = xp.array(inv_d_real)
+        xp_inv_d_imag = xp.array(inv_d_imag)
+        
+        # Formula Haversine Vectorized
+        dLat = xp.radians(xp_Lat[:, :, xp.newaxis] - xp_st_lats)
+        dLon = xp.radians(xp_Lon[:, :, xp.newaxis] - xp_st_lons)
+        lat1 = xp.radians(xp_Lat[:, :, xp.newaxis])
+        lat2 = xp.radians(xp_st_lats)
+        
+        a_geo = xp.sin(dLat/2)**2 + xp.cos(lat1) * xp.cos(lat2) * xp.sin(dLon/2)**2
+        c_geo = 2 * xp.arctan2(xp.sqrt(a_geo), xp.sqrt(1-a_geo))
+        distances = 6371.0 * c_geo 
+        
+        # Vektor b: Kovariansi spasial antara grid point ini dengan seluruh stasiun observasi
+        b_cov = (sigma_b**2) * xp.exp(-(distances**2) / (2 * L_decay_km**2))
+        
+        # [Opsi Batimetri] Jika menggunakan batimetri/DEM, kovariansi termodulasi oleh gradien kedalaman/topografi
+        if USE_BATHYMETRY_WEIGHTING:
+            xp_grid_depth = xp.array(grid_depth)
+            xp_st_depths = xp.array(st_depths)
+            b_bathy_penalty = xp.exp(-((xp_grid_depth[:, :, xp.newaxis] - xp_st_depths)**2) / (2 * depth_decay_meters**2))
+            b_cov = b_cov * b_bathy_penalty
+            if HAS_GPU:
+                del xp_grid_depth, xp_st_depths, b_bathy_penalty
+        
+        xp_influence_real = xp.dot(b_cov, xp_inv_d_real)
+        xp_influence_imag = xp.dot(b_cov, xp_inv_d_imag)
+        
+        if HAS_GPU:
+            influence_real = xp_influence_real.get()
+            influence_imag = xp_influence_imag.get()
+            
+            # Bersihkan memori GPU untuk batch selanjutnya
+            del xp_Lat, xp_Lon, xp_st_lats, xp_st_lons, xp_inv_d_real, xp_inv_d_imag
+            del dLat, dLon, lat1, lat2, a_geo, c_geo, distances, b_cov, xp_influence_real, xp_influence_imag
+            cp.get_default_memory_pool().free_all_blocks()
+        else:
+            influence_real = xp_influence_real
+            influence_imag = xp_influence_imag
+                
+        # Perbarui peta grid berdasarkan analisis real dan imaginer
         xa_real = xb_real + influence_real
         xa_imag = xb_imag + influence_imag
-        
-        # Terapkan Smoothing 2D (Gaussian Filter) pada hasil asimilasi untuk menghaluskan pola 
-        # (seperti noise spasial atau jejak asimilasi / satelit altimetri)
-        print(f"      [*] Menerapkan Gaussian Filter (Smoothing) spasial 2D untuk menghilangkan noise (sigma=2.0)...")
-        xa_real = gaussian_filter(xa_real, sigma=2.0)
-        xa_imag = gaussian_filter(xa_imag, sigma=2.0)
         
         # Kembalikan ke amplitudo dan fase
         xa_amp = np.hypot(xa_real, xa_imag)
