@@ -336,11 +336,28 @@ def data_assimilation_3dvar_multi(model_ds, stations_data, constituents=['M2', '
             st_depths = griddata(points, grid_depth_flat, (st_lats, st_lons), method='nearest')
             st_depths = np.nan_to_num(st_depths, nan=0.0)
         
-        H_xb_real = griddata(points, xb_real_flat, (st_lats, st_lons), method='linear')
-        H_xb_real = np.nan_to_num(H_xb_real, nan=np.mean(xb_real_flat)) # Proteksi nan
+        # Hanya gunakan titik model yang valid (bukan daratan/NaN) untuk interpolasi
+        valid_mask = ~np.isnan(xb_real_flat)
+        if not np.any(valid_mask):
+            valid_mask = np.ones_like(xb_real_flat, dtype=bool)
+            xb_real_flat = np.nan_to_num(xb_real_flat)
+            xb_imag_flat = np.nan_to_num(xb_imag_flat)
+            
+        valid_points = points[valid_mask]
         
-        H_xb_imag = griddata(points, xb_imag_flat, (st_lats, st_lons), method='linear')
-        H_xb_imag = np.nan_to_num(H_xb_imag, nan=np.mean(xb_imag_flat)) # Proteksi nan
+        H_xb_real = griddata(valid_points, xb_real_flat[valid_mask], (st_lats, st_lons), method='linear')
+        if np.any(np.isnan(H_xb_real)):
+            H_xb_real_nearest = griddata(valid_points, xb_real_flat[valid_mask], (st_lats, st_lons), method='nearest')
+            mask_nan = np.isnan(H_xb_real)
+            H_xb_real[mask_nan] = H_xb_real_nearest[mask_nan]
+        H_xb_real = np.nan_to_num(H_xb_real, nan=np.nanmean(xb_real_flat)) # Proteksi akhir
+        
+        H_xb_imag = griddata(valid_points, xb_imag_flat[valid_mask], (st_lats, st_lons), method='linear')
+        if np.any(np.isnan(H_xb_imag)):
+            H_xb_imag_nearest = griddata(valid_points, xb_imag_flat[valid_mask], (st_lats, st_lons), method='nearest')
+            mask_nan = np.isnan(H_xb_imag)
+            H_xb_imag[mask_nan] = H_xb_imag_nearest[mask_nan]
+        H_xb_imag = np.nan_to_num(H_xb_imag, nan=np.nanmean(xb_imag_flat)) # Proteksi akhir
         
         # Hitung Innovation (Residual): d = y - H_xb
         d_real = y_obs_real - H_xb_real
@@ -596,8 +613,23 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         y_obs_pha = np.array(y_obs_pha)
         
         # Interpolasi hasil model ke titik test stasiun (Via Real dan Imaginer)
-        model_real = griddata(points, xb_real_flat, (np.array(st_lats), np.array(st_lons)), method='linear')
-        model_imag = griddata(points, xb_imag_flat, (np.array(st_lats), np.array(st_lons)), method='linear')
+        valid_mask = ~np.isnan(xb_real_flat)
+        if not np.any(valid_mask):
+            valid_mask = np.ones_like(xb_real_flat, dtype=bool)
+            xb_real_flat = np.nan_to_num(xb_real_flat)
+            xb_imag_flat = np.nan_to_num(xb_imag_flat)
+            
+        valid_points = points[valid_mask]
+        
+        model_real = griddata(valid_points, xb_real_flat[valid_mask], (np.array(st_lats), np.array(st_lons)), method='linear')
+        if np.any(np.isnan(model_real)):
+            model_real_nearest = griddata(valid_points, xb_real_flat[valid_mask], (np.array(st_lats), np.array(st_lons)), method='nearest')
+            model_real[np.isnan(model_real)] = model_real_nearest[np.isnan(model_real)]
+            
+        model_imag = griddata(valid_points, xb_imag_flat[valid_mask], (np.array(st_lats), np.array(st_lons)), method='linear')
+        if np.any(np.isnan(model_imag)):
+            model_imag_nearest = griddata(valid_points, xb_imag_flat[valid_mask], (np.array(st_lats), np.array(st_lons)), method='nearest')
+            model_imag[np.isnan(model_imag)] = model_imag_nearest[np.isnan(model_imag)]
         
         model_amp = np.hypot(model_real, model_imag)
         model_amp = np.nan_to_num(model_amp, nan=np.mean(y_obs_amp))
@@ -610,7 +642,10 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         mae_amp = np.mean(np.abs(diff_amp))
         mse_amp = np.mean(diff_amp**2)
         rmse_amp = np.sqrt(mse_amp)
-        corr_amp, _ = pearsonr(model_amp, y_obs_amp)
+        if np.std(model_amp) < 1e-12 or np.std(y_obs_amp) < 1e-12:
+            corr_amp = np.nan
+        else:
+            corr_amp, _ = pearsonr(model_amp, y_obs_amp)
         r2_amp = corr_amp**2
         max_res_amp = np.max(diff_amp)
         min_res_amp = np.min(diff_amp)
@@ -625,7 +660,10 @@ def evaluate_metrics(model_ds, test_stations, constituents):
         min_res_pha = np.min(diff_pha)
         
         # Korelasi linear sederhana untuk fase terkadang ambigu, tetapi kita gunakan standar
-        corr_pha, _ = pearsonr(model_pha, y_obs_pha)
+        if np.std(model_pha) < 1e-12 or np.std(y_obs_pha) < 1e-12:
+            corr_pha = np.nan
+        else:
+            corr_pha, _ = pearsonr(model_pha, y_obs_pha)
         r2_pha = corr_pha**2
         
         all_metrics[const] = {
@@ -691,7 +729,7 @@ def merge_constituent_netcdfs(input_dir, output_filepath):
     print(f"[*] Ditemukan {len(nc_files)} file. Memulai penggabungan...")
     datasets = []
     
-    known_consts = ['2N2', 'EPS2', 'J1', 'K1', 'K2', 'L2', 'LAM2', 'M2', 'M3', 'M4', 'M6', 'M8', 'MF', 'MKS2', 'MM', 'MN4', 'MS4', 'MSF', 'MSQM', 'MTM', 'MU2', 'N2', 'N4', 'NU2', 'O1', 'P1', 'Q1', 'R2', 'S1', 'S2', 'S4', 'SA', 'SSA', 'T2']
+    known_consts = ['2N2', 'EPS2', 'J1', 'K1', 'K2', 'L2', 'LAMBDA2', 'M2', 'M3', 'M4', 'M6', 'M8', 'MF', 'MKS2', 'MM', 'MN4', 'MS4', 'MSF', 'MSQM', 'MTM', 'MU2', 'N2', 'N4', 'NU2', 'O1', 'P1', 'Q1', 'R2', 'S1', 'S2', 'S4', 'SA', 'SSA', 'T2']
     
     for file in nc_files:
         filename = os.path.basename(file)
@@ -796,7 +834,7 @@ def run_pipeline(input_patterns):
     print(f"[*] Total Komponen Pasut Unik yang ditemukan untuk Asimilasi: {constituents_list}")
     
     # 3. Muat berkas global model dasar
-    global_model_file = "global_model_base_fes.nc"
+    global_model_file = "global_model_base_big.nc"
     
     # Jika model dasar belum digabung, coba scan di folder saat ini (.) 
     if not os.path.exists(global_model_file):
@@ -825,7 +863,7 @@ def run_pipeline(input_patterns):
         save_evaluation_metrics(metrics, "tide_model_ina_metrics.txt", log_info=log_txt)
     
     # 7. Ekspor model hasil asimilasi ke format NetCDF (.nc)
-    output_nc = "tide_model_ina_FES2022.nc"
+    output_nc = "tide_model_ina_BIG2026.nc"
     try:
         updated_model.to_netcdf(output_nc)
         print("=====================================================================")
@@ -841,5 +879,11 @@ def run_pipeline(input_patterns):
 
 if __name__ == "__main__":
     # Apabila dilewatkan argument spesifik, asumsikan itu target pencarian berkas
-    targets = sys.argv[1:] if len(sys.argv) > 1 else ["*.txt", "*.csv"]
+    if len(sys.argv) > 1:
+        targets = sys.argv[1:]
+    else:
+        obs_dir = r"D:\2026\Pasut\Model Pasut\InaTides"
+        targets = ["*.txt", "*.csv"]
+        if os.path.exists(obs_dir):
+            targets.extend([os.path.join(obs_dir, "*.txt"), os.path.join(obs_dir, "*.csv")])
     run_pipeline(targets)
