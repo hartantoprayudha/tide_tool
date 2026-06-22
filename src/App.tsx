@@ -70,6 +70,8 @@ const formatUTC = (date: Date, fmt: string) => {
   if (isNaN(date.getTime())) return "Invalid Date";
   // Always use UTC components to avoid timezone interference
   const y = date.getUTCFullYear();
+  const yyyy = String(y);
+  const yy = String(y).slice(-2);
   const m = String(date.getUTCMonth() + 1).padStart(2, '0');
   const d = String(date.getUTCDate()).padStart(2, '0');
   const hh = String(date.getUTCHours()).padStart(2, '0');
@@ -77,7 +79,8 @@ const formatUTC = (date: Date, fmt: string) => {
   const ss = String(date.getUTCSeconds()).padStart(2, '0');
 
   return fmt
-    .replace('yyyy', String(y))
+    .replace('yyyy', yyyy)
+    .replace('yy', yy)
     .replace('MM', m)
     .replace('dd', d)
     .replace('HH', hh)
@@ -2419,7 +2422,7 @@ export default function App() {
 
                 predData.push({
                     time: formatUTC(d, 'ddMMyy'),
-                    fullTime: formatUTC(d, 'dd/MM/yy HH:mm'),
+                    fullTime: formatUTC(d, 'dd/MM/yyyy HH:mm:ss') + ' UTC',
                     value: parseFloat(val.toFixed(3)),
                     timestamp: d,
                     dayKey: dayKey

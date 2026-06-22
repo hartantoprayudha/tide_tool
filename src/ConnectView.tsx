@@ -5,8 +5,8 @@ import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, 
 export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onDataLoaded: (data: any[], selectedSensorName?: string) => void, onStationMetaLoaded: (name: string, lat: string, lon: string) => void }) {
   const [host, setHost] = useState('10.10.140.19');
   const [port, setPort] = useState('3306');
-  const [user, setUser] = useState('');
-  const [password, setPassword] = useState('');
+  const [user, setUser] = useState('root');
+  const [password, setPassword] = useState('r00t');
   const [database, setDatabase] = useState('bako');
   
   const [selectedTable, setSelectedTable] = useState('data_vsat5');

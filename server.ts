@@ -24,13 +24,18 @@ async function startServer() {
         user,
         password,
         database,
+        connectTimeout: 5000,
         dateStrings: true
       });
       await connection.execute("SELECT 1");
       res.json({ success: true, message: "Koneksi berhasil." });
     } catch (error: any) {
       console.error("Database test error:", error);
-      res.status(500).json({ success: false, error: error.message });
+      let errMsg = error.message;
+      if (error.code === 'ETIMEDOUT') {
+        errMsg = `Koneksi timeout (ETIMEDOUT). Pastikan database di ${host}:${port} dapat diakses dari internet publik (bukan IP lokal seperti 10.x.x.x atau 192.x.x.x).`;
+      }
+      res.status(500).json({ success: false, error: errMsg });
     } finally {
       if (connection) {
         await connection.end();
@@ -49,6 +54,7 @@ async function startServer() {
         user,
         password,
         database,
+        connectTimeout: 5000,
         dateStrings: true
       });
 
@@ -88,7 +94,11 @@ async function startServer() {
       res.json({ success: true, data: rows });
     } catch (error: any) {
       console.error("Database connection error:", error);
-      res.status(500).json({ success: false, error: error.message });
+      let errMsg = error.message;
+      if (error.code === 'ETIMEDOUT') {
+        errMsg = `Koneksi timeout (ETIMEDOUT). Pastikan database di ${host}:${port} dapat diakses dari internet publik (bukan IP lokal seperti 10.x.x.x atau 192.x.x.x).`;
+      }
+      res.status(500).json({ success: false, error: errMsg });
     } finally {
       if (connection) {
         await connection.end();
@@ -106,6 +116,7 @@ async function startServer() {
         user,
         password,
         database,
+        connectTimeout: 5000,
         dateStrings: true
       });
 
@@ -113,7 +124,11 @@ async function startServer() {
       res.json({ success: true, data: rows });
     } catch (error: any) {
       console.error("Database query error:", error);
-      res.status(500).json({ success: false, error: error.message });
+      let errMsg = error.message;
+      if (error.code === 'ETIMEDOUT') {
+        errMsg = `Koneksi timeout (ETIMEDOUT). Pastikan database di ${host}:${port} dapat diakses dari internet publik.`;
+      }
+      res.status(500).json({ success: false, error: errMsg });
     } finally {
       if (connection) {
         await connection.end();
