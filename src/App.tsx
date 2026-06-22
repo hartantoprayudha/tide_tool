@@ -3222,7 +3222,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     </div>
                 </div>
             )}
-            {activeTab === 'tsunami' && <TsunamiAnalysisView records={records} selectedSensor={selectedSensor} availableSensors={availableSensors} />}
+            {activeTab === 'tsunami' && <TsunamiAnalysisView records={records} selectedSensor={selectedSensor} availableSensors={availableSensors} stationName={chartTitle} />}
             {activeTab === 'summarize' && <SummarizeView />}
             {activeTab === 'utilities' && <UtilitiesView />}
             {activeTab === 'connect' && (

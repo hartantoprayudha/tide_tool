@@ -22,7 +22,7 @@ const formatUTC = (date: Date, fmt: string) => {
     .replace('ss', ss);
 };
 
-export default function TsunamiAnalysisView({ records, selectedSensor, availableSensors }: any) {
+export default function TsunamiAnalysisView({ records, selectedSensor, availableSensors, stationName }: any) {
   const [isControlsOpen, setIsControlsOpen] = useState(true);
   const [vZoom, setVZoom] = useState(1);
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
@@ -400,21 +400,41 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
     
     if (detected && maxIdx !== -1) {
         // Find start time
-        const GAP_THRESHOLD_MS = 3 * 3600 * 1000; // 3 hours
-        let lastAboveThreshIdx = maxIdx;
+        let windowStart = bmkgData?.timeMs || results[0].timeMs;
+        let windowEnd = windowStart + 24 * 3600 * 1000; // 24 hours potential window
+        let firstDropIdx = -1;
         
-        for (let i = maxIdx; i >= 0; i--) {
+        // Cari posisi pertama di mana air surut secara anomali (negatif)
+        for (let i = 0; i < results.length; i++) {
             if (results[i].tsunamiSignal === null) continue;
-            let absSig = Math.abs(results[i].tsunamiSignal!);
-            if (absSig > THRESHOLD) {
-                lastAboveThreshIdx = i;
-            } else {
-                if (results[lastAboveThreshIdx].timeMs - results[i].timeMs > GAP_THRESHOLD_MS) {
+            if (results[i].timeMs >= windowStart && results[i].timeMs <= windowEnd) {
+                if (results[i].tsunamiSignal! < -THRESHOLD) {
+                    firstDropIdx = i;
                     break;
                 }
             }
         }
-        startTime = results[lastAboveThreshIdx].timeMs;
+
+        const GAP_THRESHOLD_MS = 3 * 3600 * 1000; // 3 hours
+        let lastAboveThreshIdx = maxIdx;
+
+        if (firstDropIdx !== -1 && firstDropIdx <= maxIdx) {
+            startTime = results[firstDropIdx].timeMs;
+        } else {
+            // Fallback logic
+            for (let i = maxIdx; i >= 0; i--) {
+                if (results[i].tsunamiSignal === null) continue;
+                let absSig = Math.abs(results[i].tsunamiSignal!);
+                if (absSig > THRESHOLD) {
+                    lastAboveThreshIdx = i;
+                } else {
+                    if (results[lastAboveThreshIdx].timeMs - results[i].timeMs > GAP_THRESHOLD_MS) {
+                        break;
+                    }
+                }
+            }
+            startTime = results[lastAboveThreshIdx].timeMs;
+        }
         
         // Find end time
         lastAboveThreshIdx = maxIdx;
@@ -588,7 +608,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
          <div className="flex-1 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
              <div className="flex justify-between items-center mb-6">
                 <div>
-                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Analisis Anomali Sea Level</h3>
+                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">{stationName ? `Analisis Tsunami - ${stationName}` : "Analisis Anomali Sea Level"}</h3>
                    <p className="text-xs text-slate-500 mt-1">Grafik interaktif untuk isolasi sinyal tsunami dari pasang surut astronomis</p>
                 </div>
                 <div className="flex gap-2">
