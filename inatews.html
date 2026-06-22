@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+	
+	<link rel="icon" type="image/x-icon" href="https://inatews.bmkg.go.id//favicon.ico">
+    <link rel="stylesheet" href="https://inatews.bmkg.go.id/assets_inatews/css/all.css" />
+    <link rel="stylesheet" href="https://inatews.bmkg.go.id/assets_inatews/css/L.Icon.Pulse.css" />
+	<link rel="stylesheet" href="https://inatews.bmkg.go.id/assets_inatews/css/L.Control.Layers.Tree.css"/>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.11.4/css/jquery.dataTables.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/ekko-lightbox/5.3.0/ekko-lightbox.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css'>
+    <link rel="stylesheet" href="https://inatews.bmkg.go.id/assets_inatews/css/Icon.Label.css" />
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/foundation-sites@6.7.4/dist/css/foundation.min.css" crossorigin="anonymous">
+	<link rel="stylesheet" href="https://inatews.bmkg.go.id/assets_inatews/css/style.css" />
+   	<script src="https://inatews.bmkg.go.id/assets_inatews/js/Icon.Label.js"></script>
+    <script src="https://inatews.bmkg.go.id/assets_inatews/js/Icon.Label.Default.js"></script>
+	<script src="https://inatews.bmkg.go.id/assets_inatews/js/leaflet-tilelayer-colorfilter.min.js"></script>
+    <title>InaTEWS - BMKG (Indonesia Tsunami Early Warning System)</title>
+  </head>
+  
+  <body >
+  
+    <div class="container">
+	
+	
+	
+	
+	
+	
+	
+	
+   <header id="main-header" class="">
+
+        <div class="d-flex flex-row "id="header_img_bg" style=" display:block; background-image: url('https://inatews.bmkg.go.id/assets_inatews/img/header2.jpg'); background-repeat:no-repeat; background-size: 100% auto;  max-width: 100%; height:110px">
+		
+		   		   	 <div class="col-lg-2 p-0 bg-secondary" style="background-color:rgb(0,0,0,0)!important;  position: absolute; z-index:100" >
+              <a href="https://inatews.bmkg.go.id/"><div class="card card-body text-black py-2 px-1 border-0 d-none d-lg-block d-md-block col-sm-2" style=" background-color:rgb(0,0,0,0); background-image: url('https://inatews.bmkg.go.id/assets_inatews/img/gabunglogo.png')!important; background-repeat:no-repeat; background-size: contain; background-position: left; height:90px; display: block; max-width: 100%; max-height: 100%">
+              </div></a> 
+            </div>	
+		
+			
+          <div class="col-lg-12 col-md-12" style="float:left!important; ">
+            <div id="box_judul" class="d-flex flex-column py-4 my-1 d-sm-block text-white" >
+           
+              <h4 id="judul_header" style="font-weight: bold;text-align:center!important; margin-bottom:0px;" >INDONESIA TSUNAMI EARLY WARNING SYSTEM</h4>
+			
+            </div>
+          </div>
+		  
+		  </div>
+		  <div class="d-flex flex-row">
+		  
+		  
+		  <div class="col-lg-12 col-md-12" style="padding:0px">
+		  <nav class="navbar my-navbar navbar-expand-lg navbar-light bg-light">
+  
+  <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNavDropdown" aria-controls="navbarNavDropdown" aria-expanded="false" aria-label="Toggle navigation">
+    <span class="navbar-toggler-icon"></span>
+  </button>
+  <div class="collapse navbar-collapse" id="navbarNavDropdown">
+    <ul class="navbar-nav ml-auto" id="menu">
+      <li class="nav-item ">
+        <a class="nav-link" href="https://inatews.bmkg.go.id/"><i class="fas fa-home"></i> Info Terkini <span class="sr-only">(current)</span></a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="https://inatews.bmkg.go.id/web/m5"><i class="fab fa-creative-commons-sampling"></i> Gempabumi M>5</a>
+      </li>
+	  
+      <li class="nav-item">
+        <a class="nav-link" href="https://inatews.bmkg.go.id/web/felt"><i class="fas fa-globe-asia"></i> Gempabumi Dirasakan</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="https://inatews.bmkg.go.id/web/tsunami"><i class="fas fa-house-damage"></i> Tsunami</a>
+      </li>
+	   <li class="nav-item">
+        <a class="nav-link" href="https://inatews.bmkg.go.id/web/realtime"><i class="fas fa-bolt"></i> Gempabumi Realtime</a> 
+      </li>
+	   <li class="nav-item">
+        <a class="nav-link" href="http://inatews2.bmkg.go.id" target="_blank"><i class="fas fa-bolt"></i> Versi Desktop</a> 
+      </li>
+	   <li class="nav-item">
+        <a class="nav-link" href="https://inatews.bmkg.go.id/eng"><i class="fas fa-language"></i> English Version</a> 
+      </li>
+    </ul>
+  </div>
+ 
+</nav>
+	 </div>	  
+</div>
+<script>
+document.onkeydown = function(e) {
+if(event.keyCode == 123) {
+return false;
+}
+if(e.ctrlKey && e.shiftKey && e.keyCode == 'I'.charCodeAt(0)){
+return false;
+}
+if(e.ctrlKey && e.shiftKey && e.keyCode == 'J'.charCodeAt(0)){
+return false;
+}
+if(e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)){
+return false;
+}
+}
+</script> </header>
+  
+    
+     
+          <!-- CONTACT -->
+	  <div id="contact" >
+	  <div class="card card-body bg-default text-black py-3 border-0" style="background-color:#e0e0dc!important">
+	  <h2 style="font-size:150%" class="text-center"><b>DAFTAR 30 TSUNAMI TERAKHIR</b></h2>
+    <!--<p class="text-center m-0" style="font-size:90%">Merupakan 30 kejadian gempabumi terakhir yang didiseminasikan oleh InaTEWS BMKG</p>-->
+		
+	<section id="model_6">
+	
+		<div class="tab-content mt-2 container" id="myTabContent">
+			<div class="tab-pane fade show active" id="contact5" style="font-size:80%; font-color:black" role="tabpanel" aria-labelledby="profile-tab"></div>
+
+		</div>
+</section>
+     
+		
+			  </div>
+			  </div>
+ <script>
+ function loadata(a,e){var t=new XMLHttpRequest;t.onreadystatechange=function(){4==this.readyState&&200==this.status&&myFunction(this,e,a)},t.open("GET",a,!0),t.send()}function myFunction(a,e,t){var i;let n;if("home5"==e)var l='<div class="d-flex py-3 px-0 text-dark"> Disclaimer!:Merupakan informasi gempabumi yang didiseminasikan dalam waktu kurang dari 5 menit setelah kejadian gempa melalui multi-moda penyebaran informasi  antara lain: SMS, App Seluler, E-mail, Fax, Website, WRS, GTS dan Sosial Media. Informasi ini merupakan informasi gempabumi secara cepat dari InaTEWS. Tidak akan ada pemutakhiran parameter gempabumi dan parameter gempabumi yang final boleh jadi berbeda.</div>';else if("profile5"==e)l='<div class="d-flex py-3 px-0 text-dark">Disclaimer!:Merupakan daftar informasi gempabumi dirasakan yang didiseminasikan setelah BMKG menerima laporan kerusakan atau dirasakan dari masyarakat. Tidak  ada pemutakhiran parameter gempabumi dan parameter gempabumi yang final boleh jadi berbeda dengan informasi dalam daftar ini.</div>';else l='<div class="d-flex py-3 px-0 text-dark">Disclaimer!:Daftar tsunami berikut ini adalah rangkaian buletin peringatan dini tsunami BMKG yang didiseminasikan melalui multi-moda penyebaran informasi antara lain: SMS, Aplikasi Seluler, Email, Faks, Situs Web, WRS, GTS, dan Media Sosial. Informasi ini merupakan peringatan dini tsunami secara cepat dari InaTEWS. Parameter gempabumi yang final boleh jadi berbeda dengan informasi dalam daftar ini.</div>';var o=a.responseXML.getElementsByTagName("info");for(i=0;i<o.length;i++){n=o[i].getElementsByTagName("subject")[0].childNodes[0].nodeValue;o[i].getElementsByTagName("date")[0].childNodes[0].nodeValue;if("https://bmkg-content-inatews.storage.googleapis.com/last30event.xml"==t)var d=578;else if("https://bmkg-content-inatews.storage.googleapis.com/last30feltevent.xml"==t)d=476;else d=614;l+='<a  href="detail?name='+o[i].getElementsByTagName("eventid")[0].childNodes[0].nodeValue+"&day="+d+'"><div class="d-flex flex-row text-black align-items-start text-left border-1" style="border-bottom-style: solid!important;border-bottom-width: thin; border-bottom-color: coral; background-color:#9A0101;"> <div class="col-lg-2 col-sm-3  p-1 bg-secondary " id="mm" style="background-color:#9A0101!important" ><div class="card card-body text-black p-0 border-0" style="background-color:rgb(0,0,0,0)!important"><p style="margin-bottom:0px; color:#FFA858; text-align:center"> Magnitudo</p><h2 style=" text-align:center; font-size:320%; margin-top:0px; color:#FFA858; font-weight:bold !important" id="">'+o[i].getElementsByTagName("magnitude")[0].childNodes[0].nodeValue+'</h2></div></div> <div class="col-lg-10 col-sm-9  p-0 bg-secondary border-0" id="" style="border-style: solid;background-color:white!important"> <div class="card card-body bg-none text-black py-1 border-0" style="background-color:rgb(0, 0, 0,0)!important"><p class="text-black" style="color:black; margin-bottom:0; font-weight:bold">'+o[i].getElementsByTagName("subject")[0].childNodes[0].nodeValue.toUpperCase()+'</p><p class="text-black" style="color:black; margin-bottom:0; font-weight:bold">'+o[i].getElementsByTagName("date")[0].childNodes[0].nodeValue+" "+o[i].getElementsByTagName("time")[0].childNodes[0].nodeValue+'</p><p class="text-black" style="color:black; font-size:90%; margin-bottom:0; font-weight:normal"> Pusat Gempabumi '+o[i].getElementsByTagName("area")[0].childNodes[0].nodeValue+'</p>  <p class="text-black" style="color:black; margin-bottom:0; font-weight:normal">Kedalaman : '+o[i].getElementsByTagName("depth")[0].childNodes[0].nodeValue+"</p></div></div></div></a>"}document.getElementById(e).innerHTML=l}loadata("https://bmkg-content-inatews.storage.googleapis.com/last30tsunamievent.xml","contact5");
+ </script><div class="alert alert-success" style="margin:0!important; font-size:90%"role="alert">
+<p id="note"></p>
+<p style="font-size:90%">Situs web berbasis cloud ini berisi informasi ringan dan terbatas untuk tujuan peringatan dini saja, untuk katalog gempa lengkap dapat diakses melalui http://repogempa.bmkg.  go.id atau hubungi email bmkg info_inatews@bmkg.go.id untuk mengakses waveform gempa.</p>
+</div>
+      <!-- FOOTER -->
+      <footer id="main-footer" class="p-2 bg-light text-dark text-center">
+      
+        <div class="row" style="margin-top:10px">
+          <div class="col text-black">
+            <a href="https://bmkg.go.id/" target="_blank">
+              <span style="color:black!important">
+                <i class="fas fa-user-circle"></i> BMKG Website </span>
+            </a>
+          </div>
+          <div class="col text-black">
+            <a href="http://repogempa.bmkg.go.id/" target="_blank">
+              <span style="color:black!important">
+                <i class="fas fa-user-circle"></i> Repository </a>
+            </span>
+          </div>
+          <div class="col text-black">
+            <a href="http://aeic.bmkg.go.id/" target="_blank">
+              <span style="color:black!important">
+                <i class="fas fa-user-circle"></i> AEIC-BMKG </a>
+            </span>
+          </div>
+          
+        </div>
+        <div class="row text-center" style="margin-top:20px">
+         
+            <div class="col" style="width:20%!important;">
+              <a href="https://inatews.bmkg.go.id/assets_inatews/img/blekok_innovator_team.png" data-toggle="lightbox">
+                <img src="https://inatews.bmkg.go.id/assets_inatews/img/blekok_innovator_team.png" alt="" width="15%" class="img-fluid ">
+              </a></br>
+              <span style="font-size:90%!important">&copy;2022 Website InaTEWS</span>
+            </div>
+          
+        </div>
+      </footer>
+    </div>
+	
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ekko-lightbox/5.3.0/ekko-lightbox.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/foundation-sites@6.7.4/dist/js/foundation.min.js"></script>
+	<script src="https://cdn.datatables.net/1.11.4/js/jquery.dataTables.min.js"></script>
+	
+	<script>
+	 var current = location.href;
+	 var sub = document.getElementById("menu").getElementsByTagName("li");
+	 var lis = document.querySelectorAll('nav ul li a');
+    for (let i = 0; i < lis.length; i++) {
+		if(lis[i].href == current){
+			sub[i].classList.add("nav-active");
+		}
+	} 
+    </script>
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7cbaf3ec2b0e442aa509982450bb00ce","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0f995b018d2a9ad',t:'MTc4MjExMzgxNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

@@ -136,6 +136,49 @@ async function startServer() {
     }
   });
 
+  app.get("/api/bmkg/gempa", async (req, res) => {
+    try {
+      // type can be 'terkini' (60 latest M5+), 'tsunami' (latest tsunami), or 'autogempa' (latest single)
+      let file = 'autogempa.xml';
+      // BMKG does not have a dedicated gempatsunami.xml. We must fetch gempaterkini.xml
+      // which contains the list of latest earthquakes, and filter out the tsunami ones on the client.
+      if (req.query.type === 'tsunami' || req.query.type === 'terkini') file = 'gempaterkini.xml';
+      else if (req.query.type === 'dirasakan') file = 'gempadirasakan.xml';
+      
+      const response = await fetch(`https://data.bmkg.go.id/DataMKG/TEWS/${file}`);
+      if (!response.ok) throw new Error("Failed to fetch BMKG data");
+      const xml = await response.text();
+      res.type('application/xml').send(xml);
+    } catch (error: any) {
+      console.error("BMKG fetch error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get("/api/bmkg/history", async (req, res) => {
+    try {
+      const response = await fetch("https://www.bmkg.go.id/gempabumi/berpotensi-tsunami");
+      if (!response.ok) throw new Error("Failed to fetch BMKG history");
+      const html = await response.text();
+      res.type('text/html').send(html);
+    } catch (error: any) {
+      console.error("BMKG history fetch error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get("/api/bmkg/inatews", async (req, res) => {
+    try {
+      const response = await fetch("https://bmkg-content-inatews.storage.googleapis.com/last30tsunamievent.xml");
+      if (!response.ok) throw new Error("Failed to fetch BMKG inatews");
+      const xml = await response.text();
+      res.type('application/xml').send(xml);
+    } catch (error: any) {
+      console.error("BMKG inatews fetch error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

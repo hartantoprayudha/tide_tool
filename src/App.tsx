@@ -37,7 +37,7 @@ import {
 import ConnectView from './ConnectView';
 import SummarizeView from './SummarizeView';
 import UtilitiesView from './UtilitiesView';
-import ModelsView from './ModelsView';
+import TsunamiAnalysisView from './TsunamiAnalysisView';
 
 import { 
   ComposedChart,
@@ -2987,7 +2987,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
         </div>
         
         <nav className="flex-1 space-y-1 w-full">
-          {['dashboard', 'connect', 'validate', 'harmonic', 'predictions', 'models', 'summarize', 'utilities', 'about'].map((tab) => (
+          {['dashboard', 'connect', 'validate', 'harmonic', 'predictions', 'tsunami', 'summarize', 'utilities', 'about'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -3005,11 +3005,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
               {tab === 'validate' && <Search size={18} />}
               {tab === 'harmonic' && <Piano size={18} />}
               {tab === 'predictions' && <TrendingUp size={18} />}
-              {tab === 'models' && <Globe size={18} />}
+              {tab === 'tsunami' && <Waves size={18} />}
               {tab === 'summarize' && <MapIcon size={18} />}
               {tab === 'utilities' && <Wrench size={18} />}
               {tab === 'about' && <Info size={18} />}
-              {isSidebarOpen && <span className="capitalize">{tab === 'models' ? 'Tide Models' : tab}</span>}
+              {isSidebarOpen && <span className="capitalize">{tab === 'tsunami' ? 'Tsunami Analysis' : tab}</span>}
             </button>
           ))}
         </nav>
@@ -3178,7 +3178,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             </div>
         )}
 
-        {!records.length && (activeTab !== 'readme' && activeTab !== 'about' && activeTab !== 'models' && activeTab !== 'summarize' && activeTab !== 'connect' && activeTab !== 'utilities') && !isLoading ? (
+        {!records.length && (activeTab !== 'readme' && activeTab !== 'about' && activeTab !== 'tsunami' && activeTab !== 'summarize' && activeTab !== 'connect' && activeTab !== 'utilities') && !isLoading ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-2xl border border-[#e2e8f0] p-12 text-center gap-6 shadow-sm">
             <div className="w-20 h-20 bg-sky-50 rounded-3xl flex items-center justify-center text-[#0284c7] rotate-3 hover:rotate-0 transition-transform duration-300">
               <Waves size={40} />
@@ -3222,7 +3222,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     </div>
                 </div>
             )}
-            {activeTab === 'models' && <ModelsView />}
+            {activeTab === 'tsunami' && <TsunamiAnalysisView records={records} selectedSensor={selectedSensor} availableSensors={availableSensors} />}
             {activeTab === 'summarize' && <SummarizeView />}
             {activeTab === 'utilities' && <UtilitiesView />}
             {activeTab === 'connect' && (

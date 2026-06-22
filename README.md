@@ -47,6 +47,24 @@ Bagi Anda yang ingin menjalankan analisis masif (batching) secara sistematis tan
 ```bash
 pip install pandas numpy scipy matplotlib
 ```
+
+### Cara Jalan:
+Gunakan file `tide_analysis.py` sebagai modul utama.
+```python
+import pandas as pd
+from tide_analysis import load_data, harmonic_analysis, predict_tide
+
+# Load & Analisis
+df = load_data('data.csv', value_col='PRS1 (m)')
+results, z0 = harmonic_analysis(df, set_konstanta='UKHO')
+
+# Prediksi 7 hari kedepan
+times, values = predict_tide(df['Timestamp'].max(), df['Timestamp'].max() + pd.Timedelta(days=7), 60, results, z0)
+print(values)
+```
+
+---
+
 ## 4. Integrasi Sistem (Web API)
 
 Untuk kebutuhan automasi *pipeline* data geospasial, sistem *machine learning*, atau integrasi ke dasbor eksternal, BIG Tidal Analysis menyediakan jalur Web API (Representational State Transfer). 
