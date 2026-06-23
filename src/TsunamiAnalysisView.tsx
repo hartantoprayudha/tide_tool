@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ReferenceLine, ReferenceArea, Brush } from 'recharts';
-import { Activity, AlertTriangle, Clock, Waves, PanelRightClose, PanelRightOpen, Settings } from 'lucide-react';
+import { Activity, AlertTriangle, Clock, Waves, PanelRightClose, PanelRightOpen, Settings, Download } from 'lucide-react';
+import { toPng } from 'html-to-image';
+import download from 'downloadjs';
 import { cn } from './lib/utils';
 
 const formatUTC = (date: Date, fmt: string) => {
@@ -22,7 +24,7 @@ const formatUTC = (date: Date, fmt: string) => {
     .replace('ss', ss);
 };
 
-export default function TsunamiAnalysisView({ records, selectedSensor, availableSensors, stationName }: any) {
+export default function TsunamiAnalysisView({ records, selectedSensor, availableSensors, stationName, stationLat, stationLon }: any) {
   const [isControlsOpen, setIsControlsOpen] = useState(true);
   const [vZoom, setVZoom] = useState(1);
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
@@ -450,6 +452,13 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
             }
         }
         endTime = results[lastAboveThreshIdx].timeMs;
+        
+        if (startTime) {
+           const MAX_DURATION_MS = 4 * 3600 * 1000;
+           if (endTime - startTime > MAX_DURATION_MS) {
+               endTime = startTime + MAX_DURATION_MS;
+           }
+        }
     }
 
     return {
@@ -479,6 +488,26 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
     const step = Math.max(1, Math.ceil(detection.data.length / 1000));
     return detection.data.filter((_: any, i: number) => i % step === 0);
   }, [detection.data]);
+
+  const handleDownloadPNG = () => {
+      const el = document.getElementById('tsunami-chart-container');
+      if (el) {
+          toPng(el, { backgroundColor: '#ffffff' }).then(dataUrl => {
+              download(dataUrl, `tsunami_analysis_${stationName || 'chart'}.png`);
+          }).catch(err => console.error("Error creating PNG:", err));
+      }
+  };
+
+  const handleDownloadCSV = () => {
+      const csvContent = [
+          "Nama Stasiun,Latitude,Longitude,Amplitudo Tsunami (m),Waktu Mulai,Waktu Berakhir",
+          `${stationName || 'Unknown'},${stationLat || ''},${stationLon || ''},${detection.detected ? detection.maxWave.toFixed(3) : 0},${detection.start ? formatUTC(new Date(detection.start), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : ''},${detection.end ? formatUTC(new Date(detection.end), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : ''}`
+      ].join('\n');
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      download(url, `tsunami_report_${stationName || 'station'}.csv`);
+  };
 
   const yDomain = useMemo(() => {
     if (!displayData.length) return ['auto', 'auto'];
@@ -605,13 +634,16 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
 
       {/* Chart Section */}
       <div className="flex flex-col xl:flex-row gap-6">
-         <div className="flex-1 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+         <div id="tsunami-chart-container" className="flex-1 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative">
              <div className="flex justify-between items-center mb-6">
                 <div>
                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">{stationName ? `Analisis Tsunami - ${stationName}` : "Analisis Anomali Sea Level"}</h3>
                    <p className="text-xs text-slate-500 mt-1">Grafik interaktif untuk isolasi sinyal tsunami dari pasang surut astronomis</p>
                 </div>
-                <div className="flex gap-2">
+                <div data-html2canvas-ignore className="flex gap-2">
+                   <button onClick={handleDownloadPNG} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> PNG</button>
+                   <button onClick={handleDownloadCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> CSV</button>
+                   <div className="w-px h-6 bg-slate-200 mx-1 self-center"></div>
                    <button onClick={() => zoomInOut(0.25)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors">Zoom In</button>
                    <button onClick={() => zoomInOut(-0.25)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors">Zoom Out</button>
                    <button onClick={() => { setZoomDomain(null); setVZoom(1); }} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-colors">Reset</button>
@@ -659,7 +691,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                           width={60}
                         />
                         <RechartsTooltip 
-                          formatter={(value: number, name: string) => [value.toFixed(3) + ' m', name === 'tsunamiSignal' ? 'High-Freq Signal (Tsunami)' : (name === 'smoothed' ? 'Astro Tide Base' : 'Raw Sea Level')]}
+                          formatter={(value: number, name: string) => [value.toFixed(3) + ' m', name === 'tsunamiSignal' ? 'High-Freq Signal (Tsunami)' : (name === 'smoothed' ? 'Predicted Sea Level' : 'Raw Sea Level')]}
                           labelFormatter={(label: number) => formatUTC(new Date(label), 'dd/MM/yyyy HH:mm:ss') + ' UTC'}
                           contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                           itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
@@ -687,7 +719,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                             strokeWidth={2} 
                             strokeDasharray="5 5"
                             dot={false} 
-                            name="Astro Tide Base" 
+                            name="Predicted Sea Level" 
                             isAnimationActive={false} 
                         />
                         <Line 
