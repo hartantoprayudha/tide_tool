@@ -105,26 +105,26 @@ def get_nodal_corrections(N, name):
         
     return f, u
 
-def predict_tide(start_date, years, z0, constituents):
+def predict_tide(start_date, end_date, z0, constituents):
     '''
     start_date: datetime object
-    years: int, number of years to predict
+    end_date: datetime object
     z0: float, mean sea level / datum offset
     constituents: list of dicts with 'name', 'amplitude', 'phase' (Greenwich phase g), 'frequency'
     '''
-    # Create 1-hour interval timestamps, up to exactly 19 years
-    end_date_exact = datetime(start_date.year + years, start_date.month, start_date.day, start_date.hour, start_date.minute, start_date.second)
-    
     # Generate timestamp series (freq='1h' works in pandas, 'h' is also fine)
     try:
-        timestamps = pd.date_range(start=start_date, end=end_date_exact, freq='1h', inclusive='left')
+        timestamps = pd.date_range(start=start_date, end=end_date, freq='1h', inclusive='left')
     except TypeError:
         # Fallback for older pandas versions
-        timestamps = pd.date_range(start=start_date, end=end_date_exact, freq='1h', closed='left')
+        timestamps = pd.date_range(start=start_date, end=end_date, freq='1h', closed='left')
     
     all_predictions = []
     
-    for year in range(start_date.year, start_date.year + years + 1):
+    start_year = start_date.year
+    end_year = end_date.year
+    
+    for year in range(start_year, end_year + 1):
         year_mask = timestamps.year == year
         if not year_mask.any():
             continue
@@ -166,10 +166,14 @@ def predict_tide(start_date, years, z0, constituents):
     return df
 
 def main():
-    parser = argparse.ArgumentParser(description='Calculate 19-year tide prediction from harmonic constants CSV')
+    parser = argparse.ArgumentParser(description='Calculate tide prediction from harmonic constants CSV')
     parser.add_argument('input_csv', help='Input CSV file containing harmonic constants (e.g., harmonic_constants_xxxx.csv)')
     parser.add_argument('--z0', type=float, default=0.0, help='Mean sea level (Z0) offset. Default is 0.0.')
-    parser.add_argument('--output', '-o', default='prediction_19years_BIG9.csv', help='Output CSV file name')
+    parser.add_argument('--start', type=str, default='2026-01-01 00:00:00', help='Start date (YYYY-MM-DD HH:MM:SS). Default is 2026-01-01 00:00:00.')
+    parser.add_argument('--end', type=str, help='End date (YYYY-MM-DD HH:MM:SS). If provided, overrides --years and --months.')
+    parser.add_argument('--years', type=int, default=0, help='Duration of prediction in years.')
+    parser.add_argument('--months', type=int, default=0, help='Duration of prediction in months.')
+    parser.add_argument('--output', '-o', default='out_pred_BIG.csv', help='Output CSV file name')
     
     args = parser.parse_args()
     
@@ -201,12 +205,18 @@ def main():
         
     print(f"Using {len(filtered_constituents)} constituents for prediction: {[c['name'] for c in filtered_constituents]}")
     
-    # Requirement: 19 years starting from 1 Jan 2026 00:00:00 UTC
-    start_date = datetime(2026, 1, 1, 0, 0, 0)
-    years_to_predict = 19
+    start_date = pd.to_datetime(args.start)
     
-    print(f"Starting prediction from {start_date} for {years_to_predict} years...")
-    df_pred = predict_tide(start_date, years_to_predict, args.z0, filtered_constituents)
+    if args.end:
+        end_date = pd.to_datetime(args.end)
+    else:
+        if args.years == 0 and args.months == 0:
+            # Default to 19 years if neither end_date, years, nor months are specified
+            args.years = 19
+        end_date = start_date + pd.DateOffset(years=args.years, months=args.months)
+        
+    print(f"Starting prediction from {start_date} to {end_date}...")
+    df_pred = predict_tide(start_date, end_date, args.z0, filtered_constituents)
     
     df_pred.to_csv(args.output, index=False)
     print(f"Prediction successfully saved to {args.output}")
