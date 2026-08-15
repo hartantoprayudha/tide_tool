@@ -32,6 +32,8 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
   const [bmkgData, setBmkgData] = useState<any>(null);
 
+  const [brushKey, setBrushKey] = useState(0);
+
   useEffect(() => {
     let dataStart = records?.[0]?.timestamp?.getTime() || 0;
     let dataEnd = records?.[records.length - 1]?.timestamp?.getTime() || 0;
@@ -646,7 +648,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                    <div className="w-px h-6 bg-slate-200 mx-1 self-center"></div>
                    <button onClick={() => zoomInOut(0.25)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors">Zoom In</button>
                    <button onClick={() => zoomInOut(-0.25)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors">Zoom Out</button>
-                   <button onClick={() => { setZoomDomain(null); setVZoom(1); }} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-colors">Reset</button>
+                   <button onClick={() => { setZoomDomain(null); setVZoom(1); setBrushKey(prev => prev + 1); }} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-colors">Reset</button>
                 </div>
              </div>
 
@@ -691,7 +693,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                           width={60}
                         />
                         <RechartsTooltip 
-                          formatter={(value: number, name: string) => [value.toFixed(3) + ' m', name === 'tsunamiSignal' ? 'High-Freq Signal (Tsunami)' : (name === 'smoothed' ? 'Predicted Sea Level' : 'Raw Sea Level')]}
+                          formatter={(value: number, name: string) => [value.toFixed(3) + ' m', name]}
                           labelFormatter={(label: number) => formatUTC(new Date(label), 'dd/MM/yyyy HH:mm:ss') + ' UTC'}
                           contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                           itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
@@ -728,11 +730,12 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                             stroke="#ef4444" 
                             strokeWidth={2} 
                             dot={false} 
-                            name="High-Freq Signal (Tsunami)" 
+                            name="Anomali Tsunami" 
                             isAnimationActive={false} 
                         />
 
                         <Brush 
+                            key={brushKey}
                             dataKey="timeMs" 
                             height={30} 
                             stroke="#cbd5e1" 
