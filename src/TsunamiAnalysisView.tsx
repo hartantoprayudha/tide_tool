@@ -34,6 +34,17 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
 
   const [brushKey, setBrushKey] = useState(0);
 
+  // Line visibility state for toggling
+  const [visibleLines, setVisibleLines] = useState({
+    raw: true,
+    smoothed: true,
+    tsunamiSignal: true,
+  });
+
+  const toggleLine = (key: 'raw' | 'smoothed' | 'tsunamiSignal') => {
+    setVisibleLines(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   useEffect(() => {
     let dataStart = records?.[0]?.timestamp?.getTime() || 0;
     let dataEnd = records?.[records.length - 1]?.timestamp?.getTime() || 0;
@@ -361,35 +372,18 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
     ifft(real, imag);
 
     const THRESHOLD = 0.05; // 5 cm anomalous amplitude threshold
-    let maxWave = 0;
-    let maxIdx = -1;
     let results = [];
 
-    // First pass: find maximum amplitude and populate results
+    // Populate results with raw, smoothed (predicted), and tsunami anomaly signal
     for (let i = 0; i < tsData.length; i++) {
         const current = tsData[i];
         let signal = real[i];
         
         if (isNaN(current.val) || current.val === null) {
-            results.push({ ...current, tsunamiSignal: null, smoothed: null });
+            results.push({ timeMs: current.timestamp, raw: null, smoothed: null, tsunamiSignal: null });
             continue;
         }
 
-        const absSignal = Math.abs(signal);
-        
-        let inWindow = true;
-        if (bmkgData && bmkgData.timeMs) {
-            // Check if current time is after earthquake, and within e.g. 24 hours
-            if (current.timestamp < bmkgData.timeMs || current.timestamp > bmkgData.timeMs + 24 * 3600 * 1000) {
-                inWindow = false;
-            }
-        }
-        
-        if (inWindow && absSignal > maxWave) {
-            maxWave = absSignal;
-            maxIdx = i;
-        }
-        
         results.push({
             timeMs: current.timestamp,
             raw: current.val,
@@ -398,17 +392,33 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
         });
     }
 
-    let detected = maxWave > THRESHOLD;
+    // Determine candidate search window for tsunami anomaly (post-earthquake)
+    let windowStart = bmkgData?.timeMs || (results.length > 0 ? results[0].timeMs : 0);
+    let windowEnd = windowStart + 24 * 3600 * 1000; // 24 hours potential window
+
+    let initialSignificantIdx = -1;
+    let initialMaxAbs = 0;
+
+    for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        if (r.tsunamiSignal === null) continue;
+        if (r.timeMs >= windowStart && r.timeMs <= windowEnd) {
+            const absSig = Math.abs(r.tsunamiSignal);
+            if (absSig > initialMaxAbs) {
+                initialMaxAbs = absSig;
+                initialSignificantIdx = i;
+            }
+        }
+    }
+
+    let detected = initialMaxAbs >= THRESHOLD && initialSignificantIdx !== -1;
     let startTime: number | null = null;
     let endTime: number | null = null;
+    let maxWave = 0;
     
-    if (detected && maxIdx !== -1) {
-        // Find start time
-        let windowStart = bmkgData?.timeMs || results[0].timeMs;
-        let windowEnd = windowStart + 24 * 3600 * 1000; // 24 hours potential window
+    if (detected && initialSignificantIdx !== -1) {
+        // Find start time: check for first drop/drawdown or first anomaly onset
         let firstDropIdx = -1;
-        
-        // Cari posisi pertama di mana air surut secara anomali (negatif)
         for (let i = 0; i < results.length; i++) {
             if (results[i].tsunamiSignal === null) continue;
             if (results[i].timeMs >= windowStart && results[i].timeMs <= windowEnd) {
@@ -420,16 +430,19 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
         }
 
         const GAP_THRESHOLD_MS = 3 * 3600 * 1000; // 3 hours
-        let lastAboveThreshIdx = maxIdx;
+        let startIdx = initialSignificantIdx;
 
-        if (firstDropIdx !== -1 && firstDropIdx <= maxIdx) {
+        if (firstDropIdx !== -1 && firstDropIdx <= initialSignificantIdx) {
+            startIdx = firstDropIdx;
             startTime = results[firstDropIdx].timeMs;
         } else {
-            // Fallback logic
-            for (let i = maxIdx; i >= 0; i--) {
+            // Fallback: search backwards from anomaly peak
+            let lastAboveThreshIdx = initialSignificantIdx;
+            for (let i = initialSignificantIdx; i >= 0; i--) {
                 if (results[i].tsunamiSignal === null) continue;
+                if (results[i].timeMs < windowStart) break;
                 let absSig = Math.abs(results[i].tsunamiSignal!);
-                if (absSig > THRESHOLD) {
+                if (absSig >= THRESHOLD) {
                     lastAboveThreshIdx = i;
                 } else {
                     if (results[lastAboveThreshIdx].timeMs - results[i].timeMs > GAP_THRESHOLD_MS) {
@@ -437,15 +450,16 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                     }
                 }
             }
+            startIdx = lastAboveThreshIdx;
             startTime = results[lastAboveThreshIdx].timeMs;
         }
         
-        // Find end time
-        lastAboveThreshIdx = maxIdx;
-        for (let i = maxIdx; i < results.length; i++) {
+        // Find end time: search forward from anomaly peak
+        let lastAboveThreshIdx = initialSignificantIdx;
+        for (let i = initialSignificantIdx; i < results.length; i++) {
             if (results[i].tsunamiSignal === null) continue;
             let absSig = Math.abs(results[i].tsunamiSignal!);
-            if (absSig > THRESHOLD) {
+            if (absSig >= THRESHOLD) {
                 lastAboveThreshIdx = i;
             } else {
                 if (results[i].timeMs - results[lastAboveThreshIdx].timeMs > GAP_THRESHOLD_MS) {
@@ -455,17 +469,31 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
         }
         endTime = results[lastAboveThreshIdx].timeMs;
         
+        // Batasan waktu berakhir: maksimal 4 jam setelah waktu mulai kejadian
         if (startTime) {
            const MAX_DURATION_MS = 4 * 3600 * 1000;
            if (endTime - startTime > MAX_DURATION_MS) {
                endTime = startTime + MAX_DURATION_MS;
            }
         }
+
+        // Amplitudo Tsunami: Hanya amplitudo maksimal dari nol ke puncak anomali pada rentang yang diduga terjadi tsunami [startTime, endTime]
+        let maxZeroToPeak = 0;
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            if (r.tsunamiSignal !== null && r.timeMs >= startTime && r.timeMs <= endTime!) {
+                if (r.tsunamiSignal > maxZeroToPeak) {
+                    maxZeroToPeak = r.tsunamiSignal;
+                }
+            }
+        }
+
+        maxWave = maxZeroToPeak;
     }
 
     return {
-        detected,
-        maxWave: detected ? maxWave : 0, 
+        detected: detected && maxWave > 0,
+        maxWave: (detected && maxWave > 0) ? maxWave : 0, 
         start: startTime,
         end: endTime,
         data: results
@@ -515,16 +543,25 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
     if (!displayData.length) return ['auto', 'auto'];
     let min = Number.MAX_VALUE;
     let max = -Number.MAX_VALUE;
+
     displayData.forEach((d: any) => {
-        if (d.tsunamiSignal !== null) {
-            if (d.raw < min) min = d.raw;
-            if (d.raw > max) max = d.raw;
-        }
+      if (visibleLines.raw && d.raw !== null && !isNaN(d.raw)) {
+        if (d.raw < min) min = d.raw;
+        if (d.raw > max) max = d.raw;
+      }
+      if (visibleLines.smoothed && d.smoothed !== null && !isNaN(d.smoothed)) {
+        if (d.smoothed < min) min = d.smoothed;
+        if (d.smoothed > max) max = d.smoothed;
+      }
+      if (visibleLines.tsunamiSignal && d.tsunamiSignal !== null && !isNaN(d.tsunamiSignal)) {
+        if (d.tsunamiSignal < min) min = d.tsunamiSignal;
+        if (d.tsunamiSignal > max) max = d.tsunamiSignal;
+      }
     });
 
     if (min === Number.MAX_VALUE) return ['auto', 'auto'];
 
-    const pad = (max - min) * 0.1;
+    const pad = (max - min) * 0.1 || 0.1;
     const boundedMin = min - pad;
     const boundedMax = max + pad;
 
@@ -535,7 +572,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
         center - (span / vZoom),
         center + (span / vZoom)
     ];
-  }, [displayData, vZoom]);
+  }, [displayData, vZoom, visibleLines]);
 
   const zoomInOut = (delta: number) => {
     setVZoom(prev => Math.max(0.1, prev + delta));
@@ -606,7 +643,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                     {detection.detected ? detection.maxWave.toFixed(3) : '0.000'} <span className="text-lg text-slate-500">m</span>
                 </span>
             </div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Maksimal (Nol ke Puncak/Lembah)</p>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Maksimal (Nol ke Puncak)</p>
         </div>
       </div>
 
@@ -637,18 +674,73 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
       {/* Chart Section */}
       <div className="flex flex-col xl:flex-row gap-6">
          <div id="tsunami-chart-container" className="flex-1 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative">
-             <div className="flex justify-between items-center mb-6">
+             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
                 <div>
                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">{stationName ? `Analisis Tsunami - ${stationName}` : "Analisis Anomali Sea Level"}</h3>
                    <p className="text-xs text-slate-500 mt-1">Grafik interaktif untuk isolasi sinyal tsunami dari pasang surut astronomis</p>
                 </div>
-                <div data-html2canvas-ignore className="flex gap-2">
+                <div data-html2canvas-ignore className="flex flex-wrap items-center gap-2">
                    <button onClick={handleDownloadPNG} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> PNG</button>
                    <button onClick={handleDownloadCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> CSV</button>
-                   <div className="w-px h-6 bg-slate-200 mx-1 self-center"></div>
+                   <div className="w-px h-6 bg-slate-200 mx-1 self-center hidden sm:block"></div>
                    <button onClick={() => zoomInOut(0.25)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors">Zoom In</button>
                    <button onClick={() => zoomInOut(-0.25)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors">Zoom Out</button>
                    <button onClick={() => { setZoomDomain(null); setVZoom(1); setBrushKey(prev => prev + 1); }} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-colors">Reset</button>
+                </div>
+             </div>
+
+             {/* Line Visibility Toggle Controls */}
+             <div data-html2canvas-ignore className="flex flex-wrap items-center justify-between gap-3 mb-5 p-2.5 bg-slate-50 rounded-xl border border-slate-200/70">
+                <div className="flex flex-wrap items-center gap-2">
+                   <span className="text-xs font-black text-slate-600 uppercase tracking-wider mr-1">Plot Garis:</span>
+                   
+                   <button 
+                     type="button"
+                     onClick={() => toggleLine('raw')}
+                     className={cn(
+                       "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-xs cursor-pointer",
+                       visibleLines.raw 
+                         ? "bg-blue-600 text-white border-blue-600" 
+                         : "bg-white text-slate-400 border-slate-200 hover:bg-slate-100 opacity-60 line-through"
+                     )}
+                     title="Klik untuk tampilkan/sembunyikan Raw Sea Level"
+                   >
+                     <span className={cn("w-2.5 h-2.5 rounded-full inline-block border", visibleLines.raw ? "bg-white border-blue-200" : "bg-slate-300 border-slate-400")}></span>
+                     Raw Sea Level
+                   </button>
+
+                   <button 
+                     type="button"
+                     onClick={() => toggleLine('smoothed')}
+                     className={cn(
+                       "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-xs cursor-pointer",
+                       visibleLines.smoothed 
+                         ? "bg-slate-900 text-white border-slate-900" 
+                         : "bg-white text-slate-400 border-slate-200 hover:bg-slate-100 opacity-60 line-through"
+                     )}
+                     title="Klik untuk tampilkan/sembunyikan Predicted Sea Level"
+                   >
+                     <span className="w-3 h-0.5 border-b-2 border-dashed border-current inline-block"></span>
+                     Predicted Sea Level
+                   </button>
+
+                   <button 
+                     type="button"
+                     onClick={() => toggleLine('tsunamiSignal')}
+                     className={cn(
+                       "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-xs cursor-pointer",
+                       visibleLines.tsunamiSignal 
+                         ? "bg-red-600 text-white border-red-600" 
+                         : "bg-white text-slate-400 border-slate-200 hover:bg-slate-100 opacity-60 line-through"
+                     )}
+                     title="Klik untuk tampilkan/sembunyikan Anomali Tsunami"
+                   >
+                     <span className={cn("w-2.5 h-2.5 rounded-full inline-block border", visibleLines.tsunamiSignal ? "bg-white border-red-200" : "bg-slate-300 border-slate-400")}></span>
+                     Anomali Tsunami
+                   </button>
+                </div>
+                <div className="text-[11px] font-medium text-slate-400 italic">
+                   *Klik tombol atau legenda untuk toggle on/off garis
                 </div>
              </div>
 
@@ -699,7 +791,22 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                           itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
                           labelStyle={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid #f1f5f9' }}
                         />
-                        <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px', fontWeight: 'bold', color: '#475569' }} />
+                        <Legend 
+                          wrapperStyle={{ paddingTop: '20px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }} 
+                          onClick={(e: any) => {
+                            if (e && e.dataKey) {
+                              toggleLine(e.dataKey as 'raw' | 'smoothed' | 'tsunamiSignal');
+                            }
+                          }}
+                          formatter={(value: string, entry: any) => {
+                            const isHidden = !visibleLines[entry.dataKey as keyof typeof visibleLines];
+                            return (
+                              <span className={cn("transition-all select-none", isHidden ? "line-through text-slate-400 opacity-50" : "text-slate-700")}>
+                                {value}
+                              </span>
+                            );
+                          }}
+                        />
 
                         {refAreaLeft && refAreaRight && (
                            <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#ef4444" fillOpacity={0.15} />
@@ -708,21 +815,23 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                         <Line 
                             type="monotone" 
                             dataKey="raw" 
-                            stroke="#0f172a" 
+                            stroke="#2563eb" 
                             strokeWidth={1.5} 
                             dot={false} 
                             name="Raw Sea Level" 
                             isAnimationActive={false} 
+                            hide={!visibleLines.raw}
                         />
                         <Line 
                             type="monotone" 
                             dataKey="smoothed" 
-                            stroke="#3b82f6" 
+                            stroke="#0f172a" 
                             strokeWidth={2} 
                             strokeDasharray="5 5"
                             dot={false} 
                             name="Predicted Sea Level" 
                             isAnimationActive={false} 
+                            hide={!visibleLines.smoothed}
                         />
                         <Line 
                             type="monotone" 
@@ -732,6 +841,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                             dot={false} 
                             name="Anomali Tsunami" 
                             isAnimationActive={false} 
+                            hide={!visibleLines.tsunamiSignal}
                         />
 
                         <Brush 
