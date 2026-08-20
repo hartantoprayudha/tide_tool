@@ -3,6 +3,7 @@ import {
   LayoutDashboard, 
   Database,
   Search, 
+  ArrowLeft,
   Radio, 
   Piano, 
   TrendingUp, 
@@ -2506,6 +2507,8 @@ export default function App() {
   const [withHydrasHeader, setWithHydrasHeader] = useState(true);
   const [exportHydrasStart, setExportHydrasStart] = useState<string>('');
   const [exportHydrasEnd, setExportHydrasEnd] = useState<string>('');
+  const [hydrasNanMode, setHydrasNanMode] = useState<'empty' | 'default' | 'nan_text' | 'custom'>('empty');
+  const [hydrasNanCustomVal, setHydrasNanCustomVal] = useState<string>('-9999');
 
   const formatToDatetimeLocal = (date: Date) => {
       const pad = (num: number) => num.toString().padStart(2, '0');
@@ -2619,38 +2622,49 @@ export default function App() {
         return formatUTC(date, 'dd/MM/yyyy HH:mm:ss');
     };
 
+    const getRawNumericVal = (r: any, k: string) => {
+        if (k.endsWith('(Valid)')) {
+            const sensorName = k.replace(' (Valid)', '');
+            if (sensorName === selectedSensor) return r.filtered;
+            return r.allSamples?.[sensorName];
+        } else if (k.endsWith('(Combined)')) {
+            const sensorName = k.replace(' (Combined)', '');
+            if (sensorName === selectedSensor) return r.combined;
+            return r.allSamples?.[sensorName];
+        } else if (k.endsWith('(Interpolated)')) {
+            const sensorName = k.replace(' (Interpolated)', '');
+            if (sensorName === selectedSensor) return r.interpolated;
+            return r.allSamples?.[sensorName];
+        }
+        return r.allSamples?.[k];
+    };
+
+    const isValidNumericValue = (num: any) => {
+        return typeof num === 'number' && !isNaN(num) && num !== 999 && num !== -999;
+    };
+
+    const getNanRepresentation = () => {
+        if (hydrasNanMode === 'nan_text') return 'NaN';
+        if (hydrasNanMode === 'custom') return hydrasNanCustomVal !== '' ? hydrasNanCustomVal : 'NaN';
+        return '999'; // default HYDRAS standard
+    };
+
+    const nanValueStr = getNanRepresentation();
+
+    // If 'empty' mode is selected, remove any rows where selected sensors have no valid data (timestamp and values omitted entirely)
+    if (hydrasNanMode === 'empty') {
+        exportRecords = exportRecords.filter(r => selectedKeys.some(k => isValidNumericValue(getRawNumericVal(r, k))));
+    }
+
     exportRecords.forEach(r => {
         let rowStr = formatTimestamp(r.timestamp);
         selectedKeys.forEach(k => {
-            const getStrVal = (num: number | undefined | null) => {
-                if (typeof num !== 'number' || isNaN(num) || num === 999 || num === -999) return '999';
-                return Math.round(num * 100).toString();
+            const num = getRawNumericVal(r, k);
+            const getStrVal = (n: number | undefined | null) => {
+                if (!isValidNumericValue(n)) return nanValueStr;
+                return Math.round(n * 100).toString();
             };
-
-            if (k.endsWith('(Valid)')) {
-                const sensorName = k.replace(' (Valid)', '');
-                if (sensorName === selectedSensor) {
-                    rowStr += `\t${getStrVal(r.filtered)}`;
-                } else {
-                    rowStr += `\t${getStrVal(r.allSamples?.[sensorName])}`;
-                }
-            } else if (k.endsWith('(Combined)')) {
-                const sensorName = k.replace(' (Combined)', '');
-                if (sensorName === selectedSensor) {
-                    rowStr += `\t${getStrVal(r.combined)}`;
-                } else {
-                     rowStr += `\t${getStrVal(r.allSamples?.[sensorName])}`;
-                }
-            } else if (k.endsWith('(Interpolated)')) {
-                const sensorName = k.replace(' (Interpolated)', '');
-                if (sensorName === selectedSensor) {
-                    rowStr += `\t${getStrVal(r.interpolated)}`;
-                } else {
-                     rowStr += `\t${getStrVal(r.allSamples?.[sensorName])}`;
-                }
-            } else {
-                rowStr += `\t${getStrVal(r.allSamples?.[k])}`;
-            }
+            rowStr += `\t${getStrVal(num)}`;
         });
         lines.push(rowStr);
     });
@@ -3015,36 +3029,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
         </nav>
 
         <div className="mt-auto space-y-4 w-full">
-          {availableSensors.length > 0 && isSidebarOpen && (
-            <div className="space-y-1.5 animate-in fade-in slide-in-from-bottom-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Sensor Terdeteksi</label>
-              <select 
-                value={selectedSensor}
-                onChange={(e) => {
-                  const newSensor = e.target.value;
-                  setSelectedSensor(newSensor);
-                  setIsFullAnalysisRun(false);
-                  
-                  // Restore active cleaning states for the chosen sensor
-                  const newIsPem = sensorPembersihanActive[newSensor] || false;
-                  const newIsFil = sensorFilterActive[newSensor] || false;
-                  
-                  runAnalysis(rawData, newSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false, undefined, harmonicMethod, newIsPem, newIsFil);
-                }}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 cursor-pointer hover:border-sky-300 transition-colors"
-              >
-                {availableSensors.map(sensor => (
-                  <option key={sensor} value={sensor}>{sensor}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
           {isSidebarOpen && (
             <div className="space-y-1.5 pt-4 border-t border-slate-100">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Custom Chart Title</label>
               <input 
-                type="text"
+                type="text" 
                 value={chartTitle}
                 onChange={(e) => setChartTitle(e.target.value)}
                 placeholder="Enter chart name..."
@@ -3273,6 +3262,15 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     title={chartTitle} 
                     availableSensors={availableSensors}
                     selectedSensor={selectedSensor}
+                    onSelectSensor={(newSensor: string) => {
+                        if (!newSensor) return;
+                        setSelectedSensor(newSensor);
+                        setIsFullAnalysisRun(false);
+                        const newIsPem = sensorPembersihanActive[newSensor] || false;
+                        const newIsFil = sensorFilterActive[newSensor] || false;
+                        runAnalysis(rawData, newSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, false, undefined, harmonicMethod, newIsPem, newIsFil);
+                    }}
+                    onNavigateToValidate={() => setActiveTab('validate')}
                     rawData={rawData}
                     validCache={validCache}
                     runAnalysis={runAnalysis}
@@ -3323,6 +3321,28 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
             )}
             {activeTab === 'validate' && records.length > 0 && (
                 <div className="flex flex-col gap-6">
+                    <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
+                      <div className="flex items-center gap-3.5">
+                        <div className="p-2.5 bg-sky-50 text-sky-600 rounded-xl border border-sky-100/80 shadow-xs">
+                          <Search size={22} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h2 className="text-base sm:text-lg font-black text-slate-800 tracking-tight">Panel Validasi Data (Outlier & Filter)</h2>
+                            <span className="px-2 py-0.5 bg-sky-100 text-sky-700 font-black text-[10px] rounded uppercase">Sensor: {selectedSensor}</span>
+                          </div>
+                          <p className="text-xs text-slate-500 font-medium mt-0.5">Konfigurasi pembersihan outlier, spike data, dan filter sinyal harmonik pasang surut.</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => setActiveTab('dashboard')}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black transition-all shadow-sm hover:shadow group cursor-pointer"
+                        title="Kembali ke tampilan Dashboard"
+                      >
+                        <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
+                        <span>Kembali ke Dashboard</span>
+                      </button>
+                    </div>
                     <OutlierView 
                       records={records} 
                       threshold={zThreshold} 
@@ -3542,6 +3562,81 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                                 </div>
                             </label>
                           </div>
+
+                          {/* Opsi Representasi Missing Data (NaN) */}
+                          <div className="space-y-2 mb-4">
+                            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Representasi Data Kosong / NaN</div>
+                            <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/40 space-y-3">
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <label className="flex items-center gap-2 p-2 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-amber-400 transition-colors">
+                                        <input 
+                                            type="radio" 
+                                            name="hydrasNanMode" 
+                                            value="empty" 
+                                            checked={hydrasNanMode === 'empty'} 
+                                            onChange={() => setHydrasNanMode('empty')} 
+                                            className="w-3.5 h-3.5 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="font-bold text-slate-700">Kosong (Blank)</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 p-2 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-amber-400 transition-colors">
+                                        <input 
+                                            type="radio" 
+                                            name="hydrasNanMode" 
+                                            value="default" 
+                                            checked={hydrasNanMode === 'default'} 
+                                            onChange={() => setHydrasNanMode('default')} 
+                                            className="w-3.5 h-3.5 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="font-bold text-slate-700">999 (Standar)</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 p-2 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-amber-400 transition-colors">
+                                        <input 
+                                            type="radio" 
+                                            name="hydrasNanMode" 
+                                            value="nan_text" 
+                                            checked={hydrasNanMode === 'nan_text'} 
+                                            onChange={() => setHydrasNanMode('nan_text')} 
+                                            className="w-3.5 h-3.5 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="font-bold text-slate-700">Teks "NaN"</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 p-2 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-amber-400 transition-colors">
+                                        <input 
+                                            type="radio" 
+                                            name="hydrasNanMode" 
+                                            value="custom" 
+                                            checked={hydrasNanMode === 'custom'} 
+                                            onChange={() => setHydrasNanMode('custom')} 
+                                            className="w-3.5 h-3.5 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="font-bold text-slate-700">Nilai Custom</span>
+                                    </label>
+                                </div>
+
+                                {hydrasNanMode === 'empty' && (
+                                    <div className="text-[10px] text-amber-800 bg-amber-100/70 p-2 rounded-lg font-medium">
+                                        ✓ Baris yang tidak memiliki data (beserta timestamp-nya) tidak akan dicantumkan dalam file ekspor HYDRAS.
+                                    </div>
+                                )}
+
+                                {hydrasNanMode === 'custom' && (
+                                    <div className="pt-2 border-t border-amber-200/70 space-y-1.5 animate-in fade-in duration-150">
+                                        <label className="text-[10px] font-black text-amber-800 uppercase tracking-wider block">Ketik Nilai Pengganti NaN / No-Data:</label>
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="text" 
+                                                value={hydrasNanCustomVal} 
+                                                onChange={(e) => setHydrasNanCustomVal(e.target.value)} 
+                                                placeholder="Contoh: -9999, NULL, NA, -999.0" 
+                                                className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-amber-300"
+                                            />
+                                        </div>
+                                        <span className="text-[9px] text-amber-700/80 font-medium">Nilai ini akan ditulis di kolom bila baris data bernilai NaN, null, atau kosong.</span>
+                                    </div>
+                                )}
+                            </div>
+                          </div>
                           <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
                               <input 
                                   type="checkbox" 
@@ -3656,7 +3751,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, setVerticalOffset, timeOffset, setTimeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, onSelectSensor, onNavigateToValidate, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, setVerticalOffset, timeOffset, setTimeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
   const [isControlsOpen, setIsControlsOpen] = useState(true);
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({
@@ -3744,6 +3839,8 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     if (e.value === "Valid") key = "filtered";
     else if (e.value === "Sea Level Trend") key = "trendline";
     else if (e.value === "Predicted") key = "predictedLevel";
+    else if (e.value === "Combined") key = "combined";
+    else if (e.value === "Interpolated") key = "interpolated";
     else if (availableSensors.includes(e.value)) key = e.value;
     
     if (typeof key === 'function' && typeof e.value === 'string') {
@@ -4304,26 +4401,83 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 </div>
              </div>
 
-             {/* Multi-sensor toggles */}
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Multi-Sensor Overlay</label>
-                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                    {availableSensors.map((s: string) => {
+             {/* Multi-sensor toggles & selection */}
+             <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Multi-Sensor Overlay</label>
+                    <div className="flex gap-1 text-[9px] font-bold">
+                        <button 
+                            onClick={() => {
+                                setVisibleSensors([...availableSensors]);
+                                setHiddenLines(prev => {
+                                    const next = { ...prev };
+                                    availableSensors.forEach(s => { next[s] = false; });
+                                    return next;
+                                });
+                            }}
+                            className="text-sky-600 hover:underline px-1"
+                        >
+                            Semua
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button 
+                            onClick={() => setVisibleSensors([])}
+                            className="text-slate-500 hover:underline px-1"
+                        >
+                            Reset
+                        </button>
+                    </div>
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {availableSensors.map((s: string, idx: number) => {
                         const palette = ['#3E9BFE', '#059669', '#ff00ff', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
-                        const color = palette[availableSensors.indexOf(s) % palette.length];
-                        const isActive = visibleSensors.includes(s);
+                        const color = palette[idx % palette.length];
+                        const isVisible = visibleSensors.includes(s) && !hiddenLines[s];
+                        const isPrimary = s === selectedSensor;
                         return (
-                            <button 
-                                key={s}
-                                onClick={() => setVisibleSensors(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}
+                            <div 
+                                key={s} 
                                 className={cn(
-                                    "px-2 py-1 rounded-full text-[9px] font-bold border transition-all shadow-sm",
-                                    isActive ? "text-white border-transparent" : "bg-white text-slate-400 border-slate-200"
+                                    "flex items-center justify-between p-1.5 rounded-lg border transition-all text-xs",
+                                    isPrimary ? "bg-white border-sky-400 shadow-sm" : "bg-white/70 border-slate-200 hover:bg-white"
                                 )}
-                                style={isActive ? { backgroundColor: color } : {}}
                             >
-                                {s}
-                            </button>
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                                    <span className="font-bold text-slate-700 text-[11px] truncate max-w-[85px]" title={s}>{s}</span>
+                                    {isPrimary && (
+                                        <span className="px-1.5 py-0.5 bg-sky-100 text-sky-700 font-black text-[8px] rounded uppercase flex-shrink-0">Utama</span>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                    {!isPrimary && onSelectSensor && (
+                                        <button
+                                            onClick={() => onSelectSensor(s)}
+                                            className="px-1.5 py-0.5 text-[9px] font-bold text-slate-500 hover:text-sky-600 hover:bg-sky-50 rounded transition-colors"
+                                            title="Jadikan sensor utama untuk analisis"
+                                        >
+                                            Pilih
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={() => {
+                                            if (!visibleSensors.includes(s)) {
+                                                setVisibleSensors(prev => [...prev, s]);
+                                                setHiddenLines(prev => ({ ...prev, [s]: false }));
+                                            } else {
+                                                setHiddenLines(prev => ({ ...prev, [s]: !prev[s] }));
+                                            }
+                                        }}
+                                        className={cn(
+                                            "px-2 py-0.5 rounded text-[9px] font-black transition-all",
+                                            isVisible ? "bg-emerald-500 text-white shadow-xs" : "bg-slate-200 text-slate-500 hover:bg-slate-300"
+                                        )}
+                                        title={isVisible ? "Sembunyikan dari grafik" : "Tampilkan pada grafik"}
+                                    >
+                                        {isVisible ? 'ON' : 'OFF'}
+                                    </button>
+                                </div>
+                            </div>
                         );
                     })}
                 </div>
@@ -4379,10 +4533,10 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
          </div>
       </div>
 
-      <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] pb-[10px] pt-[40px] mt-0 p-6 shadow-sm relative">
-        <div className="relative mb-[30px] pl-0 flex justify-center items-center">
-          <h3 className="text-2xl font-black text-slate-800 px-2 font-display text-center ml-0 mt-[29px] pl-2 mb-[22px]">{title}</h3>
-          <div className="absolute right-0 -top-4 flex gap-2 export-exclude">
+      <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] pb-[10px] pt-[24px] mt-0 p-6 shadow-sm relative">
+        <div className="relative mb-[18px] pl-0 flex justify-center items-center">
+          <h3 className="text-2xl font-black text-slate-800 px-2 font-display text-center ml-0 mt-[10px] pl-2 mb-[10px]">{title}</h3>
+          <div className="absolute right-0 top-0 flex gap-2 export-exclude">
             <button 
                 onClick={onReset}
                 className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-rose-100 mr-2"
@@ -4411,6 +4565,87 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <button onClick={() => handleDownload('pdf')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
           </div>
         </div>
+
+        {/* Interactive Sensor & Line Toggle Bar on Dashboard Chart */}
+        <div className="mb-4 pb-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 export-exclude bg-slate-50/70 p-3 rounded-xl border">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+              <Layers size={13} className="text-slate-400" />
+              Plot Sensor:
+            </span>
+            {availableSensors.map((s: string, idx: number) => {
+              const palette = ['#3E9BFE', '#059669', '#ff00ff', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#1e40af'];
+              const color = palette[idx % palette.length];
+              const isVisible = visibleSensors.includes(s) && !hiddenLines[s];
+              const isPrimary = s === selectedSensor;
+              return (
+                <div key={s} className="inline-flex items-center rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
+                  <button
+                    onClick={() => {
+                      if (!visibleSensors.includes(s)) {
+                        setVisibleSensors((prev: string[]) => [...prev, s]);
+                        setHiddenLines(prev => ({ ...prev, [s]: false }));
+                      } else {
+                        setHiddenLines(prev => ({ ...prev, [s]: !prev[s] }));
+                      }
+                    }}
+                    className={cn(
+                      "px-2.5 py-1 text-[11px] font-bold flex items-center gap-1.5 transition-all",
+                      isVisible ? "text-slate-800" : "text-slate-400 opacity-40 line-through bg-slate-100"
+                    )}
+                    title={`Klik untuk toggle visibilitas sensor ${s}`}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: isVisible ? color : '#94a3b8' }} />
+                    <span>{s}</span>
+                  </button>
+                  {isPrimary ? (
+                    <span className="px-2 py-1 bg-sky-500 text-white text-[9px] font-black uppercase tracking-tight" title="Sensor Utama Analisis">
+                      Utama
+                    </span>
+                  ) : onSelectSensor ? (
+                    <button
+                      onClick={() => onSelectSensor(s)}
+                      className="px-2 py-1 bg-slate-100 hover:bg-sky-100 text-slate-600 hover:text-sky-700 text-[9px] font-bold uppercase transition-colors border-l border-slate-200"
+                      title="Klik untuk jadikan Sensor Utama (Analisis)"
+                    >
+                      Pilih
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Garis Analisis:</span>
+            {[
+              { key: 'filtered', label: 'Valid', color: '#ec7017' },
+              { key: 'predictedLevel', label: 'Predicted', color: '#0a0a0a' },
+              { key: 'trendline', label: 'Sea Level Trend', color: '#ef4444' },
+              { key: 'combined', label: 'Combined', color: '#F5BF03' },
+              { key: 'interpolated', label: 'Interpolated', color: '#800000' }
+            ].map(item => {
+              const isHidden = !!hiddenLines[item.key];
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => setHiddenLines(prev => ({ ...prev, [item.key]: !prev[item.key] }))}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1.5",
+                    !isHidden 
+                      ? "bg-white border-slate-300 text-slate-700 shadow-xs" 
+                      : "bg-slate-100 border-slate-200 text-slate-400 opacity-40 line-through"
+                  )}
+                  title={`Klik untuk toggle garis ${item.label}`}
+                >
+                  <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: !isHidden ? item.color : '#94a3b8' }} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div 
             className="relative h-[500px] w-full mt-[-5px] group bg-white pt-2 pb-4"
             onContextMenu={(e) => {
@@ -4420,41 +4655,78 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         >
           {contextMenu && (
             <div 
-              className="fixed z-[9999] bg-[#e9eff3] rounded-lg shadow-xl border border-slate-200 py-1.5 w-[200px] text-[12px]"
+              className="fixed z-[9999] bg-[#f8fafc] rounded-xl shadow-2xl border border-slate-200 py-1.5 w-[210px] text-[12px] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
               style={{ top: contextMenu.y, left: contextMenu.x }}
               onClick={(e) => e.stopPropagation()}
             >
               <button 
-                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-sky-600 transition-colors"
+                className="w-full text-left px-4 py-2.5 font-bold text-sky-700 bg-sky-50/80 hover:bg-sky-100 hover:text-sky-900 transition-colors flex items-center gap-2.5 border-b border-slate-200/80"
+                onClick={() => {
+                  if (onNavigateToValidate) {
+                    onNavigateToValidate();
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                <Search size={14} className="text-sky-600" />
+                <span>Buka Panel Validate</span>
+              </button>
+
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors flex items-center gap-2"
+                onClick={() => {
+                  setShowCombinationModal(true);
+                  setContextMenu(null);
+                }}
+              >
+                <Layers size={14} className="text-sky-600" />
+                <span>Sensor Combination</span>
+              </button>
+
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-rose-600 transition-colors flex items-center gap-2"
+                onClick={() => {
+                  const newVal = { ...interpolationSettings, enabled: true };
+                  setInterpolationSettings(newVal);
+                  runInterpolation(newVal);
+                  setContextMenu(null);
+                }}
+              >
+                <Waves size={14} className="text-rose-600" />
+                <span>Hitung Interpolasi</span>
+              </button>
+
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors flex items-center gap-2 border-t border-slate-100"
                 onClick={() => {
                   handleCalculateMSL();
                   setContextMenu(null);
                 }}
               >
-                Hitung Muka Laut Rerata
+                <span>Hitung Muka Laut Rerata</span>
               </button>
               <button 
-                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-rose-600 transition-colors"
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-rose-600 transition-colors flex items-center gap-2"
                 onClick={() => {
                   onReset();
                   setContextMenu(null);
                 }}
               >
-                General Reset
+                <span>General Reset</span>
               </button>
               {zoomDomain && (
               <button 
-                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-sky-600 transition-colors"
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors flex items-center gap-2"
                 onClick={() => {
                   zoomOut();
                   setContextMenu(null);
                 }}
               >
-                Reset Zoom
+                <span>Reset Zoom</span>
               </button>
               )}
               <button 
-                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-rose-600 transition-colors"
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-rose-600 transition-colors flex items-center gap-2"
                 onClick={() => {
                   let startMs, endMs;
                   if (zoomDomain) {
@@ -4472,26 +4744,26 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                   setContextMenu(null);
                 }}
               >
-                Delete
+                <span>Delete</span>
               </button>
               <button 
-                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-sky-600 transition-colors"
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors flex items-center gap-2"
                 onClick={() => {
                   setDragAction('pan');
                   setContextMenu(null);
                 }}
               >
-                Geser
+                <span>Geser</span>
               </button>
               {modifiers.length > 0 && (
               <button 
-                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 hover:text-amber-600 transition-colors"
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-amber-600 transition-colors flex items-center gap-2"
                 onClick={() => {
                   undoModifier();
                   setContextMenu(null);
                 }}
               >
-                Undo Delete/Mod
+                <span>Undo Delete/Mod</span>
               </button>
               )}
             </div>
@@ -4689,6 +4961,22 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                 height={50} 
                 wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold', cursor: 'pointer', paddingBottom: '20px'}} 
                 onClick={handleLegendClick}
+                formatter={(value: string) => {
+                  let isHidden = false;
+                  if (value === "Valid") isHidden = !!hiddenLines["filtered"];
+                  else if (value === "Predicted") isHidden = !!hiddenLines["predictedLevel"];
+                  else if (value === "Combined") isHidden = !!hiddenLines["combined"];
+                  else if (value === "Interpolated") isHidden = !!hiddenLines["interpolated"];
+                  else if (value === "Sea Level Trend") isHidden = !!hiddenLines["trendline"];
+                  else if (availableSensors.includes(value)) {
+                    isHidden = !visibleSensors.includes(value) || !!hiddenLines[value];
+                  }
+                  return (
+                    <span className={cn("transition-all select-none", isHidden ? "line-through text-slate-400 opacity-40" : "text-slate-700")}>
+                      {value} {value === selectedSensor ? "(Utama)" : ""}
+                    </span>
+                  );
+                }}
               />
               
               {datums && (
