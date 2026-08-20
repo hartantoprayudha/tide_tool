@@ -3090,7 +3090,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col p-8 gap-6 overflow-y-auto">
+      <main className="flex-1 flex flex-col p-4 sm:p-6 lg:p-7 gap-6 overflow-y-auto max-w-full">
         <header className="flex justify-between items-start">
           <div className="flex items-center gap-6">
             <a href="https://www.big.go.id" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 transition-opacity">
@@ -4190,26 +4190,26 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <StatCard 
               label="HAT / LAT" 
               value={
-                <div className="flex flex-col items-center justify-center w-full">
-                  <span className="block leading-[1.1] pb-0.5">{datums ? datums.hat.toFixed(2) : '--'}</span>
-                  <div className="w-12 border-t-2 border-indigo-100 my-1" />
-                  <span className="block leading-[1.1] pt-0.5">{datums ? datums.lat.toFixed(2) : '--'}</span>
+                <div className="flex flex-col items-center justify-center w-full py-1">
+                  <span className="block leading-none font-black text-3xl sm:text-4xl xl:text-[2.6rem] 2xl:text-5xl tracking-tight">{datums ? datums.hat.toFixed(2) : '--'}</span>
+                  <div className="w-14 sm:w-16 border-t-2 border-indigo-200/80 my-1.5" />
+                  <span className="block leading-none font-black text-3xl sm:text-4xl xl:text-[2.6rem] 2xl:text-5xl tracking-tight">{datums ? datums.lat.toFixed(2) : '--'}</span>
                 </div>
               }
-              trend="Highest/Lowest" 
-              valueClassName="text-3xl xl:text-3xl 2xl:text-4xl"
+              trend="Highest/Lowest (m)" 
+              valueClassName="w-full flex justify-center"
             />
             <StatCard 
               label="MHWS / MLWS" 
               value={
-                <div className="flex flex-col items-center justify-center w-full">
-                  <span className="block leading-[1.1] pb-0.5">{datums ? datums.mhws.toFixed(2) : '--'}</span>
-                  <div className="w-12 border-t-2 border-indigo-100 my-1" />
-                  <span className="block leading-[1.1] pt-0.5">{datums ? datums.mlws.toFixed(2) : '--'}</span>
+                <div className="flex flex-col items-center justify-center w-full py-1">
+                  <span className="block leading-none font-black text-3xl sm:text-4xl xl:text-[2.6rem] 2xl:text-5xl tracking-tight">{datums ? datums.mhws.toFixed(2) : '--'}</span>
+                  <div className="w-14 sm:w-16 border-t-2 border-indigo-200/80 my-1.5" />
+                  <span className="block leading-none font-black text-3xl sm:text-4xl xl:text-[2.6rem] 2xl:text-5xl tracking-tight">{datums ? datums.mlws.toFixed(2) : '--'}</span>
                 </div>
               }
-              trend="High/Low Springs"
-              valueClassName="text-3xl xl:text-3xl 2xl:text-4xl"
+              trend="High/Low Springs (m)"
+              valueClassName="w-full flex justify-center"
             />
           </div>
 
@@ -4533,36 +4533,36 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
          </div>
       </div>
 
-      <div ref={chartRef} className="bg-white rounded-2xl border border-[#e2e8f0] pb-[10px] pt-[24px] mt-0 p-6 shadow-sm relative">
-        <div className="relative mb-[18px] pl-0 flex justify-center items-center">
-          <h3 className="text-2xl font-black text-slate-800 px-2 font-display text-center ml-0 mt-[10px] pl-2 mb-[10px]">{title}</h3>
-          <div className="absolute right-0 top-0 flex gap-2 export-exclude">
+      <div ref={chartRef} className="bg-white rounded-2xl border border-slate-200/90 pb-6 pt-5 px-3 sm:px-5 lg:px-6 shadow-sm relative w-full overflow-hidden">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 mb-4 export-exclude">
+          <h3 className="text-xl sm:text-2xl font-black text-slate-800 font-display tracking-tight text-center xl:text-left">{title}</h3>
+          <div className="flex flex-wrap items-center justify-center xl:justify-end gap-1.5 self-center xl:self-auto">
             <button 
                 onClick={onReset}
-                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-rose-100 mr-2"
+                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-rose-100"
                 title="Reset all corrections (Offsets, Modifiers, Scaling)"
             >
                 <RefreshCw size={14} />
                 General Reset
             </button>
             {zoomDomain && (
-              <button onClick={zoomOut} className="px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors mr-4 shadow-sm border border-sky-200"><ZoomOut size={14} /> Reset Zoom X</button>
+              <button onClick={zoomOut} className="px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-sky-200"><ZoomOut size={14} /> Reset Zoom X</button>
             )}
             
-            <div className="flex bg-slate-100 p-1 rounded-lg mr-4 border border-slate-200">
-              <button onClick={() => setDragAction('zoom')} className={`px-3 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'zoom' ? 'bg-white shadow-sm text-sky-700' : 'text-slate-500'}`}>Zoom</button>
-              <button onClick={() => setDragAction('delete')} className={`px-3 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'delete' ? 'bg-rose-500 shadow-sm text-white' : 'text-slate-500'}`}>Delete</button>
+            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+              <button onClick={() => setDragAction('zoom')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'zoom' ? 'bg-white shadow-sm text-sky-700' : 'text-slate-500'}`}>Zoom</button>
+              <button onClick={() => setDragAction('delete')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'delete' ? 'bg-rose-500 shadow-sm text-white' : 'text-slate-500'}`}>Delete</button>
             </div>
 
             {modifiers.length > 0 && (
-              <button onClick={undoModifier} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors mr-4 shadow-sm border border-amber-200">
+              <button onClick={undoModifier} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-amber-200">
                 Undo Delete/Mod
               </button>
             )}
             
-            <button onClick={() => handleDownload('png')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
-            <button onClick={() => handleDownload('jpeg')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
-            <button onClick={() => handleDownload('pdf')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
+            <button onClick={() => handleDownload('png')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
+            <button onClick={() => handleDownload('jpeg')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
+            <button onClick={() => handleDownload('pdf')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
           </div>
         </div>
 
@@ -4647,7 +4647,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         </div>
 
         <div 
-            className="relative h-[500px] w-full mt-[-5px] group bg-white pt-2 pb-4"
+            className="relative h-[600px] sm:h-[650px] lg:h-[700px] 2xl:h-[760px] w-full mt-[-5px] group bg-white pt-2 pb-4"
             onContextMenu={(e) => {
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY });
@@ -4798,9 +4798,9 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
           </div>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart 
-                className="ml-0 mt-[-42px] pl-0 pt-0"
+                className="ml-0 mt-[-30px] pl-0 pt-0"
                 data={displayData} 
-                margin={{ bottom: 10, left: 30, right: 20, top: 20 }} 
+                margin={{ bottom: 10, left: 20, right: 15, top: 15 }} 
                 style={{ cursor: dragAction === 'pan' ? 'move' : (dragAction === 'delete' ? 'copy' : 'crosshair'), userSelect: 'none' }}
                 onMouseDown={(e: any) => {
                     if (dragAction === 'pan' && e && e.activeLabel) {
