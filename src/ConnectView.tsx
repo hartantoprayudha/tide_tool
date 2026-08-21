@@ -2,7 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download, ChevronDown, Search } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subHours, subDays, subMonths, startOfDay, endOfDay } from 'date-fns';
 
-export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onDataLoaded: (data: any[], selectedSensorName?: string) => void, onStationMetaLoaded: (name: string, lat: string, lon: string) => void }) {
+export default function ConnectView({ 
+  onDataLoaded, 
+  onStationMetaLoaded,
+  onConnectionChange
+}: { 
+  onDataLoaded: (data: any[], selectedSensorName?: string) => void, 
+  onStationMetaLoaded: (name: string, lat: string, lon: string) => void,
+  onConnectionChange?: (isConnected: boolean, creds: { host: string, port: string, user: string, database: string, password?: string }) => void
+}) {
   const [host, setHost] = useState('10.10.140.19');
   const [port, setPort] = useState('3306');
   const [user, setUser] = useState('root');
@@ -160,6 +168,8 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
       const data = await res.json();
       if (data.success) {
         setConnStatus('success');
+        localStorage.setItem('tide_db_connected', 'true');
+        onConnectionChange?.(true, { host, port, user, database, password });
         
         try {
           const stationRes = await fetch('/api/db/connect', {
@@ -242,6 +252,8 @@ export default function ConnectView({ onDataLoaded, onStationMetaLoaded }: { onD
       const data = await res.json();
       
       if (data.success) {
+        localStorage.setItem('tide_db_connected', 'true');
+        onConnectionChange?.(true, { host, port, user, database, password });
         if (!data.data || data.data.length === 0) {
           setError('Tabel kosong atau tidak ditemukan data yang sesuai kriteria.');
           setIsLoading(false);

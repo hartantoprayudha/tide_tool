@@ -136,6 +136,69 @@ async function startServer() {
     }
   });
 
+  // API POST route to directly export dataset to validdata2 table
+  app.post("/api/db/export-validdata2", async (req, res) => {
+    const { host, port, user, password, database, sqlStatements, autoCreateTable } = req.body;
+    let connection;
+    try {
+      connection = await mysql.createConnection({
+        host,
+        port: parseInt(port, 10) || 3306,
+        user,
+        password,
+        database: database || 'bako',
+        connectTimeout: 8000,
+        multipleStatements: true,
+        dateStrings: true
+      });
+
+      if (autoCreateTable) {
+        await connection.query(`
+          CREATE TABLE IF NOT EXISTS \`validdata2\` (
+            \`RecId\` bigint(20) NOT NULL,
+            \`StationId\` varchar(10) NOT NULL,
+            \`TimeStamp\` datetime NOT NULL,
+            \`combination\` float DEFAULT NULL,
+            \`Interpolation\` float NOT NULL,
+            \`Sensor1\` float DEFAULT NULL,
+            \`Sensor2\` float DEFAULT NULL,
+            \`Sensor3\` float DEFAULT NULL,
+            \`Source\` varchar(20) DEFAULT NULL,
+            \`Operator\` varchar(20) DEFAULT NULL,
+            \`Remark\` text,
+            PRIMARY KEY (\`RecId\`)
+          ) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+        `);
+      }
+
+      let executedCount = 0;
+      if (Array.isArray(sqlStatements)) {
+        for (const statement of sqlStatements) {
+          if (statement && statement.trim()) {
+            await connection.query(statement);
+            executedCount++;
+          }
+        }
+      } else if (typeof sqlStatements === 'string' && sqlStatements.trim()) {
+        await connection.query(sqlStatements);
+        executedCount++;
+      }
+
+      res.json({ success: true, message: `Data berhasil diekspor langsung ke tabel validdata2 dalam database ${database || 'bako'}.`, executedStatements: executedCount });
+    } catch (error: any) {
+      console.error("Export to validdata2 error:", error);
+      let errMsg = error.message;
+      if (error.code === 'ETIMEDOUT') {
+        errMsg = `Koneksi timeout (ETIMEDOUT). Pastikan database di ${host}:${port} dapat diakses dari server.`;
+      }
+      res.status(500).json({ success: false, error: errMsg });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  });
+
   app.get("/api/bmkg/gempa", async (req, res) => {
     try {
       // type can be 'terkini' (60 latest M5+), 'tsunami' (latest tsunami), or 'autogempa' (latest single)

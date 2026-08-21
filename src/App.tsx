@@ -33,7 +33,13 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Wrench,
-  Globe
+  Globe,
+  Code,
+  Copy,
+  Check,
+  RotateCw,
+  Server,
+  ExternalLink
 } from 'lucide-react';
 import ConnectView from './ConnectView';
 import SummarizeView from './SummarizeView';
@@ -3262,6 +3268,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     title={chartTitle} 
                     availableSensors={availableSensors}
                     selectedSensor={selectedSensor}
+                    onNavigateToConnect={() => setActiveTab('connect')}
                     onSelectSensor={(newSensor: string) => {
                         if (!newSensor) return;
                         setSelectedSensor(newSensor);
@@ -3751,7 +3758,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 // --- SUB-VIEWS ---
 
-function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, onSelectSensor, onNavigateToValidate, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, setVerticalOffset, timeOffset, setTimeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
+function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, onSelectSensor, onNavigateToValidate, onNavigateToConnect, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, setVerticalOffset, timeOffset, setTimeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
   const [isControlsOpen, setIsControlsOpen] = useState(true);
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({
@@ -3831,6 +3838,437 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
   const [dragAction, setDragAction] = useState<'zoom' | 'delete' | 'pan'>('zoom');
   const [showDifferences, setShowDifferences] = useState<boolean>(false);
+
+  // Database Export to validdata2 State
+  const [showDbExportModal, setShowDbExportModal] = useState(false);
+  const [dbExportSelections, setDbExportSelections] = useState<Record<string, boolean>>({});
+  const [dbStationId, setDbStationId] = useState<string>('');
+  const [dbOperator, setDbOperator] = useState<string>('BIG');
+  const [dbSource, setDbSource] = useState<string>('TideTool');
+  const [dbRemark, setDbRemark] = useState<string>('');
+  const [dbSqlMode, setDbSqlMode] = useState<'INSERT' | 'REPLACE' | 'INSERT_IGNORE'>('INSERT');
+  const [dbExportStart, setDbExportStart] = useState<string>('');
+  const [dbExportEnd, setDbExportEnd] = useState<string>('');
+  const [dbValidationMsg, setDbValidationMsg] = useState<string>('');
+  const [dbExportCopied, setDbExportCopied] = useState(false);
+
+  // Direct Database Connection & Export State
+  const [isDbConnected, setIsDbConnected] = useState<boolean>(false);
+  const [dbCredentials, setDbCredentials] = useState<any>(null);
+  const [isCheckingDbConn, setIsCheckingDbConn] = useState<boolean>(false);
+  const [isDirectExporting, setIsDirectExporting] = useState<boolean>(false);
+  const [directExportSuccess, setDirectExportSuccess] = useState<string | null>(null);
+  const [directExportError, setDirectExportError] = useState<string | null>(null);
+
+  const checkDbConnectionStatus = async (showLoading = false) => {
+    const saved = localStorage.getItem('tide_db_credentials');
+    let creds = { host: '10.10.140.19', port: '3306', user: 'root', password: 'r00t', database: 'bako' };
+    if (saved) {
+      try { creds = { ...creds, ...JSON.parse(saved) }; } catch (e) {}
+    }
+    setDbCredentials(creds);
+    if (showLoading) setIsCheckingDbConn(true);
+    try {
+      const res = await fetch('/api/db/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: creds.host,
+          port: creds.port,
+          user: creds.user,
+          password: creds.password,
+          database: creds.database
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsDbConnected(true);
+        localStorage.setItem('tide_db_connected', 'true');
+        return true;
+      } else {
+        setIsDbConnected(false);
+        return false;
+      }
+    } catch (e) {
+      setIsDbConnected(false);
+      return false;
+    } finally {
+      if (showLoading) setIsCheckingDbConn(false);
+    }
+  };
+
+  const handleOpenDbExportModal = () => {
+    setDbStationId((title || 'STA01').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 10) || 'STA01');
+    if (records.length > 0) {
+      if (!dbExportStart) {
+        const d1 = records[0].timestamp;
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        setDbExportStart(`${d1.getUTCFullYear()}-${pad(d1.getUTCMonth() + 1)}-${pad(d1.getUTCDate())}T${pad(d1.getUTCHours())}:${pad(d1.getUTCMinutes())}`);
+      }
+      if (!dbExportEnd) {
+        const d2 = records[records.length - 1].timestamp;
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        setDbExportEnd(`${d2.getUTCFullYear()}-${pad(d2.getUTCMonth() + 1)}-${pad(d2.getUTCDate())}T${pad(d2.getUTCHours())}:${pad(d2.getUTCMinutes())}`);
+      }
+    }
+    setDbValidationMsg('');
+    setDirectExportSuccess(null);
+    setDirectExportError(null);
+    setShowDbExportModal(true);
+    checkDbConnectionStatus(false);
+  };
+
+  const selectedSensorKeys = useMemo(() => {
+    return Object.keys(dbExportSelections).filter(k => 
+      dbExportSelections[k] && 
+      (availableSensors.includes(k) || availableSensors.some((s: string) => `${s} (Valid)` === k))
+    );
+  }, [dbExportSelections, availableSensors]);
+
+  const selectedCombinedKeys = useMemo(() => {
+    return Object.keys(dbExportSelections).filter(k => 
+      dbExportSelections[k] && 
+      availableSensors.some((s: string) => `${s} (Combined)` === k)
+    );
+  }, [dbExportSelections, availableSensors]);
+
+  const selectedInterpolatedKeys = useMemo(() => {
+    return Object.keys(dbExportSelections).filter(k => 
+      dbExportSelections[k] && 
+      availableSensors.some((s: string) => `${s} (Interpolated)` === k)
+    );
+  }, [dbExportSelections, availableSensors]);
+
+  const toggleDbExportSelection = (key: string, category: 'sensor' | 'combined' | 'interpolated') => {
+    setDbValidationMsg('');
+    setDirectExportSuccess(null);
+    setDirectExportError(null);
+    setDbExportSelections(prev => {
+      const isSelected = !!prev[key];
+      if (isSelected) {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      
+      if (category === 'sensor') {
+        const currentCount = Object.keys(prev).filter(k => 
+          prev[k] && (availableSensors.includes(k) || availableSensors.some((s: string) => `${s} (Valid)` === k))
+        ).length;
+        if (currentCount >= 3) {
+          setDbValidationMsg('Maksimal 3 sensor data (boleh Raw atau Valid) yang dapat dipilih (dimapping ke Sensor1, Sensor2, Sensor3).');
+          return prev;
+        }
+      } else if (category === 'combined') {
+        const currentCount = Object.keys(prev).filter(k => 
+          prev[k] && availableSensors.some((s: string) => `${s} (Combined)` === k)
+        ).length;
+        if (currentCount >= 1) {
+          setDbValidationMsg('Maksimal 1 data Combined yang dapat dipilih (dimapping ke kolom combination).');
+          return prev;
+        }
+      } else if (category === 'interpolated') {
+        const currentCount = Object.keys(prev).filter(k => 
+          prev[k] && availableSensors.some((s: string) => `${s} (Interpolated)` === k)
+        ).length;
+        if (currentCount >= 1) {
+          setDbValidationMsg('Maksimal 1 data Interpolated yang dapat dipilih (dimapping ke kolom Interpolation).');
+          return prev;
+        }
+      }
+      return { ...prev, [key]: true };
+    });
+  };
+
+  const getDbRecordVal = (r: any, i: number, k: string) => {
+    if (!k) return null;
+    if (k.endsWith(' (Valid)')) {
+      const sName = k.replace(' (Valid)', '');
+      if (sName === selectedSensor) {
+        return r.filtered ?? r.waterLevel;
+      }
+      const v = validCache?.[sName]?.[i]?.filtered;
+      if (typeof v === 'number' && !isNaN(v)) return v;
+      return r.allSamples?.[sName];
+    }
+    if (k.endsWith(' (Combined)')) {
+      return r.combined;
+    }
+    if (k.endsWith(' (Interpolated)')) {
+      return r.interpolated;
+    }
+    return r.allSamples?.[k];
+  };
+
+  const generateValidData2SqlStatements = () => {
+    if (!records.length) return [];
+    
+    let exportData = records;
+    if (dbExportStart) {
+      const sMs = new Date(dbExportStart + 'Z').getTime();
+      exportData = exportData.filter((r: any) => r.timestamp.getTime() >= sMs);
+    }
+    if (dbExportEnd) {
+      const eMs = new Date(dbExportEnd + 'Z').getTime();
+      exportData = exportData.filter((r: any) => r.timestamp.getTime() <= eMs);
+    }
+
+    const s1Key = selectedSensorKeys[0] || null;
+    const s2Key = selectedSensorKeys[1] || null;
+    const s3Key = selectedSensorKeys[2] || null;
+    const combKey = selectedCombinedKeys[0] || null;
+    const interpKey = selectedInterpolatedKeys[0] || null;
+
+    const stId = (dbStationId || title || 'STA01').slice(0, 10).replace(/'/g, "''");
+    const sourceStr = (dbSource || 'TideTool').slice(0, 20).replace(/'/g, "''");
+    const operatorStr = (dbOperator || 'BIG').slice(0, 20).replace(/'/g, "''");
+    const remarkStr = (dbRemark || `Exported from Tide Tools on ${formatUTC(new Date(), 'yyyy-MM-dd HH:mm:ss')}`).replace(/'/g, "''");
+
+    const verb = dbSqlMode === 'REPLACE' ? 'REPLACE' : (dbSqlMode === 'INSERT_IGNORE' ? 'INSERT IGNORE' : 'INSERT');
+
+    const formatFloatSql = (val: any) => {
+      if (typeof val !== 'number' || isNaN(val) || val === 999 || val === -999) return 'NULL';
+      return Number(val.toFixed(3)).toString();
+    };
+
+    const statements: string[] = [];
+    const chunkSize = 250;
+    for (let c = 0; c < exportData.length; c += chunkSize) {
+      const chunk = exportData.slice(c, c + chunkSize);
+      const valueRows: string[] = [];
+
+      chunk.forEach((r: any, idx: number) => {
+        const globalIdx = c + idx;
+        const d = r.timestamp;
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const dtStr = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+        const recId = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCHMinutes())}${pad(d.getUTCSeconds())}`;
+
+        const combVal = combKey ? getDbRecordVal(r, globalIdx, combKey) : null;
+        const interpVal = interpKey ? getDbRecordVal(r, globalIdx, interpKey) : null;
+        const s1Val = s1Key ? getDbRecordVal(r, globalIdx, s1Key) : null;
+        const s2Val = s2Key ? getDbRecordVal(r, globalIdx, s2Key) : null;
+        const s3Val = s3Key ? getDbRecordVal(r, globalIdx, s3Key) : null;
+
+        const cSql = formatFloatSql(combVal);
+        const iSql = formatFloatSql(interpVal) === 'NULL' ? '0' : formatFloatSql(interpVal);
+        const s1Sql = formatFloatSql(s1Val);
+        const s2Sql = formatFloatSql(s2Val);
+        const s3Sql = formatFloatSql(s3Val);
+
+        valueRows.push(`(${recId}, '${stId}', '${dtStr}', ${cSql}, ${iSql}, ${s1Sql}, ${s2Sql}, ${s3Sql}, '${sourceStr}', '${operatorStr}', '${remarkStr}')`);
+      });
+
+      if (valueRows.length > 0) {
+        statements.push(`${verb} INTO \`validdata2\` (\`RecId\`, \`StationId\`, \`TimeStamp\`, \`combination\`, \`Interpolation\`, \`Sensor1\`, \`Sensor2\`, \`Sensor3\`, \`Source\`, \`Operator\`, \`Remark\`) VALUES\n  ${valueRows.join(',\n  ')}`);
+      }
+    }
+
+    return statements;
+  };
+
+  const generateValidData2Sql = (previewRows?: number) => {
+    if (!records.length) return '';
+    
+    let exportData = records;
+    if (dbExportStart) {
+      const sMs = new Date(dbExportStart + 'Z').getTime();
+      exportData = exportData.filter((r: any) => r.timestamp.getTime() >= sMs);
+    }
+    if (dbExportEnd) {
+      const eMs = new Date(dbExportEnd + 'Z').getTime();
+      exportData = exportData.filter((r: any) => r.timestamp.getTime() <= eMs);
+    }
+
+    const totalRowsCount = exportData.length;
+    if (previewRows) {
+      exportData = exportData.slice(0, previewRows);
+    }
+
+    const s1Key = selectedSensorKeys[0] || null;
+    const s2Key = selectedSensorKeys[1] || null;
+    const s3Key = selectedSensorKeys[2] || null;
+    const combKey = selectedCombinedKeys[0] || null;
+    const interpKey = selectedInterpolatedKeys[0] || null;
+
+    const stId = (dbStationId || title || 'STA01').slice(0, 10).replace(/'/g, "''");
+    const sourceStr = (dbSource || 'TideTool').slice(0, 20).replace(/'/g, "''");
+    const operatorStr = (dbOperator || 'BIG').slice(0, 20).replace(/'/g, "''");
+    const remarkStr = (dbRemark || `Exported from Tide Tools on ${formatUTC(new Date(), 'yyyy-MM-dd HH:mm:ss')}`).replace(/'/g, "''");
+
+    const verb = dbSqlMode === 'REPLACE' ? 'REPLACE' : (dbSqlMode === 'INSERT_IGNORE' ? 'INSERT IGNORE' : 'INSERT');
+
+    const lines: string[] = [];
+    lines.push(`-- ========================================================`);
+    lines.push(`-- MySQL Dump Export for table: validdata2`);
+    lines.push(`-- Station: ${stId}`);
+    lines.push(`-- Generated: ${formatUTC(new Date(), 'yyyy-MM-dd HH:mm:ss')} UTC`);
+    lines.push(`-- Selected Sensor1: ${s1Key || '(NULL)'}`);
+    lines.push(`-- Selected Sensor2: ${s2Key || '(NULL)'}`);
+    lines.push(`-- Selected Sensor3: ${s3Key || '(NULL)'}`);
+    lines.push(`-- Selected combination: ${combKey || '(NULL)'}`);
+    lines.push(`-- Selected Interpolation: ${interpKey || '(NULL)'}`);
+    lines.push(`-- Total records: ${totalRowsCount}`);
+    lines.push(`-- ========================================================\n`);
+    
+    if (!previewRows) {
+      lines.push(`CREATE TABLE IF NOT EXISTS \`validdata2\` (`);
+      lines.push(`  \`RecId\` bigint(20) NOT NULL,`);
+      lines.push(`  \`StationId\` varchar(10) NOT NULL,`);
+      lines.push(`  \`TimeStamp\` datetime NOT NULL,`);
+      lines.push(`  \`combination\` float DEFAULT NULL,`);
+      lines.push(`  \`Interpolation\` float NOT NULL,`);
+      lines.push(`  \`Sensor1\` float DEFAULT NULL,`);
+      lines.push(`  \`Sensor2\` float DEFAULT NULL,`);
+      lines.push(`  \`Sensor3\` float DEFAULT NULL,`);
+      lines.push(`  \`Source\` varchar(20) DEFAULT NULL,`);
+      lines.push(`  \`Operator\` varchar(20) DEFAULT NULL,`);
+      lines.push(`  \`Remark\` text,`);
+      lines.push(`  PRIMARY KEY (\`RecId\`)`);
+      lines.push(`) ENGINE=MyISAM DEFAULT CHARSET=latin1;\n`);
+    }
+
+    const formatFloatSql = (val: any) => {
+      if (typeof val !== 'number' || isNaN(val) || val === 999 || val === -999) return 'NULL';
+      return Number(val.toFixed(3)).toString();
+    };
+
+    const chunkSize = previewRows ? previewRows : 250;
+    for (let c = 0; c < exportData.length; c += chunkSize) {
+      const chunk = exportData.slice(c, c + chunkSize);
+      const valueRows: string[] = [];
+
+      chunk.forEach((r: any, idx: number) => {
+        const globalIdx = c + idx;
+        const d = r.timestamp;
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const dtStr = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+        const recId = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
+
+        const combVal = combKey ? getDbRecordVal(r, globalIdx, combKey) : null;
+        const interpVal = interpKey ? getDbRecordVal(r, globalIdx, interpKey) : null;
+        const s1Val = s1Key ? getDbRecordVal(r, globalIdx, s1Key) : null;
+        const s2Val = s2Key ? getDbRecordVal(r, globalIdx, s2Key) : null;
+        const s3Val = s3Key ? getDbRecordVal(r, globalIdx, s3Key) : null;
+
+        const cSql = formatFloatSql(combVal);
+        const iSql = formatFloatSql(interpVal) === 'NULL' ? '0' : formatFloatSql(interpVal);
+        const s1Sql = formatFloatSql(s1Val);
+        const s2Sql = formatFloatSql(s2Val);
+        const s3Sql = formatFloatSql(s3Val);
+
+        valueRows.push(`(${recId}, '${stId}', '${dtStr}', ${cSql}, ${iSql}, ${s1Sql}, ${s2Sql}, ${s3Sql}, '${sourceStr}', '${operatorStr}', '${remarkStr}')`);
+      });
+
+      if (valueRows.length > 0) {
+        lines.push(`${verb} INTO \`validdata2\` (\`RecId\`, \`StationId\`, \`TimeStamp\`, \`combination\`, \`Interpolation\`, \`Sensor1\`, \`Sensor2\`, \`Sensor3\`, \`Source\`, \`Operator\`, \`Remark\`) VALUES\n  ${valueRows.join(',\n  ')};`);
+      }
+    }
+
+    if (previewRows && totalRowsCount > previewRows) {
+      lines.push(`\n-- ... (${totalRowsCount - previewRows} baris lainnya akan disertakan pada file ekspor .sql)`);
+    }
+
+    return lines.join('\n');
+  };
+
+  const handleDownloadDbSql = () => {
+    if (selectedSensorKeys.length === 0 && selectedCombinedKeys.length === 0 && selectedInterpolatedKeys.length === 0) {
+      setDbValidationMsg('Pilih minimal satu data sensor, combined, atau interpolated untuk diekspor ke validdata2.');
+      return;
+    }
+    const sqlContent = generateValidData2Sql();
+    const blob = new Blob([sqlContent], { type: 'text/sql;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const filename = `validdata2_${(dbStationId || title || 'station').replace(/[^a-zA-Z0-9_-]/g, '_')}_${formatUTC(new Date(), 'yyyyMMdd_HHmmss')}.sql`;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyDbSql = () => {
+    if (selectedSensorKeys.length === 0 && selectedCombinedKeys.length === 0 && selectedInterpolatedKeys.length === 0) {
+      setDbValidationMsg('Pilih minimal satu data sensor, combined, atau interpolated untuk diekspor ke validdata2.');
+      return;
+    }
+    const sqlContent = generateValidData2Sql();
+    navigator.clipboard.writeText(sqlContent).then(() => {
+      setDbExportCopied(true);
+      setTimeout(() => setDbExportCopied(false), 2500);
+    });
+  };
+
+  const handleDirectExportToMysql = async () => {
+    if (selectedSensorKeys.length === 0 && selectedCombinedKeys.length === 0 && selectedInterpolatedKeys.length === 0) {
+      setDbValidationMsg('Pilih minimal satu data sensor, combined, atau interpolated untuk diekspor ke validdata2.');
+      return;
+    }
+
+    const saved = localStorage.getItem('tide_db_credentials');
+    let creds = dbCredentials;
+    if (!creds && saved) {
+      try { creds = JSON.parse(saved); } catch (e) {}
+    }
+    if (!creds) {
+      creds = { host: '10.10.140.19', port: '3306', user: 'root', password: 'r00t', database: 'bako' };
+    }
+
+    setIsDirectExporting(true);
+    setDirectExportError(null);
+    setDirectExportSuccess(null);
+    setDbValidationMsg('');
+
+    try {
+      const sqlStatements = generateValidData2SqlStatements();
+      if (sqlStatements.length === 0) {
+        setDbValidationMsg('Tidak ada baris data yang memenuhi kriteria filter rentang waktu untuk diekspor.');
+        setIsDirectExporting(false);
+        return;
+      }
+
+      const res = await fetch('/api/db/export-validdata2', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: creds.host || '10.10.140.19',
+          port: creds.port || '3306',
+          user: creds.user || 'root',
+          password: creds.password || 'r00t',
+          database: creds.database || 'bako',
+          autoCreateTable: true,
+          sqlStatements: sqlStatements
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        let totalCount = records.length;
+        if (dbExportStart || dbExportEnd) {
+          let filtered = records;
+          if (dbExportStart) {
+            const sMs = new Date(dbExportStart + 'Z').getTime();
+            filtered = filtered.filter((r: any) => r.timestamp.getTime() >= sMs);
+          }
+          if (dbExportEnd) {
+            const eMs = new Date(dbExportEnd + 'Z').getTime();
+            filtered = filtered.filter((r: any) => r.timestamp.getTime() <= eMs);
+          }
+          totalCount = filtered.length;
+        }
+        setDirectExportSuccess(`Berhasil mengekspor ${totalCount.toLocaleString()} baris data ke tabel validdata2 dalam database ${creds.database || 'bako'} (Server: ${creds.host || '10.10.140.19'})!`);
+      } else {
+        setDirectExportError(data.error || 'Gagal mengekspor data ke database MySQL.');
+      }
+    } catch (err: any) {
+      setDirectExportError(err.message || 'Terjadi kesalahan jaringan atau server saat mengekspor ke database.');
+    } finally {
+      setIsDirectExporting(false);
+    }
+  };
 
   const outliers = useMemo(() => records.filter((r:any) => r.isOutlier).length, [records]);
 
@@ -4684,7 +5122,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               </button>
 
               <button 
-                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-rose-600 transition-colors flex items-center gap-2"
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-rose-100 hover:text-rose-600 transition-colors flex items-center gap-2"
                 onClick={() => {
                   const newVal = { ...interpolationSettings, enabled: true };
                   setInterpolationSettings(newVal);
@@ -4694,6 +5132,17 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               >
                 <Waves size={14} className="text-rose-600" />
                 <span>Hitung Interpolasi</span>
+              </button>
+
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition-colors flex items-center gap-2"
+                onClick={() => {
+                  handleOpenDbExportModal();
+                  setContextMenu(null);
+                }}
+              >
+                <Database size={14} className="text-emerald-600" />
+                <span>Ekspor ke basisdata</span>
               </button>
 
               <button 
@@ -5151,6 +5600,527 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
                     </div>
                 </div>
             </div>
+        )}
+
+        {/* --- Database Export Modal (Table validdata2) --- */}
+        {showDbExportModal && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+              {/* Modal Header */}
+              <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-emerald-50/70 via-teal-50/40 to-slate-50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-emerald-600 text-white rounded-2xl shadow-sm">
+                    <Database size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-black text-slate-800 font-display tracking-tight flex items-center gap-2">
+                      Ekspor ke Basis Data
+                      <span className="text-xs px-2.5 py-0.5 bg-emerald-100 text-emerald-800 font-mono font-bold rounded-lg">validdata2</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      Pilih data untuk diekspor ke tabel SQL <code className="font-mono text-emerald-700 font-bold">validdata2</code> (Maks. 3 Sensor, 1 Combined, 1 Interpolated).
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowDbExportModal(false)} 
+                  className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Modal Scrollable Body */}
+              <div className="p-5 sm:p-6 overflow-y-auto space-y-5 flex-1 text-xs">
+                
+                {/* Live MySQL Database Connection Banner */}
+                {isDbConnected ? (
+                  <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-emerald-900 shadow-xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-1.5 bg-emerald-600 text-white rounded-xl shadow-xs">
+                        <CheckCircle2 size={16} />
+                      </div>
+                      <div>
+                        <div className="font-black text-xs flex items-center gap-2">
+                          <span>Terhubung ke Basis Data MySQL</span>
+                          <span className="px-2 py-0.5 text-[9px] bg-emerald-200 text-emerald-900 rounded-full font-mono font-black tracking-wide">ONLINE</span>
+                        </div>
+                        <div className="text-[10px] text-emerald-700 font-mono mt-0.5">
+                          Host: <span className="font-bold">{dbCredentials?.host || '10.10.140.19'}:{dbCredentials?.port || '3306'}</span> &bull; Basis Data: <span className="font-bold">{dbCredentials?.database || 'bako'}</span> &bull; Tabel: <span className="font-bold">validdata2</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => checkDbConnectionStatus(true)}
+                      disabled={isCheckingDbConn}
+                      title="Uji ulang status koneksi ke MySQL"
+                      className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-[10px] font-bold shadow-xs transition-colors flex items-center gap-1.5 self-end sm:self-center shrink-0"
+                    >
+                      <RotateCw size={12} className={cn(isCheckingDbConn && "animate-spin text-emerald-600")} />
+                      <span>{isCheckingDbConn ? 'Memeriksa...' : 'Cek Status'}</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-slate-700 shadow-xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-1.5 bg-amber-500 text-white rounded-xl shadow-xs">
+                        <AlertCircle size={16} />
+                      </div>
+                      <div>
+                        <div className="font-black text-xs text-slate-800 flex items-center gap-2">
+                          <span>Belum Terhubung ke Basis Data MySQL</span>
+                          <span className="px-2 py-0.5 text-[9px] bg-slate-200 text-slate-700 rounded-full font-mono font-black tracking-wide">OFFLINE</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          Fitur ekspor langsung aktif jika Anda telah terhubung ke database di panel Connect.
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      <button
+                        onClick={() => checkDbConnectionStatus(true)}
+                        disabled={isCheckingDbConn}
+                        className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-[10px] font-bold shadow-xs transition-colors flex items-center gap-1.5"
+                      >
+                        <RotateCw size={12} className={cn(isCheckingDbConn && "animate-spin text-sky-600")} />
+                        <span>{isCheckingDbConn ? 'Memeriksa...' : 'Tes Koneksi'}</span>
+                      </button>
+                      {onNavigateToConnect && (
+                        <button
+                          onClick={() => {
+                            setShowDbExportModal(false);
+                            onNavigateToConnect();
+                          }}
+                          className="px-2.5 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-[10px] font-bold shadow-xs transition-colors flex items-center gap-1.5"
+                        >
+                          <Server size={12} />
+                          <span>Panel Connect</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Direct Export Success Message */}
+                {directExportSuccess && (
+                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3.5 rounded-2xl flex items-center justify-between gap-2 text-xs font-bold animate-in slide-in-from-top-1 shadow-xs">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                      <span>{directExportSuccess}</span>
+                    </div>
+                    <button onClick={() => setDirectExportSuccess(null)} className="text-emerald-600 hover:text-emerald-900 p-1 rounded-lg">
+                      <X size={15} />
+                    </button>
+                  </div>
+                )}
+
+                {/* Direct Export Error Message */}
+                {directExportError && (
+                  <div className="bg-rose-50 border border-rose-200 text-rose-900 p-3.5 rounded-2xl flex items-center justify-between gap-2 text-xs font-bold animate-in slide-in-from-top-1 shadow-xs">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle size={18} className="text-rose-600 shrink-0" />
+                      <span>{directExportError}</span>
+                    </div>
+                    <button onClick={() => setDirectExportError(null)} className="text-rose-600 hover:text-rose-900 p-1 rounded-lg">
+                      <X size={15} />
+                    </button>
+                  </div>
+                )}
+                
+                {/* Validation Message Box if any */}
+                {dbValidationMsg && (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-xl flex items-center gap-2 text-xs font-bold animate-in slide-in-from-top-1">
+                    <AlertCircle size={16} className="text-amber-600 shrink-0" />
+                    <span>{dbValidationMsg}</span>
+                  </div>
+                )}
+
+                {/* Status Quota Badges */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className={cn(
+                    "p-3 rounded-2xl border transition-all flex flex-col items-center text-center",
+                    selectedSensorKeys.length > 0 ? "bg-sky-50 border-sky-200 text-sky-900" : "bg-slate-50 border-slate-200 text-slate-500"
+                  )}>
+                    <span className="text-[10px] font-black uppercase tracking-wider">Sensor (Raw/Valid)</span>
+                    <span className="text-lg font-black font-mono mt-0.5">{selectedSensorKeys.length} / 3</span>
+                    <span className="text-[9px] text-slate-400 font-medium">Mapped to Sensor1..3</span>
+                  </div>
+
+                  <div className={cn(
+                    "p-3 rounded-2xl border transition-all flex flex-col items-center text-center",
+                    selectedCombinedKeys.length > 0 ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-slate-50 border-slate-200 text-slate-500"
+                  )}>
+                    <span className="text-[10px] font-black uppercase tracking-wider">Combined Data</span>
+                    <span className="text-lg font-black font-mono mt-0.5">{selectedCombinedKeys.length} / 1</span>
+                    <span className="text-[9px] text-slate-400 font-medium">Mapped to combination</span>
+                  </div>
+
+                  <div className={cn(
+                    "p-3 rounded-2xl border transition-all flex flex-col items-center text-center",
+                    selectedInterpolatedKeys.length > 0 ? "bg-rose-50 border-rose-200 text-rose-900" : "bg-slate-50 border-slate-200 text-slate-500"
+                  )}>
+                    <span className="text-[10px] font-black uppercase tracking-wider">Interpolated Data</span>
+                    <span className="text-lg font-black font-mono mt-0.5">{selectedInterpolatedKeys.length} / 1</span>
+                    <span className="text-[9px] text-slate-400 font-medium">Mapped to Interpolation</span>
+                  </div>
+                </div>
+
+                {/* Mapping Overview Card */}
+                <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-2">
+                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                    <span>Pemetaan Kolom Tabel SQL (validdata2):</span>
+                    <span className="font-mono text-[9px] text-slate-400">MySQL Schema Engine: MyISAM</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-[11px]">
+                    <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-xs">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">Sensor1</div>
+                      <div className="font-mono font-bold text-sky-700 truncate mt-0.5" title={selectedSensorKeys[0] || 'NULL'}>
+                        {selectedSensorKeys[0] || <span className="text-slate-300 font-normal">NULL</span>}
+                      </div>
+                    </div>
+                    <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-xs">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">Sensor2</div>
+                      <div className="font-mono font-bold text-sky-700 truncate mt-0.5" title={selectedSensorKeys[1] || 'NULL'}>
+                        {selectedSensorKeys[1] || <span className="text-slate-300 font-normal">NULL</span>}
+                      </div>
+                    </div>
+                    <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-xs">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">Sensor3</div>
+                      <div className="font-mono font-bold text-sky-700 truncate mt-0.5" title={selectedSensorKeys[2] || 'NULL'}>
+                        {selectedSensorKeys[2] || <span className="text-slate-300 font-normal">NULL</span>}
+                      </div>
+                    </div>
+                    <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-xs">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">combination</div>
+                      <div className="font-mono font-bold text-emerald-700 truncate mt-0.5" title={selectedCombinedKeys[0] || 'NULL'}>
+                        {selectedCombinedKeys[0] || <span className="text-slate-300 font-normal">NULL</span>}
+                      </div>
+                    </div>
+                    <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-xs">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">Interpolation</div>
+                      <div className="font-mono font-bold text-rose-700 truncate mt-0.5" title={selectedInterpolatedKeys[0] || '0.0 (Default)'}>
+                        {selectedInterpolatedKeys[0] || <span className="text-slate-300 font-normal">0.0 (Default)</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metadata & SQL Parameters Form */}
+                <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-3">
+                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Parameter Metadata & SQL</div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-600 block">StationId (Maks 10 Kar)</label>
+                      <input 
+                        type="text" 
+                        maxLength={10}
+                        value={dbStationId}
+                        onChange={(e) => setDbStationId(e.target.value)}
+                        placeholder="Contoh: STA01"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-200"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-600 block">Operator (Maks 20 Kar)</label>
+                      <input 
+                        type="text" 
+                        maxLength={20}
+                        value={dbOperator}
+                        onChange={(e) => setDbOperator(e.target.value)}
+                        placeholder="Operator"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-200"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-600 block">Source (Maks 20 Kar)</label>
+                      <input 
+                        type="text" 
+                        maxLength={20}
+                        value={dbSource}
+                        onChange={(e) => setDbSource(e.target.value)}
+                        placeholder="TideTool"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-200"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-600 block">Query SQL Mode</label>
+                      <select 
+                        value={dbSqlMode}
+                        onChange={(e: any) => setDbSqlMode(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-200"
+                      >
+                        <option value="INSERT">INSERT INTO</option>
+                        <option value="REPLACE">REPLACE INTO</option>
+                        <option value="INSERT_IGNORE">INSERT IGNORE INTO</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-600 block">Rentang Waktu Ekspor</label>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="datetime-local" 
+                          value={dbExportStart}
+                          onChange={(e) => setDbExportStart(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-[11px] font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                        />
+                        <span className="text-slate-400 font-bold">-</span>
+                        <input 
+                          type="datetime-local" 
+                          value={dbExportEnd}
+                          onChange={(e) => setDbExportEnd(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-[11px] font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-600 block">Remark / Catatan</label>
+                      <input 
+                        type="text" 
+                        value={dbRemark}
+                        onChange={(e) => setDbRemark(e.target.value)}
+                        placeholder="Contoh: Validasi Pasut BIG 2026"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-200"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Checklist Selection Sections (Identik dengan Export to Hydras) */}
+                <div className="space-y-4">
+                  
+                  {/* Raw Sensor Data Checklist */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                        1. Raw Sensor Data (Sensor1..3)
+                      </div>
+                      <span className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-md">
+                        Maks. 3 sensor (Raw/Valid)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {availableSensors.map((s: string) => {
+                        const isChecked = !!dbExportSelections[s];
+                        return (
+                          <label 
+                            key={s} 
+                            className={cn(
+                              "flex items-center gap-3 p-3 rounded-2xl border cursor-pointer transition-all",
+                              isChecked ? "bg-sky-50/70 border-sky-300 ring-1 ring-sky-200" : "bg-white border-slate-200 hover:bg-slate-50"
+                            )}
+                          >
+                            <input 
+                              type="checkbox" 
+                              checked={isChecked} 
+                              onChange={() => toggleDbExportSelection(s, 'sensor')}
+                              className="w-4 h-4 rounded text-sky-600 border-slate-300 focus:ring-sky-500"
+                            />
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-slate-800">{s}</span>
+                              <span className="text-[10px] text-slate-500 font-medium">Data sensor mentah</span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Valid Sensor Data Checklist */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                        2. Valid Sensor Data (Sensor1..3)
+                      </div>
+                      <span className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-md">
+                        Maks. 3 sensor (Raw/Valid)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {availableSensors.map((s: string) => {
+                        const key = `${s} (Valid)`;
+                        const isChecked = !!dbExportSelections[key];
+                        return (
+                          <label 
+                            key={key} 
+                            className={cn(
+                              "flex items-center gap-3 p-3 rounded-2xl border cursor-pointer transition-all",
+                              isChecked ? "bg-sky-50/90 border-sky-400 ring-1 ring-sky-300" : "bg-sky-50/30 border-sky-200 hover:bg-sky-50"
+                            )}
+                          >
+                            <input 
+                              type="checkbox" 
+                              checked={isChecked} 
+                              onChange={() => toggleDbExportSelection(key, 'sensor')}
+                              className="w-4 h-4 rounded text-sky-600 border-sky-300 focus:ring-sky-600"
+                            />
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-sky-950">{s} (Valid)</span>
+                              <span className="text-[10px] text-sky-600 font-medium">Dataset terfilter & terkalibrasi</span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Combined Sensor Data Checklist */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <div className="text-[10px] font-black text-emerald-800 uppercase tracking-widest">
+                        3. Combined Sensor Data (combination)
+                      </div>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                        Maks. 1 data
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {availableSensors.map((s: string) => {
+                        const key = `${s} (Combined)`;
+                        const isChecked = !!dbExportSelections[key];
+                        return (
+                          <label 
+                            key={key} 
+                            className={cn(
+                              "flex items-center gap-3 p-3 rounded-2xl border cursor-pointer transition-all",
+                              isChecked ? "bg-emerald-50/90 border-emerald-400 ring-1 ring-emerald-300" : "bg-emerald-50/30 border-emerald-200 hover:bg-emerald-50"
+                            )}
+                          >
+                            <input 
+                              type="checkbox" 
+                              checked={isChecked} 
+                              onChange={() => toggleDbExportSelection(key, 'combined')}
+                              className="w-4 h-4 rounded text-emerald-600 border-emerald-300 focus:ring-emerald-600"
+                            />
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-emerald-950">{s} (Combined)</span>
+                              <span className="text-[10px] text-emerald-600 font-medium">Data gabungan (Gap-filling)</span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Interpolated Data Checklist */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <div className="text-[10px] font-black text-rose-800 uppercase tracking-widest">
+                        4. Interpolated Data (Interpolation)
+                      </div>
+                      <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md">
+                        Maks. 1 data
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {availableSensors.map((s: string) => {
+                        const key = `${s} (Interpolated)`;
+                        const isChecked = !!dbExportSelections[key];
+                        return (
+                          <label 
+                            key={key} 
+                            className={cn(
+                              "flex items-center gap-3 p-3 rounded-2xl border cursor-pointer transition-all",
+                              isChecked ? "bg-rose-50/90 border-rose-400 ring-1 ring-rose-300" : "bg-rose-50/30 border-rose-200 hover:bg-rose-50"
+                            )}
+                          >
+                            <input 
+                              type="checkbox" 
+                              checked={isChecked} 
+                              onChange={() => toggleDbExportSelection(key, 'interpolated')}
+                              className="w-4 h-4 rounded text-rose-600 border-rose-300 focus:ring-rose-600"
+                            />
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-rose-950">{s} (Interpolated)</span>
+                              <span className="text-[10px] text-rose-600 font-medium">Hasil interpolasi gap</span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* SQL Query Live Preview */}
+                <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between px-1">
+                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                      <Code size={13} className="text-slate-600" />
+                      Preview Query SQL (Tabel validdata2)
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">10 Baris Pertama</span>
+                  </div>
+                  <div className="bg-slate-900 text-slate-100 p-3.5 rounded-2xl font-mono text-[11px] leading-relaxed overflow-x-auto max-h-36 shadow-inner">
+                    <pre className="whitespace-pre">{generateValidData2Sql(10) || '-- Pilih kolom data untuk melihat preview query SQL'}</pre>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="text-[11px] text-slate-500 font-medium text-center sm:text-left">
+                  Tabel target: <span className="font-mono font-bold text-slate-700">validdata2</span> ({records.length} data points)
+                </div>
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                  <button 
+                    onClick={() => setShowDbExportModal(false)} 
+                    className="px-3.5 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 rounded-xl transition-colors"
+                  >
+                    Tutup
+                  </button>
+                  
+                  <button 
+                    onClick={handleCopyDbSql}
+                    className="px-3.5 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+                  >
+                    {dbExportCopied ? <Check size={15} className="text-emerald-600" /> : <Copy size={15} />}
+                    <span>{dbExportCopied ? 'Tersalin!' : 'Salin SQL'}</span>
+                  </button>
+
+                  <button 
+                    onClick={handleDownloadDbSql}
+                    className="px-3.5 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+                  >
+                    <Download size={15} />
+                    <span>Download .sql</span>
+                  </button>
+
+                  <button 
+                    onClick={handleDirectExportToMysql}
+                    disabled={!isDbConnected || isDirectExporting}
+                    title={!isDbConnected ? "Hubungkan database di panel Connect terlebih dahulu untuk mengaktifkan ekspor langsung." : "Ekspor langsung ke database validdata2"}
+                    className={cn(
+                      "px-5 py-2.5 text-xs font-black rounded-xl shadow-sm transition-all flex items-center gap-2",
+                      isDbConnected && !isDirectExporting
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200/50 hover:shadow-md cursor-pointer active:scale-95"
+                        : "bg-slate-200 text-slate-400 border border-slate-200 cursor-not-allowed"
+                    )}
+                  >
+                    {isDirectExporting ? (
+                      <>
+                        <RotateCw size={16} className="animate-spin text-white" />
+                        <span>Mengekspor ke Database...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Database size={16} className={isDbConnected ? "text-emerald-100" : "text-slate-400"} />
+                        <span>Ekspor Langsung ke Database</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
     </div>
   );
