@@ -3,6 +3,19 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import mysql from "mysql2/promise";
 import cors from "cors";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
+
+// Configure proxy for native fetch if environment variables are set
+const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+if (proxyUrl) {
+  try {
+    const proxyAgent = new ProxyAgent(proxyUrl);
+    setGlobalDispatcher(proxyAgent);
+    console.log(`[Proxy] Configured native fetch to use proxy: ${proxyUrl}`);
+  } catch (error) {
+    console.error("[Proxy] Failed to configure proxy agent:", error);
+  }
+}
 
 // MySQL Connection Pool (Lazy initialized or created on demand based on connection details)
 
