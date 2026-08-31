@@ -698,6 +698,8 @@ export default function App() {
   const [butterCutoff, setButterCutoff] = useState(0.5);
   const [harmonicResults, setHarmonicResults] = useState<ConstituentResult[]>([]);
   const [rmseVal, setRmseVal] = useState<number | null>(null);
+  const [maeVal, setMaeVal] = useState<number | null>(null);
+  const [meVal, setMeVal] = useState<number | null>(null);
   const isProcessing = useRef(false);
   const [z0, setZ0] = useState(0);
   const [linearTrend, setLinearTrend] = useState<{ slope: number, intercept: number, rateYear: number, marginOfError?: number, lsqTrend?: { slope: number, intercept: number, rateYear: number, marginOfError?: number }, stlTrend?: { slope: number, intercept: number, rateYear: number, marginOfError: number }, robustStlTrend?: { slope: number, intercept: number, rateYear: number, marginOfError: number }, ssaTrend?: { slope: number, intercept: number, rateYear: number, marginOfError: number }, polyTrend?: { c0: number, c1: number, c2: number } } | null>(null);
@@ -2149,8 +2151,8 @@ export default function App() {
 
             setLinearTrend({ ...regTrend, lsqTrend, stlTrend: stlTrendData, robustStlTrend: robustStlTrendData, ssaTrend: ssaTrendData, polyTrend: polyTrendData });
             
-            // Calculate RMSE
-            let sumSqE = 0, countE = 0;
+            // Calculate RMSE, MAE, ME
+            let sumSqE = 0, sumAbsE = 0, sumE = 0, countE = 0;
             processed.forEach(r => {
                 if (!r.isOutlier && !isNaN(r.filtered)) {
                     const rtRef = (r.timestamp.getTime() - baseTimeRef) / 3600000;
@@ -2162,12 +2164,19 @@ export default function App() {
                         const w = 2 * Math.PI * res.freq;
                         p += res.amp * Math.cos(w * rtRef + (res.v0 - res.phase) * (Math.PI / 180));
                     });
-                    sumSqE += Math.pow(r.filtered - p, 2);
+                    const e = r.filtered - p;
+                    sumSqE += e * e;
+                    sumAbsE += Math.abs(e);
+                    sumE += e;
                     countE++;
                 }
             });
             const rVal = countE > 0 ? Math.sqrt(sumSqE / countE) : 0;
+            const mae = countE > 0 ? sumAbsE / countE : 0;
+            const me = countE > 0 ? sumE / countE : 0;
             setRmseVal(rVal);
+            setMaeVal(mae);
+            setMeVal(me);
         }
 
         requestAnimationFrame(() => {
@@ -2867,33 +2876,10 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
       });
       content = lines.join('\n');
     } else {
-      // Calculate Stats
-      const t0 = records[0].timestamp.getTime();
-      const yearRef = records[0].timestamp.getUTCFullYear();
-      const baseTimeRef = Date.UTC(yearRef, 0, 1, 0, 0, 0);
-      let sumE = 0, sumAbsE = 0, sumSqE = 0, count = 0;
-      records.forEach(r => {
-        if (!r.isOutlier && !isNaN(r.filtered)) {
-            const t = (r.timestamp.getTime() - t0) / 3600000;
-            const tRef = (r.timestamp.getTime() - baseTimeRef) / 3600000;
-            let p = z0;
-            if (linearTrend && linearTrend.lsqTrend) {
-                p += linearTrend.lsqTrend.slope * t;
-            }
-            harmonicResults.forEach(res => {
-                const w = 2 * Math.PI * res.freq;
-                p += res.amp * Math.cos(w * tRef + (res.v0 - res.phase) * (Math.PI / 180));
-            });
-            const e = r.filtered - p;
-            sumE += e;
-            sumAbsE += Math.abs(e);
-            sumSqE += e * e;
-            count++;
-        }
-      });
-      const me = count > 0 ? (sumE / count) : 0;
-      const mae = count > 0 ? (sumAbsE / count) : 0;
-      const rmse = count > 0 ? Math.sqrt(sumSqE / count) : 0;
+      // Use Stats from State
+      const me = meVal !== null ? meVal : 0;
+      const mae = maeVal !== null ? maeVal : 0;
+      const rmse = rmseVal !== null ? rmseVal : 0;
 
       content = `Tide Analysis Report\t${fileName}\n`;
       const sName = stationNameRef.current;
