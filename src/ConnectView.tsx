@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download, ChevronDown, Search } from 'lucide-react';
+import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download, ChevronDown, Search, Server, Radio } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subHours, subDays, subMonths, startOfDay, endOfDay } from 'date-fns';
 
 export default function ConnectView({ 
@@ -344,42 +344,72 @@ export default function ConnectView({
 
         {/* Credentials Section */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest">Credentials & Server</h2>
-            <button 
-              onClick={handleTestConnection}
-              disabled={isTesting}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold tracking-wider uppercase transition-colors ${
-                connStatus === 'success' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' :
-                connStatus === 'error' ? 'bg-red-100 text-red-700 hover:bg-red-200' :
-                'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              {isTesting ? <RotateCw className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
-              {isTesting ? 'Testing...' : connStatus === 'success' ? 'Connected' : connStatus === 'error' ? 'Failed' : 'Connect'}
-            </button>
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
+                <Server size={18} />
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest">Credentials & Server</h2>
+                <p className="text-xs text-slate-500 font-medium">Pengaturan alamat host dan port koneksi MySQL</p>
+              </div>
+            </div>
+            {connStatus === 'success' && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-full text-xs font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Terhubung
+              </span>
+            )}
+            {connStatus === 'error' && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-50 text-red-700 border border-red-200/80 rounded-full text-xs font-bold">
+                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                Gagal
+              </span>
+            )}
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Host</label>
-              <input type="text" value={host} onChange={e => setHost(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
+            <div className="sm:col-span-6 md:col-span-7">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                Alamat Host
+              </label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={host} 
+                  onChange={e => setHost(e.target.value)} 
+                  placeholder="e.g. 10.10.140.19 atau localhost"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-100 transition-all placeholder:text-slate-400" 
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Port</label>
-              <input type="text" value={port} onChange={e => setPort(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+
+            <div className="sm:col-span-3 md:col-span-2">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                Port
+              </label>
+              <input 
+                type="text" 
+                value={port} 
+                onChange={e => setPort(e.target.value)} 
+                placeholder="3306"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-100 transition-all text-center sm:text-left placeholder:text-slate-400" 
+              />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Database Name</label>
-              <input type="text" value={database} onChange={e => setDatabase(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Username</label>
-              <input type="text" value={user} onChange={e => setUser(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:ring-2 focus:ring-sky-500" />
+
+            <div className="sm:col-span-3 md:col-span-3">
+              <button 
+                onClick={handleTestConnection}
+                disabled={isTesting}
+                className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-bold tracking-wide transition-all shadow-sm ${
+                  connStatus === 'success' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' :
+                  connStatus === 'error' ? 'bg-red-600 hover:bg-red-700 text-white' :
+                  'bg-sky-600 hover:bg-sky-700 text-white'
+                } disabled:opacity-70 disabled:cursor-not-allowed`}
+              >
+                {isTesting ? <RotateCw className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
+                {isTesting ? 'Testing...' : connStatus === 'success' ? 'Connected' : connStatus === 'error' ? 'Retry' : 'Connect'}
+              </button>
             </div>
           </div>
         </div>
