@@ -1,0 +1,46 @@
+--- src/TsunamiAnalysisView.tsx
++++ src/TsunamiAnalysisView.tsx
+@@ -530,19 +530,35 @@
+ 
+   const handleDownloadCSV = () => {
+-      let csvContent = "Timestamp (UTC),Tsunami Anomaly (m)\n";
++      let csvContent = "\uFEFFTimestamp (UTC);Tsunami Anomaly (m)\n";
+       
+       detection.data.forEach((d: any) => {
+-          if (d.tsunamiSignal !== null && d.tsunamiSignal !== undefined) {
++          if (d.tsunamiSignal !== null && d.tsunamiSignal !== undefined && !isNaN(d.tsunamiSignal)) {
+               const dtStr = formatUTC(new Date(d.timeMs), 'yyyy-MM-dd HH:mm:ss');
+-              csvContent += `${dtStr},${d.tsunamiSignal.toFixed(3)}\n`;
++              csvContent += `${dtStr};${d.tsunamiSignal.toFixed(3)}\n`;
+           }
+       });
+       
+       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+       const url = URL.createObjectURL(blob);
+       download(url, `tsunami_anomaly_${stationName || 'station'}.csv`);
+   };
+ 
++  const handleDownloadTXT = () => {
++      const txtContent = [
++          "Tsunami Analysis Report",
++          "=======================",
++          `Station Name     : ${stationName || 'Unknown'}`,
++          `Coordinates      : ${stationLat || 'N/A'}, ${stationLon || 'N/A'}`,
++          `Status           : ${detection.detected ? 'Tsunami Detected' : 'No Tsunami Detected'}`,
++          `Max Amplitude    : ${detection.detected ? detection.maxWave.toFixed(3) + ' m' : 'N/A'}`,
++          `Start Time (UTC) : ${detection.start ? formatUTC(new Date(detection.start), 'yyyy-MM-dd HH:mm:ss') : 'N/A'}`,
++          `End Time (UTC)   : ${detection.end ? formatUTC(new Date(detection.end), 'yyyy-MM-dd HH:mm:ss') : 'N/A'}`
++      ].join('\n');
++      const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
++      const url = URL.createObjectURL(blob);
++      download(url, `tsunami_report_${stationName || 'station'}.txt`);
++  };
++
+   const yDomain = useMemo(() => {
+     if (!displayData.length) return ['auto', 'auto'];
+@@ -688,4 +704,5 @@
+                    <button onClick={handleDownloadPNG} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> PNG</button>
+                    <button onClick={handleDownloadCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> CSV</button>
++                   <button onClick={handleDownloadTXT} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> TXT</button>
+                  </div>
+                </div>

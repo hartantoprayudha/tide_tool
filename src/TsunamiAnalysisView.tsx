@@ -519,24 +519,102 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
     return detection.data.filter((_: any, i: number) => i % step === 0);
   }, [detection.data]);
 
+  const triggerDownload = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    try {
+      download(blob, filename, mimeType);
+    } catch {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  };
+
   const handleDownloadPNG = () => {
       const el = document.getElementById('tsunami-chart-container');
       if (el) {
           toPng(el, { backgroundColor: '#ffffff' }).then(dataUrl => {
-              download(dataUrl, `tsunami_analysis_${stationName || 'chart'}.png`);
+              const safeName = (stationName || 'chart').replace(/[^a-zA-Z0-9_-]/g, '_');
+              download(dataUrl, `tsunami_analysis_${safeName}.png`);
           }).catch(err => console.error("Error creating PNG:", err));
       }
   };
 
   const handleDownloadCSV = () => {
-      const csvContent = [
-          "Nama Stasiun,Latitude,Longitude,Amplitudo Tsunami (m),Waktu Mulai,Waktu Berakhir",
-          `${stationName || 'Unknown'},${stationLat || ''},${stationLon || ''},${detection.detected ? detection.maxWave.toFixed(3) : 0},${detection.start ? formatUTC(new Date(detection.start), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : ''},${detection.end ? formatUTC(new Date(detection.end), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : ''}`
-      ].join('\n');
+      if (!detection.data || detection.data.length === 0) return;
       
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      download(url, `tsunami_report_${stationName || 'station'}.csv`);
+      let csvContent = "Tanggal,Waktu (UTC),Tsunami Anomaly (m)\n";
+      
+      detection.data.forEach((d: any) => {
+          const dateObj = new Date(d.timeMs);
+          const dateStr = formatUTC(dateObj, 'dd/MM/yyyy');
+          const timeStr = formatUTC(dateObj, 'HH:mm:ss');
+          const valStr = (d.tsunamiSignal !== null && d.tsunamiSignal !== undefined && !isNaN(d.tsunamiSignal))
+              ? d.tsunamiSignal.toFixed(4)
+              : '';
+          csvContent += `${dateStr},${timeStr},${valStr}\n`;
+      });
+      
+      const safeName = (stationName || 'station').replace(/[^a-zA-Z0-9_-]/g, '_');
+      triggerDownload(csvContent, `tsunami_anomaly_${safeName}.csv`, 'text/csv;charset=utf-8;');
+  };
+
+  const handleDownloadTXT = () => {
+      const safeName = (stationName || 'station').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const dataStart = records?.[0]?.timestamp ? formatUTC(new Date(records[0].timestamp), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : '-';
+      const dataEnd = records?.[records.length - 1]?.timestamp ? formatUTC(new Date(records[records.length - 1].timestamp), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : '-';
+      const totalPoints = records?.length || 0;
+      
+      let durationHours = 0;
+      if (detection.start && detection.end) {
+          durationHours = (detection.end - detection.start) / (1000 * 3600);
+      }
+
+      const lines = [
+          "==================================================================",
+          "             LAPORAN RINGKASAN ANALISIS TSUNAMI                  ",
+          "               TSUNAMI ANALYSIS SUMMARY REPORT                    ",
+          "==================================================================",
+          "",
+          "[1] INFORMASI STASIUN & DATA",
+          `    - Nama Stasiun        : ${stationName || 'Unknown / Tidak diketahui'}`,
+          `    - Koordinat (Lat, Lon): ${stationLat ? Number(stationLat).toFixed(6) : '-'}, ${stationLon ? Number(stationLon).toFixed(6) : '-'}`,
+          `    - Sensor Terpilih     : ${selectedSensor || 'Default'}`,
+          `    - Periode Data Awal   : ${dataStart}`,
+          `    - Periode Data Akhir  : ${dataEnd}`,
+          `    - Total Sampel Data   : ${totalPoints.toLocaleString()} data points`,
+          "",
+          "[2] HASIL DETEKSI TSUNAMI",
+          `    - Status Deteksi      : ${detection.detected ? 'TERDETEKSI (TSUNAMI DETECTED)' : 'TIDAK TERDETEKSI (NO TSUNAMI DETECTED)'}`,
+          `    - Amplitudo Maksimum  : ${detection.detected ? detection.maxWave.toFixed(4) + ' meter (Nol ke Puncak / Zero-to-Peak)' : '0.0000 meter'}`,
+          `    - Waktu Mulai (UTC)   : ${detection.start ? formatUTC(new Date(detection.start), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : 'N/A'}`,
+          `    - Waktu Berakhir (UTC): ${detection.end ? formatUTC(new Date(detection.end), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : 'N/A'}`,
+          `    - Estimasi Durasi     : ${detection.detected && durationHours > 0 ? durationHours.toFixed(2) + ' jam (' + (durationHours * 60).toFixed(0) + ' menit)' : 'N/A'}`,
+          "",
+          "[3] REFERENSI KEJADIAN GEMPA BUMI (BMKG / InaTEWS)",
+          bmkgData ? [
+              `    - Tanggal & Waktu     : ${bmkgData.tanggal || '-'} ${bmkgData.jam || '-'}`,
+              `    - Magnitudo           : ${bmkgData.magnitude || '-'}`,
+              `    - Wilayah Pusat Gempa : ${bmkgData.wilayah || '-'}`,
+              `    - Potensi Tsunami     : ${bmkgData.potensi || '-'}`
+          ].join('\n') : "    - Informasi Gempa     : Data gempa tidak ditemukan dalam rentang waktu data pasut.",
+          "",
+          "[4] PARAMETER METODE ANALISIS",
+          "    - Algoritma           : Fast Fourier Transform (FFT) Band-Pass Filter",
+          "    - Rentang Frekuensi   : 0.08 mHz s/d 3.33 mHz (Periode ~5 menit s/d ~200 menit)",
+          "    - Ambang Batas (Thresh): 0.05 m (5 cm) amplitudo anomali",
+          "",
+          `Laporan dibuat secara otomatis pada: ${formatUTC(new Date(), 'yyyy-MM-dd HH:mm:ss')} UTC`,
+          "=================================================================="
+      ];
+
+      const txtContent = lines.join('\n');
+      triggerDownload(txtContent, `tsunami_report_${safeName}.txt`, 'text/plain;charset=utf-8;');
   };
 
   const yDomain = useMemo(() => {
@@ -682,6 +760,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                 <div data-html2canvas-ignore className="flex flex-wrap items-center gap-2">
                    <button onClick={handleDownloadPNG} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> PNG</button>
                    <button onClick={handleDownloadCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> CSV</button>
+                   <button onClick={handleDownloadTXT} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> TXT</button>
                    <div className="w-px h-6 bg-slate-200 mx-1 self-center hidden sm:block"></div>
                    <button onClick={() => zoomInOut(0.25)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors">Zoom In</button>
                    <button onClick={() => zoomInOut(-0.25)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors">Zoom Out</button>
