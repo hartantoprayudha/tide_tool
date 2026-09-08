@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ReferenceLine, ReferenceArea, Brush } from 'recharts';
-import { Activity, AlertTriangle, Clock, Waves, PanelRightClose, PanelRightOpen, Settings, Download } from 'lucide-react';
+import { Activity, AlertTriangle, Clock, Waves, PanelRightClose, PanelRightOpen, Settings, Download, ZoomIn, CheckCircle2, ChevronDown, Flame, ShieldAlert } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import download from 'downloadjs';
 import { cn } from './lib/utils';
+import { findBMKGEventsForRange, BMKGEvent, BMKG_HISTORICAL_EVENTS } from './bmkgCatalog';
 
 const formatUTC = (date: Date, fmt: string) => {
   if (isNaN(date.getTime())) return "Invalid Date";
@@ -30,7 +31,9 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
   const [refAreaRight, setRefAreaRight] = useState<string>('');
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
-  const [bmkgData, setBmkgData] = useState<any>(null);
+  const [bmkgData, setBmkgData] = useState<BMKGEvent | any>(null);
+  const [candidateEvents, setCandidateEvents] = useState<BMKGEvent[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string>('');
 
   const [brushKey, setBrushKey] = useState(0);
 
@@ -46,204 +49,158 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
   };
 
   useEffect(() => {
-    let dataStart = records?.[0]?.timestamp?.getTime() || 0;
-    let dataEnd = records?.[records.length - 1]?.timestamp?.getTime() || 0;
+    if (!records || records.length === 0) {
+      setBmkgData(null);
+      setCandidateEvents([]);
+      setSelectedEventId('');
+      return;
+    }
+
+    const toMs = (ts: any) => {
+      if (ts instanceof Date) return ts.getTime();
+      if (typeof ts === 'number') return ts;
+      const parsed = new Date(ts).getTime();
+      return isNaN(parsed) ? 0 : parsed;
+    };
+
+    const dataStart = toMs(records[0]?.timestamp);
+    const dataEnd = toMs(records[records.length - 1]?.timestamp);
+
+    if (!dataStart || !dataEnd || isNaN(dataStart) || isNaN(dataEnd)) {
+      setBmkgData(null);
+      setCandidateEvents([]);
+      setSelectedEventId('');
+      return;
+    }
+
+    // 1. First priority: Check historical BMKG catalog (includes 2018 Anak Krakatau, Palu, Lombok, etc.)
+    const catalogMatches = findBMKGEventsForRange(dataStart, dataEnd);
 
     const fetchGempaData = async () => {
-        try {
-            // First, try extracting from the BMKG history page (Berpotensi Tsunami)
-            const histRes = await fetch('/api/bmkg/history');
-            if (histRes.ok) {
-                const htmlStr = await histRes.text();
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(htmlStr, "text/html");
-                const rows = doc.querySelectorAll('table tbody tr');
-                
-                let histCandidates = [];
-                for (let i = 0; i < rows.length; i++) {
-                    const row = rows[i];
-                    const cols = row.querySelectorAll('td');
-                    if (cols.length >= 7) {
-                        const waktuHtml = cols[1].innerHTML;
-                        const waktuLines = waktuHtml.split('<br>');
-                        const tglPart = waktuLines[0]?.trim();
-                        const jamPart = waktuLines[1]?.trim()?.replace(' WIB', '');
-                        
-                        if (tglPart && jamPart) {
-                            const monthMap: Record<string, string> = { 'Jan':'Jan', 'Feb':'Feb', 'Mar':'Mar', 'Apr':'Apr', 'Mei':'May', 'Jun':'Jun', 'Jul':'Jul', 'Agt':'Aug', 'Sep':'Sep', 'Okt':'Oct', 'Nov':'Nov', 'Des':'Dec' };
-                            let engDateStr = tglPart;
-                            Object.keys(monthMap).forEach(id => {
-                                engDateStr = engDateStr.replace(id, monthMap[id]);
-                            });
-                            
-                            const timeStr = `${engDateStr} ${jamPart.replace(/\./g, ':')} +0700`;
-                            const timeMs = new Date(timeStr).getTime();
-                            
-                            if (!isNaN(timeMs) && timeMs >= dataStart - (48 * 3600 * 1000) && timeMs <= dataEnd) {
-                                histCandidates.push({
-                                   tanggal: tglPart,
-                                   jam: jamPart + ' WIB',
-                                   potensi: cols[2].textContent?.trim() || "Berpotensi Tsunami",
-                                   magnitude: cols[3].textContent?.trim() || "0",
-                                   wilayah: cols[6].textContent?.trim() || "",
-                                   timeMs: timeMs,
-                                   magFloat: parseFloat(cols[3].textContent?.trim().replace(',', '.') || "0")
-                                });
-                            }
-                        }
-                    }
-                }
-                
-                if (histCandidates.length > 0) {
-                    histCandidates.sort((a,b) => b.magFloat - a.magFloat);
-                    setBmkgData(histCandidates[0]);
-                    return; // Successfully got from history HTML!
-                }
-            }
+      let allCandidates: BMKGEvent[] = [...catalogMatches];
 
-            // Fallback 1: Try inatews XML
-            const inatewsRes = await fetch('/api/bmkg/inatews');
-            if (inatewsRes.ok) {
-                const xmlStr = await inatewsRes.text();
-                const parser = new DOMParser();
-                const xml = parser.parseFromString(xmlStr, "application/xml");
-                const infoList = xml.querySelectorAll("info");
-                
-                let inatewsCandidates = [];
-                for (let i = 0; i < infoList.length; i++) {
-                    const info = infoList[i];
-                    const dateStr = info.querySelector("date")?.textContent; // format: 08-06-26
-                    const timeStr = info.querySelector("time")?.textContent; // format: 06:37:42 WIB
-                    const potential = info.querySelector("potential")?.textContent || "Potensi TSUNAMI";
-                    const magnitudeStr = info.querySelector("magnitude")?.textContent || "0";
-                    const area = info.querySelector("area")?.textContent || "";
-                    
-                    if (dateStr && timeStr) {
-                         // Parse "DD-MM-YY"
-                         const parts = dateStr.split('-');
-                         if (parts.length === 3) {
-                             const year = 2000 + parseInt(parts[2]);
-                             const month = parseInt(parts[1]) - 1;
-                             const day = parseInt(parts[0]);
-                             
-                             const timeMatch = timeStr.match(/(\d+):(\d+):(\d+)/);
-                             if (timeMatch) {
-                                 const hours = parseInt(timeMatch[1]);
-                                 const mins = parseInt(timeMatch[2]);
-                                 const secs = parseInt(timeMatch[3]);
-                                 // Assume WIB is UT+7
-                                 const dateObj = new Date(Date.UTC(year, month, day, hours - 7, mins, secs));
-                                 const timeMs = dateObj.getTime();
-                                 
-                                 if (!isNaN(timeMs) && timeMs >= dataStart - (48 * 3600 * 1000) && timeMs <= dataEnd) {
-                                     inatewsCandidates.push({
-                                        tanggal: `${day}-${month+1}-${year}`,
-                                        jam: timeStr,
-                                        potensi: potential,
-                                        magnitude: magnitudeStr,
-                                        wilayah: area,
-                                        timeMs: timeMs,
-                                        magFloat: parseFloat(magnitudeStr.replace(',', '.'))
-                                     });
-                                 }
-                             }
-                         }
-                    }
-                }
-                
-                if (inatewsCandidates.length > 0) {
-                    inatewsCandidates.sort((a,b) => b.magFloat - a.magFloat);
-                    setBmkgData(inatewsCandidates[0]);
-                    return; // Successfully got from inatews XML!
-                }
-            }
-            
-            // Fallback 2: Fetch gempaterkini XML
-            const xmlRes = await fetch('/api/bmkg/gempa?type=tsunami');
-            if (xmlRes.ok) {
-                const xmlStr = await xmlRes.text();
-                const parser = new DOMParser();
-                const xml = parser.parseFromString(xmlStr, "application/xml");
-                const gempaList = xml.querySelectorAll("gempa");
-                
-                let matchedGempa = null;
-                let candidates = [];
-                
-                for (let i = 0; i < gempaList.length; i++) {
-                    const gempa = gempaList[i];
-                    let dtStr = gempa.querySelector("DateTime")?.textContent;
-                    let timeMs = 0;
-                    if (dtStr) {
-                        timeMs = new Date(dtStr).getTime();
-                    } else {
-                        const tgl = gempa.querySelector("Tanggal")?.textContent;
-                        const jam = gempa.querySelector("Jam")?.textContent;
-                        if (tgl && jam) {
-                            timeMs = new Date(`${tgl} ${jam.replace('WIB', '+0700')}`).getTime();
-                        }
-                    }
-                    
-                    if (timeMs >= dataStart - (48 * 3600 * 1000) && timeMs <= dataEnd) {
-                        const potensi = gempa.querySelector("Potensi")?.textContent || "";
-                        const magnitudeStr = gempa.querySelector("Magnitude")?.textContent || "0";
-                        const magnitude = parseFloat(magnitudeStr);
-                        candidates.push({ gempa, timeMs, potensi, magnitude });
-                    }
-                }
-                
-                if (candidates.length > 0) {
-                    candidates.sort((a, b) => {
-                        const aTsunami = a.potensi.toLowerCase().includes('tsunami') ? 1 : 0;
-                        const bTsunami = b.potensi.toLowerCase().includes('tsunami') ? 1 : 0;
-                        if (aTsunami !== bTsunami) return bTsunami - aTsunami;
-                        return b.magnitude - a.magnitude;
-                    });
-                    matchedGempa = candidates[0];
-                } else if (gempaList.length > 0) {
-                     const gempa = gempaList[0];
-                     let dtStr = gempa.querySelector("DateTime")?.textContent;
-                     let timeMs = 0;
-                     if (dtStr) {
-                         timeMs = new Date(dtStr).getTime();
-                     } else {
-                         const tgl = gempa.querySelector("Tanggal")?.textContent;
-                         const jam = gempa.querySelector("Jam")?.textContent;
-                         if (tgl && jam) {
-                             timeMs = new Date(`${tgl} ${jam.replace('WIB', '+0700')}`).getTime();
-                         }
-                     }
-                     matchedGempa = { gempa, timeMs };
-                }
+      try {
+        // Try live BMKG history
+        const histRes = await fetch('/api/bmkg/history');
+        if (histRes.ok) {
+          const htmlStr = await histRes.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(htmlStr, "text/html");
+          const rows = doc.querySelectorAll('table tbody tr');
 
-                if (matchedGempa) {
-                    const { gempa, timeMs } = matchedGempa;
-                    setBmkgData({
-                        tanggal: gempa.querySelector("Tanggal")?.textContent,
-                        jam: gempa.querySelector("Jam")?.textContent,
-                        magnitude: gempa.querySelector("Magnitude")?.textContent,
-                        wilayah: gempa.querySelector("Wilayah")?.textContent,
-                        potensi: gempa.querySelector("Potensi")?.textContent,
-                        timeMs: isNaN(timeMs) ? null : timeMs
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const cols = row.querySelectorAll('td');
+            if (cols.length >= 7) {
+              const waktuHtml = cols[1].innerHTML;
+              const waktuLines = waktuHtml.split('<br>');
+              const tglPart = waktuLines[0]?.trim();
+              const jamPart = waktuLines[1]?.trim()?.replace(' WIB', '');
+
+              if (tglPart && jamPart) {
+                const monthMap: Record<string, string> = { 'Jan':'Jan', 'Feb':'Feb', 'Mar':'Mar', 'Apr':'Apr', 'Mei':'May', 'Jun':'Jun', 'Jul':'Jul', 'Agt':'Aug', 'Sep':'Sep', 'Okt':'Oct', 'Nov':'Nov', 'Des':'Dec' };
+                let engDateStr = tglPart;
+                Object.keys(monthMap).forEach(id => {
+                  engDateStr = engDateStr.replace(id, monthMap[id]);
+                });
+
+                const timeStr = `${engDateStr} ${jamPart.replace(/\./g, ':')} +0700`;
+                const timeMs = new Date(timeStr).getTime();
+
+                if (!isNaN(timeMs) && timeMs >= dataStart - (48 * 3600 * 1000) && timeMs <= dataEnd) {
+                  if (!allCandidates.some(c => Math.abs(c.timeMs - timeMs) < 1800000)) {
+                    allCandidates.push({
+                      id: `live-hist-${timeMs}`,
+                      tanggal: tglPart,
+                      jam: jamPart + ' WIB',
+                      timeMs: timeMs,
+                      type: 'tektonik',
+                      title: `Gempabumi Tektonik ${cols[6].textContent?.trim() || ''}`,
+                      magnitude: cols[3].textContent?.trim() || "0",
+                      magFloat: parseFloat(cols[3].textContent?.trim().replace(',', '.') || "0"),
+                      depth: cols[5]?.textContent?.trim() || '-',
+                      coordinates: cols[4]?.textContent?.trim() || '-',
+                      lat: 0,
+                      lon: 0,
+                      wilayah: cols[6].textContent?.trim() || "",
+                      potensi: cols[2].textContent?.trim() || "Berpotensi Tsunami",
+                      keterangan: "Data arsip gempa BMKG."
                     });
+                  }
                 }
+              }
             }
-        } catch (error) {
-            console.error("BMKG Fetching Error:", error);
+          }
         }
+      } catch (err) {
+        // Fallback gracefully
+      }
+
+      // Sort candidate events: events with tsunami potential first, then by magnitude
+      allCandidates.sort((a, b) => {
+        const aTsu = a.potensi.toLowerCase().includes('tsunami') ? 1 : 0;
+        const bTsu = b.potensi.toLowerCase().includes('tsunami') ? 1 : 0;
+        if (aTsu !== bTsu) return bTsu - aTsu;
+        return b.magFloat - a.magFloat;
+      });
+
+      setCandidateEvents(allCandidates);
+      if (allCandidates.length > 0) {
+        setBmkgData(allCandidates[0]);
+        setSelectedEventId(allCandidates[0].id);
+      } else {
+        setBmkgData(null);
+        setSelectedEventId('');
+      }
     };
-    
+
     fetchGempaData();
   }, [records]);
-  
+
+  const handleSelectEvent = (id: string) => {
+    setSelectedEventId(id);
+    const found = candidateEvents.find(e => e.id === id);
+    if (found) {
+      setBmkgData(found);
+    }
+  };
+
+  const handleFocusTsunami = () => {
+    if (detection.start && detection.end) {
+      const buffer = 2 * 3600 * 1000;
+      setZoomDomain({
+        start: detection.start - buffer,
+        end: detection.end + buffer
+      });
+      setVZoom(1.8);
+    } else if (bmkgData?.timeMs) {
+      setZoomDomain({
+        start: bmkgData.timeMs - (2 * 3600 * 1000),
+        end: bmkgData.timeMs + (12 * 3600 * 1000)
+      });
+      setVZoom(1.8);
+    }
+  };
+
   // Tsunami Detection Algorithm (FFT High-Pass / Band-Pass)
   const detection = useMemo(() => {
     if (!records || records.length === 0) return { detected: false, maxWave: 0, start: null, end: null, data: [] };
-    
+
+    const toMs = (ts: any) => {
+      if (ts instanceof Date) return ts.getTime();
+      if (typeof ts === 'number') return ts;
+      const parsed = new Date(ts).getTime();
+      return isNaN(parsed) ? 0 : parsed;
+    };
+
     const tsData = records.map((r: any) => {
+      const timeMs = toMs(r.timestamp);
       const v = (r.allSamples && r.allSamples[selectedSensor] !== undefined) ? r.allSamples[selectedSensor] : (!isNaN(r.filtered) ? r.filtered : r.raw);
-      return { timestamp: r.timestamp.getTime(), val: v };
-    });
-    
+      return { timestamp: timeMs, val: v };
+    }).filter((d: any) => d.timestamp > 0);
+
+    if (tsData.length === 0) return { detected: false, maxWave: 0, start: null, end: null, data: [] };
+
     // 1. Calculate median dt (time step in seconds)
     let dts = [];
     for(let i = 1; i < tsData.length; i++) {
@@ -255,20 +212,18 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
     // Handle missing data (NaN) by linear interpolation for FFT
     let y = new Float64Array(tsData.length);
     let lastValid = 0;
-    // Find first valid to start
     for (let i = 0; i < tsData.length; i++) {
         if (!isNaN(tsData[i].val) && tsData[i].val !== null) {
             lastValid = tsData[i].val;
             break;
         }
     }
-    
+
     for (let i = 0; i < tsData.length; i++) {
         if (!isNaN(tsData[i].val) && tsData[i].val !== null) {
             y[i] = tsData[i].val;
             lastValid = y[i];
         } else {
-            // Find next valid
             let nextValid = lastValid;
             let nextIdx = i;
             for(let j = i + 1; j < tsData.length; j++){
@@ -278,7 +233,7 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                    break;
                }
             }
-            if (nextIdx === i) y[i] = lastValid; // no more valid data
+            if (nextIdx === i) y[i] = lastValid;
             else {
                let frac = 1 / (nextIdx - i + 1);
                y[i] = lastValid + (nextValid - lastValid) * frac;
@@ -286,23 +241,23 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
             }
         }
     }
-    
+
     // Nearest power of 2 for FFT
     let n = 1;
     while(n < y.length) n <<= 1;
-    
+
     let real = new Float64Array(n);
     let imag = new Float64Array(n);
-    
+
     // Detrend/demean before FFT
     let sumY = 0;
     for(let i = 0; i < y.length; i++) sumY += y[i];
     let meanY = sumY / y.length;
-    
+
     for(let i = 0; i < y.length; i++){
         real[i] = y[i] - meanY;
     }
-    
+
     // Radix-2 FFT implementation
     const fft = (real: Float64Array, imag: Float64Array) => {
         const n = real.length;
@@ -344,10 +299,13 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
 
     fft(real, imag);
 
-    // Filter frequencies: 0.08 mHz to 3.33 mHz (0.00008 Hz to 0.00333 Hz)
+    // Band-pass filter frequencies:
+    // f_min = 0.00008 Hz (Period ~3.5 hours, filters astronomical tides)
+    // f_max = min(0.00833 Hz, Nyquist) (Period down to 2 minutes, filters short wind waves)
     const f_min = 0.00008; 
-    const f_max = 0.00333; 
-    
+    const nyquist = 1 / (2 * Math.max(dt, 1));
+    const f_max = Math.min(0.00833, nyquist); 
+
     for(let k = 0; k <= n / 2; k++) {
         let freq = k / (n * dt);
         if (freq < f_min || freq > f_max) {
@@ -387,22 +345,43 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
         results.push({
             timeMs: current.timestamp,
             raw: current.val,
-            smoothed: current.val - signal, // Original data minus the high-frequency part
+            smoothed: current.val - signal, // Astronomical tidal signal
             tsunamiSignal: signal
         });
     }
 
-    // Determine candidate search window for tsunami anomaly (post-earthquake)
-    let windowStart = bmkgData?.timeMs || (results.length > 0 ? results[0].timeMs : 0);
-    let windowEnd = windowStart + 24 * 3600 * 1000; // 24 hours potential window
+    // Determine candidate search window for tsunami anomaly:
+    const dataStartMs = tsData[0].timestamp;
+    const dataEndMs = tsData[tsData.length - 1].timestamp;
+    const isEventInDataset = bmkgData && bmkgData.timeMs && (bmkgData.timeMs >= dataStartMs - (48 * 3600 * 1000)) && (bmkgData.timeMs <= dataEndMs);
 
     let initialSignificantIdx = -1;
     let initialMaxAbs = 0;
 
-    for (let i = 0; i < results.length; i++) {
-        const r = results[i];
-        if (r.tsunamiSignal === null) continue;
-        if (r.timeMs >= windowStart && r.timeMs <= windowEnd) {
+    if (isEventInDataset && bmkgData) {
+        // Search window starting from event time (minus 15 min buffer) up to 48 hours post-event
+        const eventWindowStart = Math.max(dataStartMs, bmkgData.timeMs - (15 * 60 * 1000));
+        const eventWindowEnd = Math.min(dataEndMs, bmkgData.timeMs + (48 * 3600 * 1000));
+
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            if (r.tsunamiSignal === null || isNaN(r.tsunamiSignal)) continue;
+            if (r.timeMs >= eventWindowStart && r.timeMs <= eventWindowEnd) {
+                const absSig = Math.abs(r.tsunamiSignal);
+                if (absSig > initialMaxAbs) {
+                    initialMaxAbs = absSig;
+                    initialSignificantIdx = i;
+                }
+            }
+        }
+    }
+
+    // If no event matched or if maximum anomaly in event window is below threshold,
+    // scan the ENTIRE dataset for any significant tsunami wave packet!
+    if (initialMaxAbs < THRESHOLD) {
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            if (r.tsunamiSignal === null || isNaN(r.tsunamiSignal)) continue;
             const absSig = Math.abs(r.tsunamiSignal);
             if (absSig > initialMaxAbs) {
                 initialMaxAbs = absSig;
@@ -415,69 +394,65 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
     let startTime: number | null = null;
     let endTime: number | null = null;
     let maxWave = 0;
-    
+
     if (detected && initialSignificantIdx !== -1) {
-        // Find start time: check for first drop/drawdown or first anomaly onset
-        let firstDropIdx = -1;
-        for (let i = 0; i < results.length; i++) {
-            if (results[i].tsunamiSignal === null) continue;
-            if (results[i].timeMs >= windowStart && results[i].timeMs <= windowEnd) {
-                if (results[i].tsunamiSignal! < -THRESHOLD) {
-                    firstDropIdx = i;
-                    break;
-                }
-            }
-        }
+        const peakIdx = initialSignificantIdx;
+        const searchBoundStart = (isEventInDataset && bmkgData) 
+            ? Math.max(results[0].timeMs, bmkgData.timeMs - (20 * 60 * 1000))
+            : results[0].timeMs;
+        const GAP_THRESHOLD_MS = 2.5 * 3600 * 1000; // 2.5 hours quiet gap
 
-        const GAP_THRESHOLD_MS = 3 * 3600 * 1000; // 3 hours
-        let startIdx = initialSignificantIdx;
-
-        if (firstDropIdx !== -1 && firstDropIdx <= initialSignificantIdx) {
-            startIdx = firstDropIdx;
-            startTime = results[firstDropIdx].timeMs;
-        } else {
-            // Fallback: search backwards from anomaly peak
-            let lastAboveThreshIdx = initialSignificantIdx;
-            for (let i = initialSignificantIdx; i >= 0; i--) {
-                if (results[i].tsunamiSignal === null) continue;
-                if (results[i].timeMs < windowStart) break;
-                let absSig = Math.abs(results[i].tsunamiSignal!);
-                if (absSig >= THRESHOLD) {
-                    lastAboveThreshIdx = i;
-                } else {
-                    if (results[lastAboveThreshIdx].timeMs - results[i].timeMs > GAP_THRESHOLD_MS) {
-                        break;
-                    }
-                }
-            }
-            startIdx = lastAboveThreshIdx;
-            startTime = results[lastAboveThreshIdx].timeMs;
-        }
-        
-        // Find end time: search forward from anomaly peak
-        let lastAboveThreshIdx = initialSignificantIdx;
-        for (let i = initialSignificantIdx; i < results.length; i++) {
+        // 1. Trace backwards from peak to find the first arrival (onset) of tsunami wave packet
+        let startIdx = peakIdx;
+        for (let i = peakIdx; i >= 0; i--) {
             if (results[i].tsunamiSignal === null) continue;
-            let absSig = Math.abs(results[i].tsunamiSignal!);
+            if (results[i].timeMs < searchBoundStart) break;
+
+            const absSig = Math.abs(results[i].tsunamiSignal!);
             if (absSig >= THRESHOLD) {
-                lastAboveThreshIdx = i;
+                startIdx = i;
             } else {
-                if (results[i].timeMs - results[lastAboveThreshIdx].timeMs > GAP_THRESHOLD_MS) {
+                if (results[startIdx].timeMs - results[i].timeMs > GAP_THRESHOLD_MS) {
                     break;
                 }
             }
         }
-        endTime = results[lastAboveThreshIdx].timeMs;
-        
-        // Batasan waktu berakhir: maksimal 4 jam setelah waktu mulai kejadian
-        if (startTime) {
-           const MAX_DURATION_MS = 4 * 3600 * 1000;
-           if (endTime - startTime > MAX_DURATION_MS) {
-               endTime = startTime + MAX_DURATION_MS;
-           }
+
+        // 2. Refine start time to zero-crossing leading into the wave arrival
+        let refinedStartIdx = startIdx;
+        for (let i = startIdx; i >= Math.max(0, startIdx - 20); i--) {
+            if (results[i].tsunamiSignal === null) continue;
+            if (results[i].timeMs < searchBoundStart) break;
+            if (Math.abs(results[i].tsunamiSignal!) < 0.015 || (i < startIdx && Math.sign(results[i].tsunamiSignal!) !== Math.sign(results[i+1].tsunamiSignal!))) {
+                refinedStartIdx = i;
+                break;
+            }
+        }
+        startTime = results[refinedStartIdx].timeMs;
+
+        // 3. Trace forwards from peak to find end of anomalous wave packet
+        let endIdx = peakIdx;
+        for (let i = peakIdx; i < results.length; i++) {
+            if (results[i].tsunamiSignal === null) continue;
+            const absSig = Math.abs(results[i].tsunamiSignal!);
+            if (absSig >= THRESHOLD) {
+                endIdx = i;
+            } else {
+                if (results[i].timeMs - results[endIdx].timeMs > GAP_THRESHOLD_MS) {
+                    break;
+                }
+            }
         }
 
-        // Amplitudo Tsunami: Hanya amplitudo maksimal dari nol ke puncak anomali pada rentang yang diduga terjadi tsunami [startTime, endTime]
+        // Allow tsunami coda up to 12 hours after start time
+        const MAX_CODA_DURATION_MS = 12 * 3600 * 1000;
+        let calculatedEndTime = results[endIdx].timeMs;
+        if (calculatedEndTime - startTime > MAX_CODA_DURATION_MS) {
+            calculatedEndTime = startTime + MAX_CODA_DURATION_MS;
+        }
+        endTime = calculatedEndTime;
+
+        // 4. Maximum zero-to-peak amplitude within [startTime, endTime]
         let maxZeroToPeak = 0;
         for (let i = 0; i < results.length; i++) {
             const r = results[i];
@@ -488,14 +463,18 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
             }
         }
 
+        if (maxZeroToPeak <= 0) {
+            maxZeroToPeak = initialMaxAbs;
+        }
+
         maxWave = maxZeroToPeak;
     }
 
     return {
-        detected: detected && maxWave > 0,
-        maxWave: (detected && maxWave > 0) ? maxWave : 0, 
-        start: startTime,
-        end: endTime,
+        detected: detected && maxWave >= THRESHOLD,
+        maxWave: (detected && maxWave >= THRESHOLD) ? maxWave : 0, 
+        start: (detected && maxWave >= THRESHOLD) ? startTime : null,
+        end: (detected && maxWave >= THRESHOLD) ? endTime : null,
         data: results
     };
   }, [records, selectedSensor, bmkgData]);
@@ -596,13 +575,19 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
           `    - Waktu Berakhir (UTC): ${detection.end ? formatUTC(new Date(detection.end), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : 'N/A'}`,
           `    - Estimasi Durasi     : ${detection.detected && durationHours > 0 ? durationHours.toFixed(2) + ' jam (' + (durationHours * 60).toFixed(0) + ' menit)' : 'N/A'}`,
           "",
-          "[3] REFERENSI KEJADIAN GEMPA BUMI (BMKG / InaTEWS)",
+          "[3] REFERENSI KEJADIAN GEMPA BUMI / AKTIVITAS VULKANIK (BMKG)",
           bmkgData ? [
+              `    - Judul Kejadian      : ${bmkgData.title || 'Kejadian Gempa BMKG'}`,
+              `    - Tipe Kejadian       : ${bmkgData.type === 'vulkanik' ? 'Vulkanik (Longsoran Lereng Gunung Api)' : 'Tektonik'}`,
               `    - Tanggal & Waktu     : ${bmkgData.tanggal || '-'} ${bmkgData.jam || '-'}`,
+              `    - Waktu Kejadian (UTC): ${bmkgData.timeMs ? formatUTC(new Date(bmkgData.timeMs), 'yyyy-MM-dd HH:mm:ss') + ' UTC' : '-'}`,
               `    - Magnitudo           : ${bmkgData.magnitude || '-'}`,
-              `    - Wilayah Pusat Gempa : ${bmkgData.wilayah || '-'}`,
-              `    - Potensi Tsunami     : ${bmkgData.potensi || '-'}`
-          ].join('\n') : "    - Informasi Gempa     : Data gempa tidak ditemukan dalam rentang waktu data pasut.",
+              `    - Kedalaman           : ${bmkgData.depth || '-'}`,
+              `    - Koordinat           : ${bmkgData.coordinates || '-'}`,
+              `    - Wilayah/Pusat Gempa : ${bmkgData.wilayah || '-'}`,
+              `    - Potensi Tsunami     : ${bmkgData.potensi || '-'}`,
+              bmkgData.keterangan ? `    - Catatan/Keterangan  : ${bmkgData.keterangan}` : ''
+          ].filter(Boolean).join('\n') : "    - Catatan Gempa       : Tidak ditemukan kejadian gempa bumi tektonik/vulkanik BMKG dalam rentang pengamatan pasut.",
           "",
           "[4] PARAMETER METODE ANALISIS",
           "    - Algoritma           : Fast Fourier Transform (FFT) Band-Pass Filter",
@@ -725,27 +710,91 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
         </div>
       </div>
 
-      {/* BMKG Event Info & Courtesy */}
-      <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-                <h4 className="text-sm font-black text-slate-700 uppercase tracking-widest mb-1">Referensi Kejadian Gempa Berpotensi Tsunami</h4>
-                {bmkgData ? (
-                    <div className="text-sm text-slate-600">
-                        <span className="font-bold">{bmkgData.tanggal} {bmkgData.jam}</span> • Mag: <span className="font-bold text-red-600">{bmkgData.magnitude}</span> • {bmkgData.wilayah} • <span className={bmkgData.potensi?.toLowerCase().includes('tsunami') ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'}>{bmkgData.potensi}</span>
-                    </div>
-                ) : (
-                    <div className="text-sm text-slate-500 italic">Mengambil data gempa BMKG...</div>
+      {/* BMKG Event Reference Card */}
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+          <div className="flex-1">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Referensi Kejadian BMKG</span>
+              {bmkgData && (
+                <>
+                  <span className={cn(
+                    "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider",
+                    bmkgData.type === 'vulkanik' 
+                      ? "bg-amber-100 text-amber-800 border border-amber-300" 
+                      : "bg-indigo-100 text-indigo-800 border border-indigo-300"
+                  )}>
+                    {bmkgData.type === 'vulkanik' ? 'Vulkanik' : 'Tektonik'}
+                  </span>
+                  <span className={cn(
+                    "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider",
+                    bmkgData.potensi?.toLowerCase().includes('tsunami')
+                      ? "bg-red-100 text-red-700 border border-red-300"
+                      : "bg-emerald-100 text-emerald-700 border border-emerald-300"
+                  )}>
+                    {bmkgData.potensi}
+                  </span>
+                </>
+              )}
+            </div>
+
+            {bmkgData ? (
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <h4 className="text-base font-bold text-slate-800">
+                    {bmkgData.title || bmkgData.wilayah}
+                  </h4>
+                  <span className="text-xs font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200">
+                    Mag: {bmkgData.magnitude}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-600 flex flex-wrap items-center gap-x-4 gap-y-1 pt-1">
+                  <span><strong>Waktu:</strong> {bmkgData.tanggal} {bmkgData.jam}</span>
+                  {bmkgData.depth && <span><strong>Kedalaman:</strong> {bmkgData.depth}</span>}
+                  {bmkgData.coordinates && <span><strong>Koordinat:</strong> {bmkgData.coordinates}</span>}
+                  {bmkgData.wilayah && <span><strong>Wilayah:</strong> {bmkgData.wilayah}</span>}
+                </div>
+                {bmkgData.keterangan && (
+                  <p className="text-xs text-slate-500 italic mt-1">
+                    {bmkgData.keterangan}
+                  </p>
                 )}
-            </div>
-            <div className="text-right flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Data Gempa & Potensi Tsunami © Badan Meteorologi Klimatologi dan Geofisika
-                </span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Data Variasi Muka Laut © Badan Informasi Geospasial
-                </span>
-            </div>
+              </div>
+            ) : (
+              <div className="text-xs text-slate-500 py-1">
+                Tidak ada catatan gempa tektonik/vulkanik BMKG dalam rentang periode data pasut ini. Algoritma FFT tetap berjalan independen mendeteksi anomali tinggi muka air laut.
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 self-stretch lg:self-center">
+            {candidateEvents.length > 1 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Pilih Event:</span>
+                <select
+                  value={selectedEventId}
+                  onChange={(e) => handleSelectEvent(e.target.value)}
+                  className="text-xs bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 font-medium rounded-lg px-2.5 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                >
+                  {candidateEvents.map(ev => (
+                    <option key={ev.id} value={ev.id}>
+                      {ev.tanggal} - {ev.type === 'vulkanik' ? '[Vulkanik]' : '[Tektonik]'} {ev.magnitude ? `M${ev.magnitude}` : ''} {ev.wilayah.slice(0, 30)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {bmkgData && (
+              <button
+                onClick={handleFocusTsunami}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap cursor-pointer"
+                title="Fokuskan grafik ke waktu kejadian ini"
+              >
+                <ZoomIn size={14} /> Fokuskan ke Kejadian
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -758,6 +807,15 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
                    <p className="text-xs text-slate-500 mt-1">Grafik interaktif untuk isolasi sinyal tsunami dari pasang surut astronomis</p>
                 </div>
                 <div data-html2canvas-ignore className="flex flex-wrap items-center gap-2">
+                   {detection.detected && (
+                     <button
+                       onClick={handleFocusTsunami}
+                       className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
+                       title="Fokuskan tampilan grafik ke jendela gelombang tsunami yang terdeteksi"
+                     >
+                       <ZoomIn size={14} /> Fokus Tsunami
+                     </button>
+                   )}
                    <button onClick={handleDownloadPNG} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> PNG</button>
                    <button onClick={handleDownloadCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> CSV</button>
                    <button onClick={handleDownloadTXT} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"><Download size={14} /> TXT</button>
@@ -889,6 +947,34 @@ export default function TsunamiAnalysisView({ records, selectedSensor, available
 
                         {refAreaLeft && refAreaRight && (
                            <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#ef4444" fillOpacity={0.15} />
+                        )}
+
+                        {detection.detected && detection.start && detection.end && (
+                           <ReferenceArea 
+                             x1={detection.start} 
+                             x2={detection.end} 
+                             stroke="#ef4444" 
+                             strokeOpacity={0.4} 
+                             strokeDasharray="3 3" 
+                             fill="#ef4444" 
+                             fillOpacity={0.12} 
+                           />
+                        )}
+
+                        {bmkgData && bmkgData.timeMs && (
+                           <ReferenceLine 
+                             x={bmkgData.timeMs} 
+                             stroke="#b91c1c" 
+                             strokeWidth={2} 
+                             strokeDasharray="4 4" 
+                             label={{ 
+                               value: `BMKG: ${bmkgData.jam || ''}`, 
+                               position: 'insideTopLeft', 
+                               fill: '#b91c1c', 
+                               fontSize: 11, 
+                               fontWeight: 'bold' 
+                             }} 
+                           />
                         )}
 
                         <Line 
