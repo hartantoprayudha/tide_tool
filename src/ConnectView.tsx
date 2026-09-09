@@ -13,9 +13,9 @@ export default function ConnectView({
 }) {
   const [host, setHost] = useState('10.10.140.19');
   const [port, setPort] = useState('3306');
-  const [user, setUser] = useState('root');
-  const [password, setPassword] = useState('r00t');
-  const [database, setDatabase] = useState('bako');
+  const [user, setUser] = useState('');
+  const [password, setPassword] = useState('');
+  const [database, setDatabase] = useState('');
   
   const [selectedTable, setSelectedTable] = useState('data_vsat5');
   const [stationQuery, setStationQuery] = useState('');
