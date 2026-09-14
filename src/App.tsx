@@ -73,26 +73,41 @@ import download from 'downloadjs';
 import { jsPDF } from 'jspdf';
 
 // --- UTILS ---
+const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 const formatUTC = (date: Date, fmt: string) => {
   if (isNaN(date.getTime())) return "Invalid Date";
   // Always use UTC components to avoid timezone interference
   const y = date.getUTCFullYear();
   const yyyy = String(y);
   const yy = String(y).slice(-2);
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(date.getUTCDate()).padStart(2, '0');
-  const hh = String(date.getUTCHours()).padStart(2, '0');
-  const mm = String(date.getUTCMinutes()).padStart(2, '0');
-  const ss = String(date.getUTCSeconds()).padStart(2, '0');
+  const monthNum = date.getUTCMonth() + 1;
+  const MM = String(monthNum).padStart(2, '0');
+  const M = String(monthNum);
+  const MMM = MONTH_NAMES_SHORT[date.getUTCMonth()] || MM;
+  const dayNum = date.getUTCDate();
+  const dd = String(dayNum).padStart(2, '0');
+  const d = String(dayNum);
+  const hours = date.getUTCHours();
+  const HH = String(hours).padStart(2, '0');
+  const H = String(hours);
+  const minutes = date.getUTCMinutes();
+  const mm = String(minutes).padStart(2, '0');
+  const seconds = date.getUTCSeconds();
+  const ss = String(seconds).padStart(2, '0');
 
   return fmt
-    .replace('yyyy', yyyy)
-    .replace('yy', yy)
-    .replace('MM', m)
-    .replace('dd', d)
-    .replace('HH', hh)
-    .replace('mm', mm)
-    .replace('ss', ss);
+    .replace(/yyyy/g, yyyy)
+    .replace(/yy/g, yy)
+    .replace(/MMM/g, MMM)
+    .replace(/MM/g, MM)
+    .replace(/M/g, M)
+    .replace(/dd/g, dd)
+    .replace(/d/g, d)
+    .replace(/HH/g, HH)
+    .replace(/H/g, H)
+    .replace(/mm/g, mm)
+    .replace(/ss/g, ss);
 };
 
 const CustomXAxisTick = ({ x, y, payload }: any) => {
@@ -2975,7 +2990,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
       const rmse = rmseVal !== null ? rmseVal : 0;
 
       content = `Tide Analysis Report\t${fileName}\n`;
-      const sName = stationNameRef.current;
+      const sName = stationNameRef.current || chartTitle;
       const sLat = stationLatRef.current;
       const sLon = stationLonRef.current;
       if (sName || sLat || sLon) {
@@ -2987,11 +3002,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
           const tStart = records[0].timestamp;
           const tEnd = records[records.length - 1].timestamp;
           const durationDays = (tEnd.getTime() - tStart.getTime()) / (1000 * 60 * 60 * 24);
-          content += `Data Start\t${formatUTC(tStart, 'M/d/yyyy, HH:mm:ss')} (UTC)\n`;
-          content += `Data End\t${formatUTC(tEnd, 'M/d/yyyy, HH:mm:ss')} (UTC)\n`;
+          content += `Data Start\t${formatUTC(tStart, 'MM/dd/yyyy, HH:mm:ss')} (UTC)\n`;
+          content += `Data End\t${formatUTC(tEnd, 'MM/dd/yyyy, HH:mm:ss')} (UTC)\n`;
           content += `Data Duration\t${durationDays.toFixed(2)} days\n`;
       }
-      content += `Generated\t${formatUTC(new Date(), 'M/d/yyyy, HH:mm:ss')} (UTC)\n\n`;
+      content += `Generated\t${formatUTC(new Date(), 'MM/dd/yyyy, HH:mm:ss')} (UTC)\n\n`;
 
       content += `--- CHART DATUMS & TIDAL RANGES ---\n`;
       content += `Parameter\tValue\tUnit\n`;
@@ -3120,7 +3135,10 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
               <input 
                 type="text" 
                 value={chartTitle}
-                onChange={(e) => setChartTitle(e.target.value)}
+                onChange={(e) => {
+                  setChartTitle(e.target.value);
+                  stationNameRef.current = e.target.value;
+                }}
                 placeholder="Enter chart name..."
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 placeholder:text-slate-400 mb-2"
               />
@@ -3520,8 +3538,13 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Nama Stasiun</label>
                               <input 
                                   type="text" 
-                                  defaultValue={stationNameRef.current}
-                                  onChange={(e) => stationNameRef.current = e.target.value}
+                                  defaultValue={stationNameRef.current || chartTitle}
+                                  onChange={(e) => {
+                                      stationNameRef.current = e.target.value;
+                                      if (e.target.value) {
+                                          setChartTitle(e.target.value);
+                                      }
+                                  }}
                                   placeholder="Contoh: Stasiun Tanjung Priok"
                                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
                               />
@@ -3839,6 +3862,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
 function DashboardView({ records, z0, trend, datums, title, availableSensors, selectedSensor, onSelectSensor, onNavigateToValidate, onNavigateToConnect, rawData, validCache, runAnalysis, setRecords, visibleSensors, setVisibleSensors, modifiers, setModifiers, verticalOffset, setVerticalOffset, timeOffset, setTimeOffset, onReset, isDeTiding, setIsDeTiding, combinationSettings, setCombinationSettings, setShowCombinationModal, interpolationSettings, setInterpolationSettings, runInterpolation }: any) {
   const [isControlsOpen, setIsControlsOpen] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({
     combined: true,
@@ -4612,9 +4636,21 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
   const handleDownload = async (format: 'png' | 'jpeg' | 'pdf') => {
     if (!chartRef.current) return;
+    setIsExporting(true);
+    // Allow state update and DOM repaint
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     const node = chartRef.current;
+    if (!node) {
+      setIsExporting(false);
+      return;
+    }
+
     const filter = (el: HTMLElement) => !el.classList?.contains('export-exclude');
     try {
+      const cleanTitle = (title || 'Chart').trim().replace(/[/\\?%*:|"<>]/g, '_');
+      const filenameBase = `BIG-Tidal-Analysis-${cleanTitle}`;
+
       // Calculate export dimensions based on the node's current bounding rect or a clean proportional canvas
       const width = Math.max(node.scrollWidth, node.offsetWidth, 1200);
       const height = Math.max(node.scrollHeight, node.offsetHeight, 700);
@@ -4629,22 +4665,24 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
       if (format === 'png') {
         const dataUrl = await htmlToImage.toPng(node, exportOptions);
-        download(dataUrl, 'BIG-Tidal-Analysis.png');
+        download(dataUrl, `${filenameBase}.png`);
       } else if (format === 'jpeg') {
         const dataUrl = await htmlToImage.toJpeg(node, { ...exportOptions, quality: 0.98 });
-        download(dataUrl, 'BIG-Tidal-Analysis.jpg');
+        download(dataUrl, `${filenameBase}.jpg`);
       } else if (format === 'pdf') {
         const dataUrl = await htmlToImage.toPng(node, exportOptions);
         const pdf = new jsPDF({ 
-          orientation: 'landscape', 
+          orientation: width > height ? 'landscape' : 'portrait', 
           unit: 'pt', 
           format: [width, height] 
         });
         pdf.addImage(dataUrl, 'PNG', 0, 0, width, height);
-        pdf.save('BIG-Tidal-Analysis.pdf');
+        pdf.save(`${filenameBase}.pdf`);
       }
     } catch (error) { 
       console.error('Gagal mengunduh grafik:', error instanceof Error ? error.message : String(error)); 
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -5070,44 +5108,46 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
       <div ref={chartRef} className="bg-white rounded-2xl border border-slate-200/90 pb-6 pt-5 px-3 sm:px-5 lg:px-6 shadow-sm relative w-full overflow-hidden">
         {/* Title for Export (Always centered at the top of the exported image) */}
-        <div className="hidden export-show pb-3 mb-2 text-center border-b border-slate-100">
-          <h2 className="text-xl sm:text-2xl font-black text-slate-900 font-display tracking-tight uppercase">
-            {title}
-          </h2>
-          <div className="w-16 h-1 bg-sky-500 mx-auto mt-2 rounded-full"></div>
-        </div>
-
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 mb-4 export-exclude">
-          <h3 className="text-xl sm:text-2xl font-black text-slate-800 font-display tracking-tight text-center xl:text-left">{title}</h3>
-          <div className="flex flex-wrap items-center justify-center xl:justify-end gap-1.5 self-center xl:self-auto">
-            <button 
-                onClick={onReset}
-                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-rose-100"
-                title="Reset all corrections (Offsets, Modifiers, Scaling)"
-            >
-                <RefreshCw size={14} />
-                General Reset
-            </button>
-            {zoomDomain && (
-              <button onClick={zoomOut} className="px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-sky-200"><ZoomOut size={14} /> Reset Zoom X</button>
-            )}
-            
-            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-              <button onClick={() => setDragAction('zoom')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'zoom' ? 'bg-white shadow-sm text-sky-700' : 'text-slate-500'}`}>Zoom</button>
-              <button onClick={() => setDragAction('delete')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'delete' ? 'bg-rose-500 shadow-sm text-white' : 'text-slate-500'}`}>Delete</button>
-            </div>
-
-            {modifiers.length > 0 && (
-              <button onClick={undoModifier} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-amber-200">
-                Undo Delete/Mod
-              </button>
-            )}
-            
-            <button onClick={() => handleDownload('png')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
-            <button onClick={() => handleDownload('jpeg')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
-            <button onClick={() => handleDownload('pdf')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
+        {isExporting ? (
+          <div className="w-full text-center pb-4 mb-3 border-b border-slate-200">
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-800 font-display tracking-tight uppercase">
+              {title}
+            </h2>
+            <div className="w-16 h-1 bg-sky-500 mx-auto mt-2 rounded-full"></div>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 mb-4">
+            <h3 className="text-xl sm:text-2xl font-black text-slate-800 font-display tracking-tight text-center xl:text-left">{title}</h3>
+            <div className="flex flex-wrap items-center justify-center xl:justify-end gap-1.5 self-center xl:self-auto export-exclude">
+              <button 
+                  onClick={onReset}
+                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-rose-100"
+                  title="Reset all corrections (Offsets, Modifiers, Scaling)"
+              >
+                  <RefreshCw size={14} />
+                  General Reset
+              </button>
+              {zoomDomain && (
+                <button onClick={zoomOut} className="px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-sky-200"><ZoomOut size={14} /> Reset Zoom X</button>
+              )}
+              
+              <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                <button onClick={() => setDragAction('zoom')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'zoom' ? 'bg-white shadow-sm text-sky-700' : 'text-slate-500'}`}>Zoom</button>
+                <button onClick={() => setDragAction('delete')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'delete' ? 'bg-rose-500 shadow-sm text-white' : 'text-slate-500'}`}>Delete</button>
+              </div>
+
+              {modifiers.length > 0 && (
+                <button onClick={undoModifier} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-amber-200">
+                  Undo Delete/Mod
+                </button>
+              )}
+              
+              <button onClick={() => handleDownload('png')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
+              <button onClick={() => handleDownload('jpeg')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
+              <button onClick={() => handleDownload('pdf')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
+            </div>
+          </div>
+        )}
 
         {/* Interactive Sensor & Line Toggle Bar on Dashboard Chart */}
         <div className="mb-4 pb-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 export-exclude bg-slate-50/70 p-3 rounded-xl border">
@@ -5354,7 +5394,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <ComposedChart 
                 className="ml-0 mt-[-30px] pl-0 pt-0"
                 data={displayData} 
-                margin={{ bottom: 10, left: 20, right: 90, top: 20 }} 
+                margin={{ bottom: 10, left: 20, right: 110, top: 20 }} 
                 style={{ cursor: dragAction === 'pan' ? 'move' : (dragAction === 'delete' ? 'copy' : 'crosshair'), userSelect: 'none' }}
                 onMouseDown={(e: any) => {
                     if (dragAction === 'pan' && e && e.activeLabel) {
@@ -5684,9 +5724,11 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             </div>
         )}
 
-        <div className="flex items-center gap-2 justify-center mt-2 mb-2 export-exclude">
-             <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest whitespace-nowrap">Visual Optimization: Hourly Sampling Active</div>
-        </div>
+        {!isExporting && (
+          <div className="flex items-center gap-2 justify-center mt-2 mb-2 export-exclude">
+               <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest whitespace-nowrap">Visual Optimization: Hourly Sampling Active</div>
+          </div>
+        )}
       </div>
 
         {/* --- MSL Result Modal --- */}
