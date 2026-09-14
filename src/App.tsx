@@ -593,6 +593,96 @@ function solveCubicSpline(x: number[], y: number[], xi: number[]): number[] {
     });
 }
 
+/**
+ * Menghitung HAT dan LAT dengan mencari nilai ekstrim (maksimum dan minimum)
+ * dalam rentang waktu prediksi 18,6 tahun (18.613 tahun siklus nodal bulan).
+ * Epok acuan: 00:00:00 UTC pada 1 Januari di tahun yang sama dengan data yang diinput pengguna.
+ * Menggunakan jumlah dan nilai konstanta hasil analisis harmonik sesuai pilihan user.
+ */
+function calculate18Point6YearDatums(
+  results: ConstituentResult[],
+  fittedZ0: number,
+  baseYear: number
+): { hat: number; lat: number } {
+  if (!results.length) {
+    return { hat: fittedZ0, lat: fittedZ0 };
+  }
+
+  const startMs = Date.UTC(baseYear, 0, 1, 0, 0, 0);
+  const numYears = Math.ceil(18.613) + 1;
+  const years: { year: number; startHour: number; nodals: { f: number; u: number }[] }[] = [];
+
+  for (let i = 0; i < numYears; i++) {
+    const y = baseYear + i;
+    const astro = getAstroArgs(y);
+    const nodals = results.map(r => getNodalCorrections(astro, r.comp));
+    const startHour = (Date.UTC(y, 0, 1, 0, 0, 0) - startMs) / 3600000;
+    years.push({ year: y, startHour, nodals });
+  }
+
+  const totalH = Math.round(18.613 * 365.2422 * 24);
+  const coarseStep = 1.0; // Langkah pencarian global per 1 jam (~163.158 titik)
+  let coarseMaxVal = -Infinity;
+  let coarseMinVal = Infinity;
+  let coarseMaxH = 0;
+  let coarseMinH = 0;
+
+  let yIdx = 0;
+  for (let h = 0; h <= totalH; h += coarseStep) {
+    while (yIdx < years.length - 1 && h >= years[yIdx + 1].startHour) {
+      yIdx++;
+    }
+    const currentNodals = years[yIdx].nodals;
+    let val = fittedZ0;
+    for (let j = 0; j < results.length; j++) {
+      const res = results[j];
+      const nod = currentNodals[j];
+      const w = 2 * Math.PI * res.freq;
+      val += res.amp * nod.f * Math.cos(w * h + (res.v0 + nod.u - res.phase) * (Math.PI / 180));
+    }
+
+    if (val > coarseMaxVal) {
+      coarseMaxVal = val;
+      coarseMaxH = h;
+    }
+    if (val < coarseMinVal) {
+      coarseMinVal = val;
+      coarseMinH = h;
+    }
+  }
+
+  // Evaluasi titik waktu kontinu untuk fine search di sekitar titik puncak & lembah
+  const evalAt = (h: number) => {
+    let yi = 0;
+    while (yi < years.length - 1 && h >= years[yi + 1].startHour) yi++;
+    const currentNodals = years[yi].nodals;
+    let val = fittedZ0;
+    for (let j = 0; j < results.length; j++) {
+      const res = results[j];
+      const nod = currentNodals[j];
+      const w = 2 * Math.PI * res.freq;
+      val += res.amp * nod.f * Math.cos(w * h + (res.v0 + nod.u - res.phase) * (Math.PI / 180));
+    }
+    return val;
+  };
+
+  // Fine search pencarian puncak HAT (resolusi 0.05 jam / 3 menit)
+  let fineMax = coarseMaxVal;
+  for (let dh = -coarseStep; dh <= coarseStep; dh += 0.05) {
+    const v = evalAt(coarseMaxH + dh);
+    if (v > fineMax) fineMax = v;
+  }
+
+  // Fine search pencarian lembah LAT (resolusi 0.05 jam / 3 menit)
+  let fineMin = coarseMinVal;
+  for (let dh = -coarseStep; dh <= coarseStep; dh += 0.05) {
+    const v = evalAt(coarseMinH + dh);
+    if (v < fineMin) fineMin = v;
+  }
+
+  return { hat: fineMax, lat: fineMin };
+}
+
 interface PartialModifier {
   startMs: number;
   endMs: number;
@@ -1722,13 +1812,16 @@ export default function App() {
         if (!_isInsufficient) {
             const am2 = results.find(r => r.comp === 'M2')?.amp || 0;
             const as2 = results.find(r => r.comp === 'S2')?.amp || 0;
-            const sumAmp = results.reduce((acc, r) => acc + r.amp, 0);
+            
+            // Perhitungan HAT dan LAT melalui simulasi prediksi siklus nodal astronomis 18,6 tahun
+            // Epok acuan: 00:00:00 UTC pada 1 Januari tahun yang sama dengan data yang diinput pengguna
+            const extremes18_6 = calculate18Point6YearDatums(results, fittedZ0, yearRef);
             
             setDatums({
                 mhws: fittedZ0 + (am2 + as2),
                 mlws: fittedZ0 - (am2 + as2),
-                hat: fittedZ0 + sumAmp,
-                lat: fittedZ0 - sumAmp
+                hat: extremes18_6.hat,
+                lat: extremes18_6.lat
             });
         } else {
             setDatums(null);
@@ -2839,9 +2932,9 @@ Aplikasi ini mengekstraksi komponen Tren ($T_t$) dari data harian yang telah dip
 
 ## 5. Chart Datums & Range (Elevasi Referensi Peta)
 Setelah analisis didapatkan, algoritma mensintesis datum elevasi untuk kebutuhan hidrografik.
-- **HAT / LAT (Highest / Lowest Astronomical Tide):** Estimasi batas surut dan pasang terjauh murni secara teoritis berdasarkan konstituen penggerak (tergantung kepada interaksi semua konstituen).
-- **MHWS / MLWS (Mean High / Low Water Springs):** Rata-rata pasang dan surut tertinggi yang biasanya diasosiasikan dengan konstanta utama semi-diurnal (2 komponen terbesar): $Z_0 \\pm (M_2 + S_2)$.
-- **MSL (Mean Sea Level):** Rata-rata Muka Air Laut, didapatkan secara iteratif ekuivalen denga konstanta $Z_0$ di Least Squares Fitting.
+- **HAT / LAT (Highest / Lowest Astronomical Tide):** Nilai elevasi pasang tertinggi dan surut terendah astronomis yang diperoleh dengan mensimulasikan deret waktu prediksi pasang surut selama 18,6 tahun (siklus nodal pergerakan bidang orbit Bulan 18.613 tahun) dengan epok acuan 00:00:00 UTC pada tanggal 1 Januari pada tahun data yang diinput pengguna, berdasarkan konstituen harmonik hasil analisis.
+- **MHWS / MLWS (Mean High / Low Water Springs):** Rata-rata pasang dan surut tertinggi yang diasosiasikan dengan konstanta utama semi-diurnal (2 komponen terbesar): $Z_0 \\pm (M_2 + S_2)$.
+- **MSL (Mean Sea Level):** Rata-rata Muka Air Laut, didapatkan secara iteratif ekuivalen dengan konstanta $Z_0$ di Least Squares Fitting.
 
 ---
 Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrographic Organization) serta publikasi resmi rujukan oseanografi dari BIG.`;
@@ -4522,19 +4615,37 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     const node = chartRef.current;
     const filter = (el: HTMLElement) => !el.classList?.contains('export-exclude');
     try {
+      // Calculate export dimensions based on the node's current bounding rect or a clean proportional canvas
+      const width = Math.max(node.scrollWidth, node.offsetWidth, 1200);
+      const height = Math.max(node.scrollHeight, node.offsetHeight, 700);
+
+      const exportOptions = {
+        backgroundColor: '#ffffff',
+        filter,
+        pixelRatio: 2, // High DPI for crisp and sharp text/lines
+        width,
+        height
+      };
+
       if (format === 'png') {
-        const dataUrl = await htmlToImage.toPng(node, { backgroundColor: '#ffffff', filter });
+        const dataUrl = await htmlToImage.toPng(node, exportOptions);
         download(dataUrl, 'BIG-Tidal-Analysis.png');
       } else if (format === 'jpeg') {
-        const dataUrl = await htmlToImage.toJpeg(node, { backgroundColor: '#ffffff', filter, quality: 0.95 });
+        const dataUrl = await htmlToImage.toJpeg(node, { ...exportOptions, quality: 0.98 });
         download(dataUrl, 'BIG-Tidal-Analysis.jpg');
       } else if (format === 'pdf') {
-        const dataUrl = await htmlToImage.toPng(node, { backgroundColor: '#ffffff', filter });
-        const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [node.offsetWidth, node.offsetHeight] });
-        pdf.addImage(dataUrl, 'PNG', 0, 0, node.offsetWidth, node.offsetHeight);
+        const dataUrl = await htmlToImage.toPng(node, exportOptions);
+        const pdf = new jsPDF({ 
+          orientation: 'landscape', 
+          unit: 'pt', 
+          format: [width, height] 
+        });
+        pdf.addImage(dataUrl, 'PNG', 0, 0, width, height);
         pdf.save('BIG-Tidal-Analysis.pdf');
       }
-    } catch (error) { console.error(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { 
+      console.error('Gagal mengunduh grafik:', error instanceof Error ? error.message : String(error)); 
+    }
   };
 
   const moonEvents = useMemo(() => getMoonEvents(displayData), [displayData]);
@@ -4958,6 +5069,14 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
       </div>
 
       <div ref={chartRef} className="bg-white rounded-2xl border border-slate-200/90 pb-6 pt-5 px-3 sm:px-5 lg:px-6 shadow-sm relative w-full overflow-hidden">
+        {/* Title for Export (Always centered at the top of the exported image) */}
+        <div className="hidden export-show pb-3 mb-2 text-center border-b border-slate-100">
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 font-display tracking-tight uppercase">
+            {title}
+          </h2>
+          <div className="w-16 h-1 bg-sky-500 mx-auto mt-2 rounded-full"></div>
+        </div>
+
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 mb-4 export-exclude">
           <h3 className="text-xl sm:text-2xl font-black text-slate-800 font-display tracking-tight text-center xl:text-left">{title}</h3>
           <div className="flex flex-wrap items-center justify-center xl:justify-end gap-1.5 self-center xl:self-auto">
@@ -5235,7 +5354,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             <ComposedChart 
                 className="ml-0 mt-[-30px] pl-0 pt-0"
                 data={displayData} 
-                margin={{ bottom: 10, left: 20, right: 15, top: 15 }} 
+                margin={{ bottom: 10, left: 20, right: 90, top: 20 }} 
                 style={{ cursor: dragAction === 'pan' ? 'move' : (dragAction === 'delete' ? 'copy' : 'crosshair'), userSelect: 'none' }}
                 onMouseDown={(e: any) => {
                     if (dragAction === 'pan' && e && e.activeLabel) {
@@ -5416,9 +5535,28 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
               
               {datums && (
                 <>
-                  <ReferenceLine y={datums.hat} label={{ position: 'right', value: `HAT (${datums.hat.toFixed(3)})`, fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" strokeDasharray="3 3" />
-                  <ReferenceLine y={datums.lat} label={{ position: 'right', value: `LAT (${datums.lat.toFixed(3)})`, fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" strokeDasharray="3 3" />
-                  <ReferenceLine y={z0} label={{ position: 'right', value: `MSL (${z0.toFixed(3)})`, fontSize: 9, fill: '#0284c7' }} stroke="#0284c7" strokeDasharray="5 5" opacity={0.5} />
+                  <ReferenceLine 
+                    y={datums.hat} 
+                    label={{ position: 'right', value: `HAT (${datums.hat.toFixed(3)} m)`, fontSize: 10, fontWeight: 700, fill: '#64748b' }} 
+                    stroke="#64748b" 
+                    strokeDasharray="4 4" 
+                    strokeWidth={1.5}
+                  />
+                  <ReferenceLine 
+                    y={datums.lat} 
+                    label={{ position: 'right', value: `LAT (${datums.lat.toFixed(3)} m)`, fontSize: 10, fontWeight: 700, fill: '#64748b' }} 
+                    stroke="#64748b" 
+                    strokeDasharray="4 4" 
+                    strokeWidth={1.5}
+                  />
+                  <ReferenceLine 
+                    y={z0} 
+                    label={{ position: 'right', value: `MSL (${z0.toFixed(3)} m)`, fontSize: 10, fontWeight: 700, fill: '#0284c7' }} 
+                    stroke="#0284c7" 
+                    strokeDasharray="5 5" 
+                    strokeWidth={1.5}
+                    opacity={0.8} 
+                  />
                 </>
               )}
 
@@ -5546,7 +5684,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
             </div>
         )}
 
-        <div className="flex items-center gap-2 justify-center mt-2 mb-2">
+        <div className="flex items-center gap-2 justify-center mt-2 mb-2 export-exclude">
              <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[9px] font-bold rounded uppercase tracking-widest whitespace-nowrap">Visual Optimization: Hourly Sampling Active</div>
         </div>
       </div>
