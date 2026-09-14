@@ -1827,14 +1827,37 @@ export default function App() {
         if (!_isInsufficient) {
             const am2 = results.find(r => r.comp === 'M2')?.amp || 0;
             const as2 = results.find(r => r.comp === 'S2')?.amp || 0;
+            const ak1 = results.find(r => r.comp === 'K1')?.amp || 0;
+            const ao1 = results.find(r => r.comp === 'O1')?.amp || 0;
             
+            let mhws = fittedZ0 + (am2 + as2);
+            let mlws = fittedZ0 - (am2 + as2);
+
+            const d = am2 + as2;
+            if (d !== 0) {
+                const f = (ak1 + ao1) / d;
+                if (f <= 0.25) {
+                    mhws = fittedZ0 + (am2 + as2);
+                    mlws = fittedZ0 - (am2 + as2);
+                } else if (f <= 1.5) {
+                    mhws = fittedZ0 + (am2 + as2 + 0.5*(ak1 + ao1));
+                    mlws = fittedZ0 - (am2 + as2 + 0.5*(ak1 + ao1));
+                } else if (f <= 3.0) {
+                    mhws = fittedZ0 + (am2 + as2 + ak1 + ao1);
+                    mlws = fittedZ0 - (am2 + as2 + ak1 + ao1);
+                } else {
+                    mhws = fittedZ0 + (ak1 + ao1);
+                    mlws = fittedZ0 - (ak1 + ao1);
+                }
+            }
+
             // Perhitungan HAT dan LAT melalui simulasi prediksi siklus nodal astronomis 18,6 tahun
             // Epok acuan: 00:00:00 UTC pada 1 Januari tahun yang sama dengan data yang diinput pengguna
             const extremes18_6 = calculate18Point6YearDatums(results, fittedZ0, yearRef);
             
             setDatums({
-                mhws: fittedZ0 + (am2 + as2),
-                mlws: fittedZ0 - (am2 + as2),
+                mhws,
+                mlws,
                 hat: extremes18_6.hat,
                 lat: extremes18_6.lat
             });
@@ -2948,7 +2971,7 @@ Aplikasi ini mengekstraksi komponen Tren ($T_t$) dari data harian yang telah dip
 ## 5. Chart Datums & Range (Elevasi Referensi Peta)
 Setelah analisis didapatkan, algoritma mensintesis datum elevasi untuk kebutuhan hidrografik.
 - **HAT / LAT (Highest / Lowest Astronomical Tide):** Nilai elevasi pasang tertinggi dan surut terendah astronomis yang diperoleh dengan mensimulasikan deret waktu prediksi pasang surut selama 18,6 tahun (siklus nodal pergerakan bidang orbit Bulan 18.613 tahun) dengan epok acuan 00:00:00 UTC pada tanggal 1 Januari pada tahun data yang diinput pengguna, berdasarkan konstituen harmonik hasil analisis.
-- **MHWS / MLWS (Mean High / Low Water Springs):** Rata-rata pasang dan surut tertinggi yang diasosiasikan dengan konstanta utama semi-diurnal (2 komponen terbesar): $Z_0 \\pm (M_2 + S_2)$.
+- **MHWS / MLWS (Mean High / Low Water Springs):** Rata-rata pasang dan surut tertinggi pada saat pasang purnama. Dihitung secara dinamis menggunakan bilangan Formzahl (F) untuk menyesuaikan tipe pasang surut: $Z_0 \\pm (M_2 + S_2)$ (ganda), $Z_0 \\pm (M_2 + S_2 + K_1 + O_1)$ (campuran condong ganda), $Z_0 \\pm (M_2 + K_1 + O_1)$ (campuran condong tunggal), atau $Z_0 \\pm (K_1 + O_1)$ (tunggal).
 - **MSL (Mean Sea Level):** Rata-rata Muka Air Laut, didapatkan secara iteratif ekuivalen dengan konstanta $Z_0$ di Least Squares Fitting.
 
 ---
@@ -3018,17 +3041,36 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
           const ao1 = harmonicResults.find(r => r.comp === 'O1')?.amp || 0;
           
           let tidalType = "Unknown";
+          let meanSpringTide = 2 * (am2 + as2);
+          let meanNeapTide = 2 * Math.abs(am2 - as2);
+          
           const d = am2 + as2;
           if (d !== 0) {
               const f = (ak1 + ao1) / d;
-              if (f <= 0.25) tidalType = "Semi-diurnal (Pasang Surut Ganda)";
-              else if (f <= 1.5) tidalType = "Mixed, mainly semi-diurnal (Campuran Condong Ganda)";
-              else if (f <= 3.0) tidalType = "Mixed, mainly diurnal (Campuran Condong Tunggal)";
-              else tidalType = "Diurnal (Pasang Surut Tunggal)";
+              if (f <= 0.25) {
+                  tidalType = "Semi-diurnal (Pasang Surut Ganda)";
+                  meanSpringTide = datums.mhws - datums.mlws;
+                  meanNeapTide = 2 * Math.abs(am2 - as2);
+              }
+              else if (f <= 1.5) {
+                  tidalType = "Mixed, mainly semi-diurnal (Campuran Condong Ganda)";
+                  meanSpringTide = datums.mhws - datums.mlws;
+                  meanNeapTide = 2 * Math.abs(am2 - as2);
+              }
+              else if (f <= 3.0) {
+                  tidalType = "Mixed, mainly diurnal (Campuran Condong Tunggal)";
+                  meanSpringTide = datums.mhws - datums.mlws;
+                  meanNeapTide = 2 * Math.abs(am2 - (ak1 + ao1));
+              }
+              else {
+                  tidalType = "Diurnal (Pasang Surut Tunggal)";
+                  meanSpringTide = datums.mhws - datums.mlws;
+                  meanNeapTide = 2 * Math.abs(ak1 - ao1);
+              }
+          } else {
+              meanSpringTide = datums.mhws - datums.mlws;
           }
 
-          const meanSpringTide = 2 * (am2 + as2);
-          const meanNeapTide = 2 * Math.abs(am2 - as2);
           const maxAstroRange = datums.hat - datums.lat;
 
           content += `HAT (Highest Astronomical Tide)\t${datums.hat.toFixed(3)}\tm\n`;
