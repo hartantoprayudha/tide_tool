@@ -836,6 +836,7 @@ export default function App() {
   const [useTrendInPrediction, setUseTrendInPrediction] = useState(false);
   const [predStartDate, setPredStartDate] = useState(formatUTC(new Date(), 'yyyy-MM-dd'));
   const [predEndDate, setPredEndDate] = useState(formatUTC(addDays(new Date(), 7), 'yyyy-MM-dd'));
+  const [predInterval, setPredInterval] = useState(60);
 
   const predictionsRef = useRef<any[]>([]);
   const predictions = predictionsRef.current;
@@ -2509,7 +2510,7 @@ export default function App() {
     }
   };
 
-  const generatePredictions = () => {
+  const generatePredictions = (intervalOverride?: number) => {
     if (!records.length || !harmonicResults.length) return;
     setIsLoading(true);
 
@@ -2533,6 +2534,12 @@ export default function App() {
                 alert("Tanggal akhir harus setelah tanggal awal");
                 return;
             }
+
+            const usedInterval = intervalOverride !== undefined ? intervalOverride : predInterval;
+            const activeInterval = (diffDays <= 31 && usedInterval === 1) ? 1 : 60;
+            const diffMinutes = Math.ceil((end.getTime() - start.getTime()) / 60000);
+            const steps = activeInterval === 1 ? diffMinutes : diffHours;
+            const stepMs = activeInterval * 60000;
 
             const predData = [];
             const t0 = records[0]?.timestamp?.getTime() || 0;
@@ -2558,8 +2565,8 @@ export default function App() {
                 return val;
             };
 
-            for (let h = 0; h <= diffHours; h++) {
-                const d = new Date(start.getTime() + h * 3600000);
+            for (let s = 0; s <= steps; s++) {
+                const d = new Date(start.getTime() + s * stepMs);
                 const val = calcValue(d);
                 const dayKey = formatUTC(d, 'yyyyMMdd');
 
@@ -2642,7 +2649,8 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `tide_prediction_${predStartDate}_${predEndDate}.${formatType}`;
+    const cleanTitle = (chartTitle || 'Chart').trim().replace(/[/\\?%*:|"<> ]/g, '-');
+    link.download = `BIG-Tidal-Prediction-${cleanTitle}-${predStartDate}-${predEndDate}.${formatType}`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -3025,11 +3033,11 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
           const tStart = records[0].timestamp;
           const tEnd = records[records.length - 1].timestamp;
           const durationDays = (tEnd.getTime() - tStart.getTime()) / (1000 * 60 * 60 * 24);
-          content += `Data Start\t${formatUTC(tStart, 'MM/dd/yyyy, HH:mm:ss')} (UTC)\n`;
-          content += `Data End\t${formatUTC(tEnd, 'MM/dd/yyyy, HH:mm:ss')} (UTC)\n`;
+          content += `Data Start\t${formatUTC(tStart, 'MM/dd/yyyy')}\n`;
+          content += `Data End\t${formatUTC(tEnd, 'MM/dd/yyyy')}\n`;
           content += `Data Duration\t${durationDays.toFixed(2)} days\n`;
       }
-      content += `Generated\t${formatUTC(new Date(), 'MM/dd/yyyy, HH:mm:ss')} (UTC)\n\n`;
+      content += `Generated\t${formatUTC(new Date(), 'MM/dd/yyyy')}\n\n`;
 
       content += `--- CHART DATUMS & TIDAL RANGES ---\n`;
       content += `Parameter\tValue\tUnit\n`;
@@ -3555,6 +3563,8 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     endDate={predEndDate}
                     setStartDate={setPredStartDate}
                     setEndDate={setPredEndDate}
+                    predInterval={predInterval}
+                    setPredInterval={setPredInterval}
                     onGenerate={generatePredictions}
                     onExport={exportPredictions}
                     useTrendInPrediction={useTrendInPrediction}
@@ -3913,6 +3923,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
   });
   const [vZoom, setVZoom] = useState(1);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
+  const chartScrollRef = useRef<HTMLDivElement>(null);
 
   const brushData = useMemo(() => {
     if (!records.length) return [];
@@ -3927,6 +3938,33 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
       sampled.push({ timeMs: records[records.length - 1].timestamp.getTime() });
     }
     return sampled;
+  }, [records]);
+
+  useEffect(() => {
+    const el = chartScrollRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (records.length === 0) return;
+
+      setZoomDomain(prev => {
+        const currentDomain = prev || { start: records[0].timestamp.getTime(), end: records[records.length - 1].timestamp.getTime() };
+        const domainLength = currentDomain.end - currentDomain.start;
+        const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+        const newLength = domainLength * zoomFactor;
+        
+        const minLen = 3600 * 1000;
+        const maxLen = records[records.length - 1].timestamp.getTime() - records[0].timestamp.getTime();
+        const finalLength = Math.max(minLen, Math.min(newLength, maxLen * 1.5));
+        
+        const center = currentDomain.start + domainLength / 2;
+        return { start: center - finalLength / 2, end: center + finalLength / 2 };
+      });
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
   }, [records]);
 
   useEffect(() => {
@@ -4690,7 +4728,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
 
     const filter = (el: HTMLElement) => !el.classList?.contains('export-exclude');
     try {
-      const cleanTitle = (title || 'Chart').trim().replace(/[/\\?%*:|"<>]/g, '_');
+      const cleanTitle = (title || 'Chart').trim().replace(/[/\\?%*:|"<> ]/g, '-');
       const filenameBase = `BIG-Tidal-Analysis-${cleanTitle}`;
 
       // Calculate export dimensions based on the node's current bounding rect or a clean proportional canvas
@@ -5149,47 +5187,42 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
       </div>
 
       <div ref={chartRef} className="bg-white rounded-2xl border border-slate-200/90 pb-6 pt-5 px-3 sm:px-5 lg:px-6 shadow-sm relative w-full overflow-hidden">
-        {/* Title for Export (Always centered at the top of the exported image) */}
-        {isExporting ? (
-          <div className="w-full text-center pb-4 mb-3 border-b border-slate-200">
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-800 font-display tracking-tight uppercase">
-              {title}
-            </h2>
-            <div className="w-16 h-1 bg-sky-500 mx-auto mt-2 rounded-full"></div>
-          </div>
-        ) : (
-          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 mb-4">
-            <h3 className="text-xl sm:text-2xl font-black text-slate-800 font-display tracking-tight text-center xl:text-left">{title}</h3>
-            <div className="flex flex-wrap items-center justify-center xl:justify-end gap-1.5 self-center xl:self-auto export-exclude">
-              <button 
-                  onClick={onReset}
-                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-rose-100"
-                  title="Reset all corrections (Offsets, Modifiers, Scaling)"
-              >
-                  <RefreshCw size={14} />
-                  General Reset
-              </button>
-              {zoomDomain && (
-                <button onClick={zoomOut} className="px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-sky-200"><ZoomOut size={14} /> Reset Zoom X</button>
-              )}
-              
-              <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-                <button onClick={() => setDragAction('zoom')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'zoom' ? 'bg-white shadow-sm text-sky-700' : 'text-slate-500'}`}>Zoom</button>
-                <button onClick={() => setDragAction('delete')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'delete' ? 'bg-rose-500 shadow-sm text-white' : 'text-slate-500'}`}>Delete</button>
-              </div>
-
-              {modifiers.length > 0 && (
-                <button onClick={undoModifier} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-amber-200">
-                  Undo Delete/Mod
-                </button>
-              )}
-              
-              <button onClick={() => handleDownload('png')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
-              <button onClick={() => handleDownload('jpeg')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
-              <button onClick={() => handleDownload('pdf')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
+        {/* Title for Export and UI */}
+        <div className="w-full text-center pb-4 mb-4 border-b border-slate-200 relative">
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-800 font-display tracking-tight uppercase">
+            {title}
+          </h2>
+          <div className="w-16 h-1 bg-sky-500 mx-auto mt-2 rounded-full"></div>
+          
+          <div className="absolute top-0 right-0 flex flex-wrap items-center justify-end gap-1.5 export-exclude">
+            <button 
+                onClick={onReset}
+                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-rose-100"
+                title="Reset all corrections (Offsets, Modifiers, Scaling)"
+            >
+                <RefreshCw size={14} />
+                General Reset
+            </button>
+            {zoomDomain && (
+              <button onClick={zoomOut} className="px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-sky-200"><ZoomOut size={14} /> Reset Zoom X</button>
+            )}
+            
+            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+              <button onClick={() => setDragAction('zoom')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'zoom' ? 'bg-white shadow-sm text-sky-700' : 'text-slate-500'}`}>Zoom</button>
+              <button onClick={() => setDragAction('delete')} className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors ${dragAction === 'delete' ? 'bg-rose-500 shadow-sm text-white' : 'text-slate-500'}`}>Delete</button>
             </div>
+
+            {modifiers.length > 0 && (
+              <button onClick={undoModifier} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-sm border border-amber-200">
+                Undo Delete/Mod
+              </button>
+            )}
+            
+            <button onClick={() => handleDownload('png')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PNG</button>
+            <button onClick={() => handleDownload('jpeg')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> JPG</button>
+            <button onClick={() => handleDownload('pdf')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"><Download size={14} /> PDF</button>
           </div>
-        )}
+        </div>
 
         {/* Interactive Sensor & Line Toggle Bar on Dashboard Chart */}
         <div className="mb-4 pb-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 export-exclude bg-slate-50/70 p-3 rounded-xl border">
@@ -5272,6 +5305,7 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
         </div>
 
         <div 
+            ref={chartScrollRef}
             className="relative h-[600px] sm:h-[650px] lg:h-[700px] 2xl:h-[760px] w-full mt-[-5px] group bg-white pt-2 pb-4"
             onContextMenu={(e) => {
                 e.preventDefault();
@@ -6771,11 +6805,89 @@ const PredictionTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, onGenerate, onExport, isLoading, title, hasInsufficientData, useTrendInPrediction, setUseTrendInPrediction }: any) {
+function PredictionView({ predictions, startDate, endDate, setStartDate, setEndDate, predInterval, setPredInterval, onGenerate, onExport, isLoading, title, hasInsufficientData, useTrendInPrediction, setUseTrendInPrediction }: any) {
   const [refAreaLeft, setRefAreaLeft] = useState<string>('');
   const [refAreaRight, setRefAreaRight] = useState<string>('');
   const [zoomDomain, setZoomDomain] = useState<{start: number, end: number} | null>(null);
   const [vZoom, setVZoom] = useState(1);
+  const chartScrollRef = useRef<HTMLDivElement>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
+  const [dateContextMenu, setDateContextMenu] = useState<{ x: number, y: number } | null>(null);
+  const [datePickerMode, setDatePickerMode] = useState<'none' | 'day' | 'month' | 'year'>('none');
+  const [isExporting, setIsExporting] = useState(false);
+
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setContextMenu(null);
+      setDateContextMenu(null);
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const el = chartScrollRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (predictions.length === 0) return;
+
+      setZoomDomain(prev => {
+        const currentDomain = prev || { start: predictions[0].timestamp.getTime(), end: predictions[predictions.length - 1].timestamp.getTime() };
+        const domainLength = currentDomain.end - currentDomain.start;
+        const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+        const newLength = domainLength * zoomFactor;
+        
+        const minLen = 3600 * 1000;
+        const maxLen = predictions[predictions.length - 1].timestamp.getTime() - predictions[0].timestamp.getTime();
+        const finalLength = Math.max(minLen, Math.min(newLength, maxLen * 1.5));
+        
+        const center = currentDomain.start + domainLength / 2;
+        return { start: center - finalLength / 2, end: center + finalLength / 2 };
+      });
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [predictions]);
+
+  const handleDownloadImage = async () => {
+    if (!chartContainerRef.current) return;
+    setIsExporting(true);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const node = chartContainerRef.current;
+    if (!node) {
+      setIsExporting(false);
+      return;
+    }
+
+    try {
+      const cleanTitle = (title || 'Chart').trim().replace(/[/\\?%*:|"<> ]/g, '-');
+      const filenameBase = `BIG-Tidal-Prediction-${cleanTitle}`;
+
+      const width = Math.max(node.scrollWidth, node.offsetWidth, 1200);
+      const height = Math.max(node.scrollHeight, node.offsetHeight, 700);
+
+      const exportOptions = {
+        filter: (el: HTMLElement) => !el.classList?.contains('export-exclude'),
+        width,
+        height,
+        style: { transform: 'scale(1)', transformOrigin: 'top left' },
+        pixelRatio: 2,
+        backgroundColor: '#ffffff'
+      };
+
+      const dataUrl = await htmlToImage.toPng(node, exportOptions);
+      download(dataUrl, `${filenameBase}.png`);
+    } catch (error) { 
+      console.error('Gagal mengunduh grafik:', error instanceof Error ? error.message : String(error)); 
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const displayPredsRaw = useMemo(() => {
     return predictions.map((p: any) => {
@@ -6886,7 +6998,7 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
-          <div className="space-y-3">
+          <div className="space-y-3 relative">
             <label className="text-xs font-black text-slate-700 font-display uppercase tracking-wider">Tanggal Mulai</label>
             <div className="relative group">
               <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0284c7] transition-colors" size={20} />
@@ -6894,9 +7006,41 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 type="date"
                 value={startDate} 
                 onChange={(e) => setStartDate(e.target.value)}
+                onContextMenu={(e) => {
+                   e.preventDefault();
+                   e.stopPropagation();
+                   const rect = e.currentTarget.getBoundingClientRect();
+                   setDateContextMenu({ x: rect.left, y: rect.bottom });
+                }}
                 className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-slate-800 outline-none focus:ring-4 focus:ring-sky-100 transition-all font-mono"
               />
             </div>
+            {dateContextMenu && (
+              <div 
+                className="fixed bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[60] overflow-hidden w-56 animate-in fade-in zoom-in-95 duration-100"
+                style={{ top: dateContextMenu.y, left: dateContextMenu.x }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button 
+                  className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors"
+                  onClick={() => { setDatePickerMode('day'); setDateContextMenu(null); }}
+                >
+                  Satu hari tertentu
+                </button>
+                <button 
+                  className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors"
+                  onClick={() => { setDatePickerMode('month'); setDateContextMenu(null); }}
+                >
+                  Satu bulan tertentu
+                </button>
+                <button 
+                  className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors"
+                  onClick={() => { setDatePickerMode('year'); setDateContextMenu(null); }}
+                >
+                  Satu tahun tertentu
+                </button>
+              </div>
+            )}
           </div>
           <div className="space-y-3">
             <label className="text-xs font-black text-slate-700 font-display uppercase tracking-wider">Tanggal Selesai</label>
@@ -6947,7 +7091,50 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
       </div>
 
       {predictions.length > 0 && (
-        <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
+        <div ref={chartContainerRef} className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm relative">
+          {contextMenu && (
+            <div 
+              className="absolute bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50 overflow-hidden w-48 animate-in fade-in zoom-in-95 duration-100"
+              style={{ top: contextMenu.y - 120, left: contextMenu.x - 300 }} // adjust if needed based on relative positioning
+            >
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors flex items-center gap-2"
+                onClick={() => {
+                  zoomOut();
+                  setContextMenu(null);
+                }}
+              >
+                <span>Reset Zoom</span>
+              </button>
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors flex items-center gap-2"
+                onClick={() => {
+                  onExport('csv');
+                  setContextMenu(null);
+                }}
+              >
+                <span>Unduh CSV</span>
+              </button>
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors flex items-center gap-2"
+                onClick={() => {
+                  onExport('txt');
+                  setContextMenu(null);
+                }}
+              >
+                <span>Unduh TXT</span>
+              </button>
+              <button 
+                className="w-full text-left px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-sky-600 transition-colors flex items-center gap-2"
+                onClick={() => {
+                  handleDownloadImage();
+                  setContextMenu(null);
+                }}
+              >
+                <span>Unduh PNG</span>
+              </button>
+            </div>
+          )}
           <div className="flex justify-between items-center mb-8 px-2">
             <h3 className="font-black text-slate-800 text-lg font-display">Predicted Mean Sea Level (m)</h3>
             <div className="flex gap-2">
@@ -6961,18 +7148,46 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
                 <Download size={14} /> CSV
               </button>
               <button 
-
                 onClick={() => onExport('txt')}
                 className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors"
               >
                 <Download size={14} /> TXT
               </button>
-              <span className="px-3 py-2 bg-sky-50 text-[#0284c7] text-[10px] font-black rounded-lg uppercase tracking-wider">
-                  Interval : {predictions.length > 366 * 24 ? 'monthly mean' : '1 Hour'}
-              </span>
+              <button 
+                onClick={handleDownloadImage}
+                className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                <Download size={14} /> PNG
+              </button>
+              <select
+                  value={predInterval}
+                  onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setPredInterval(val);
+                      onGenerate(val);
+                  }}
+                  disabled={(() => {
+                      const start = new Date(startDate);
+                      const end = new Date(endDate);
+                      return Math.ceil((end.getTime() - start.getTime()) / (1000 * 3600 * 24)) > 31;
+                  })()}
+                  className="px-3 py-1 bg-sky-50 text-[#0284c7] border border-sky-200 text-xs font-bold rounded-lg outline-none cursor-pointer focus:ring-2 focus:ring-sky-200"
+              >
+                  <option value={60}>Interval: 1 Hour</option>
+                  <option value={1}>Interval: 1 Minute</option>
+              </select>
             </div>
           </div>
-          <div className="relative group h-[400px] w-full" style={{ willChange: 'transform, opacity', transform: 'translateZ(0)' }}>
+          <div 
+             ref={chartScrollRef} 
+             className="relative group h-[400px] w-full" 
+             style={{ willChange: 'transform, opacity', transform: 'translateZ(0)' }}
+             onContextMenu={(e) => {
+                e.preventDefault();
+                // Getting coordinate relative to container if needed, or viewport
+                setContextMenu({ x: e.clientX, y: e.clientY });
+             }}
+          >
             <div className="export-exclude absolute right-8 top-2 flex flex-col gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
               <button onClick={() => setVZoom(z => z * 1.25)} className="p-1.5 bg-white border border-slate-200 rounded shadow-sm text-slate-600 hover:bg-slate-50 hover:text-sky-600 transition-colors" title="Zoom In Vertical">
                 <ZoomIn size={14} />
@@ -7088,6 +7303,61 @@ function PredictionView({ predictions, startDate, endDate, setStartDate, setEndD
              <p className="text-xs text-slate-500 leading-relaxed px-2">
                 Prediksi dihitung menggunakan konstanta harmonik yang dihitung dari data input. Akurasi sangat bergantung pada panjang data input (ideal minimal 15-30 hari) dan kualitas pembersihan data awal.
              </p>
+          </div>
+        </div>
+      )}
+
+      {datePickerMode !== 'none' && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[100] px-4">
+          <div className="bg-white rounded-3xl p-6 shadow-2xl border border-slate-200 w-full max-w-sm animate-in fade-in zoom-in-95 duration-200">
+             <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+               <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight">
+                 {datePickerMode === 'day' && 'Pilih Tanggal'}
+                 {datePickerMode === 'month' && 'Pilih Bulan'}
+                 {datePickerMode === 'year' && 'Pilih Tahun'}
+               </h3>
+               <button onClick={() => setDatePickerMode('none')} className="text-slate-400 hover:text-rose-500 transition-colors">
+                  <X size={20} />
+               </button>
+             </div>
+             
+             {datePickerMode === 'day' && (
+                 <input type="date" id="day-picker-input" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 focus:ring-4 focus:ring-sky-100 outline-none transition-all font-mono" defaultValue={startDate} />
+             )}
+             {datePickerMode === 'month' && (
+                 <input type="month" id="month-picker-input" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 focus:ring-4 focus:ring-sky-100 outline-none transition-all font-mono" defaultValue={startDate.slice(0, 7)} />
+             )}
+             {datePickerMode === 'year' && (
+                 <input type="number" id="year-picker-input" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 focus:ring-4 focus:ring-sky-100 outline-none transition-all font-mono" defaultValue={startDate.slice(0, 4)} min={1900} max={2100} />
+             )}
+
+             <div className="flex justify-end gap-3 mt-8">
+                 <button onClick={() => setDatePickerMode('none')} className="px-5 py-2.5 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition-colors">Batal</button>
+                 <button onClick={() => {
+                     if (datePickerMode === 'day') {
+                         const val = (document.getElementById('day-picker-input') as HTMLInputElement).value;
+                         if (val) {
+                             setStartDate(val);
+                             setEndDate(val);
+                         }
+                     } else if (datePickerMode === 'month') {
+                         const val = (document.getElementById('month-picker-input') as HTMLInputElement).value;
+                         if (val) {
+                             const [year, month] = val.split('-');
+                             setStartDate(`${year}-${month}-01`);
+                             const lastDay = new Date(Number(year), Number(month), 0).getDate();
+                             setEndDate(`${year}-${month}-${lastDay.toString().padStart(2, '0')}`);
+                         }
+                     } else if (datePickerMode === 'year') {
+                         const val = (document.getElementById('year-picker-input') as HTMLInputElement).value;
+                         if (val) {
+                             setStartDate(`${val}-01-01`);
+                             setEndDate(`${val}-12-31`);
+                         }
+                     }
+                     setDatePickerMode('none');
+                 }} className="px-5 py-2.5 rounded-xl font-black text-white bg-sky-600 hover:bg-sky-700 transition-all shadow-lg shadow-sky-200 active:scale-95">Terapkan</button>
+             </div>
           </div>
         </div>
       )}
