@@ -39,7 +39,10 @@ import {
   Check,
   RotateCw,
   Server,
-  ExternalLink
+  ExternalLink,
+  ShieldAlert,
+  AlertTriangle,
+  Filter
 } from 'lucide-react';
 import ConnectView from './ConnectView';
 import SummarizeView from './SummarizeView';
@@ -148,6 +151,9 @@ interface ConstituentResult {
   v0: number;
   snr?: number;
   nodal?: { f: number, u: number };
+  rayleighPassed?: boolean;
+  rayleighReason?: string;
+  conflictingComp?: string;
 }
 
 // --- CONSTANTS ---
@@ -1728,24 +1734,22 @@ export default function App() {
                 });
                 
                 let residualVariance = 0;
-                if (constituentSet === 'AUTO') {
-                   let sumResSq = 0;
-                   for (let i = 0; i < n; i++) {
-                       let fitVal = fittedZ0; // Since y_detrended doesn't include Z0, actually fitVal should start at 0
-                       for (let j = 0; j < fftRawResults.length; j++) {
-                           const phaseArg = 2 * Math.PI * fftRawResults[j].f * t_hours[i];
-                           fitVal += fftRawResults[j].a * Math.cos(phaseArg) + fftRawResults[j].b * Math.sin(phaseArg);
-                       }
-                       sumResSq += Math.pow(y_detrended[i] - fitVal, 2);
-                   }
-                   residualVariance = sumResSq / Math.max(1, n - fftRawResults.length * 2 - 1);
+                let sumResSq = 0;
+                for (let i = 0; i < n; i++) {
+                    let fitVal = fittedZ0; // fitVal includes fittedZ0
+                    for (let j = 0; j < fftRawResults.length; j++) {
+                        const phaseArg = 2 * Math.PI * fftRawResults[j].f * t_hours[i];
+                        fitVal += fftRawResults[j].a * Math.cos(phaseArg) + fftRawResults[j].b * Math.sin(phaseArg);
+                    }
+                    sumResSq += Math.pow(y_detrended[i] - fitVal, 2);
                 }
+                residualVariance = sumResSq / Math.max(1, n - fftRawResults.length * 2 - 1);
                 
                 results = fftRawResults.map(res => {
                     let snr = 0;
-                    if (constituentSet === 'AUTO' && residualVariance > 0) {
+                    if (residualVariance > 0) {
                         snr = (res.amp * res.amp / 2) / (residualVariance / n);
-                        if (snr > 2) snrPassedCount++; // Conventional significance threshold
+                        if (snr >= 2) snrPassedCount++; // Conventional significance threshold
                     }
                     
                     return {
@@ -1755,33 +1759,33 @@ export default function App() {
                         v0: res.v0,
                         desc: HARMONIC_FREQS[res.c].d,
                         freq: res.f,
-                        snr: constituentSet === 'AUTO' ? snr : undefined
+                        snr: Number(snr.toFixed(2))
                     };
                 });
 
-                if (constituentSet === 'AUTO') {
-                    setAutoDiagnostics(prev => prev ? { ...prev, snrPassed: snrPassedCount } : null);
-                }
+                setAutoDiagnostics(prev => ({
+                    rayleighPassed: prev?.rayleighPassed ?? results.length,
+                    totalTested: compsToFit.length,
+                    snrPassed: snrPassedCount
+                }));
             } else {
                 solution = solveLeastSquares(t_hours, y_detrended, compsToFit);
                 fittedZ0 = solution[0] || meanRaw;
                 
                 // Calculate residuals for ANOVA/SNR
                 let residualVariance = 0;
-                if (constituentSet === 'AUTO') {
-                   let sumResSq = 0;
-                   for (let i = 0; i < t_hours.length; i++) {
-                       let fitVal = fittedZ0;
-                       for (let j = 0; j < compsToFit.length; j++) {
-                           const a = solution[1 + 2 * j] || 0;
-                           const b = solution[1 + 2 * j + 1] || 0;
-                           const phaseArg = 2 * Math.PI * HARMONIC_FREQS[compsToFit[j]].f * t_hours[i];
-                           fitVal += a * Math.cos(phaseArg) + b * Math.sin(phaseArg);
-                       }
-                       sumResSq += Math.pow(y_detrended[i] - fitVal, 2);
-                   }
-                   residualVariance = sumResSq / Math.max(1, t_hours.length - compsToFit.length * 2 - 1);
+                let sumResSq = 0;
+                for (let i = 0; i < t_hours.length; i++) {
+                    let fitVal = fittedZ0;
+                    for (let j = 0; j < compsToFit.length; j++) {
+                        const a = solution[1 + 2 * j] || 0;
+                        const b = solution[1 + 2 * j + 1] || 0;
+                        const phaseArg = 2 * Math.PI * HARMONIC_FREQS[compsToFit[j]].f * t_hours[i];
+                        fitVal += a * Math.cos(phaseArg) + b * Math.sin(phaseArg);
+                    }
+                    sumResSq += Math.pow(y_detrended[i] - fitVal, 2);
                 }
+                residualVariance = sumResSq / Math.max(1, t_hours.length - compsToFit.length * 2 - 1);
                 
                 let snrPassedCount = 0;
                 
@@ -1799,9 +1803,9 @@ export default function App() {
                     if (phase < 0) phase += 360;
                     
                     let snr = 0;
-                    if (constituentSet === 'AUTO' && residualVariance > 0) {
+                    if (residualVariance > 0) {
                         snr = (amp * amp / 2) / (residualVariance / t_hours.length);
-                        if (snr > 2) snrPassedCount++; // Conventional significance threshold
+                        if (snr >= 2) snrPassedCount++; // Conventional significance threshold
                     }
                     
                     return {
@@ -1811,13 +1815,15 @@ export default function App() {
                       v0,
                       desc: HARMONIC_FREQS[c].d,
                       freq: HARMONIC_FREQS[c].f,
-                      snr: constituentSet === 'AUTO' ? snr : undefined
+                      snr: Number(snr.toFixed(2))
                     };
                 });
                 
-                if (constituentSet === 'AUTO') {
-                    setAutoDiagnostics(prev => prev ? { ...prev, snrPassed: snrPassedCount } : null);
-                }
+                setAutoDiagnostics(prev => ({
+                    rayleighPassed: prev?.rayleighPassed ?? results.length,
+                    totalTested: compsToFit.length,
+                    snrPassed: snrPassedCount
+                }));
             }
         }
 
@@ -3542,6 +3548,8 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     dataSelection={harmonicDataSelection}
                     setDataSelection={setHarmonicDataSelection}
                     dataOptions={harmonicDataOptions}
+                    durationHours={records && records.length > 1 ? (records[records.length - 1].timestamp.getTime() - records[0].timestamp.getTime()) / 3600000 : 0}
+                    recordsCount={records?.length || 0}
                     onCalculate={() => { 
                         setIsFullAnalysisRun(true); 
                         runAnalysis(rawData, selectedSensor, verticalOffset, timeOffset, modifiers, isDeTiding, combinationSettings, interpolationSettings, true, undefined, harmonicMethod, isPembersihanActive, isFilterActive, harmonicDataSelection); 
@@ -6596,30 +6604,173 @@ function FilterView({ type, setType, window, setWindow, medianWindow, setMedianW
   );
 }
 
-function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmonicMethod, setHarmonicMethod, onCalculate, isCalculating, autoDiagnostics, isDeTiding, setIsDeTiding, dataSelection, setDataSelection, dataOptions }: any) {
+function HarmonicView({ 
+  results, 
+  rmse, 
+  constituentSet, 
+  setConstituentSet, 
+  harmonicMethod, 
+  setHarmonicMethod, 
+  onCalculate, 
+  isCalculating, 
+  autoDiagnostics, 
+  isDeTiding, 
+  setIsDeTiding, 
+  dataSelection, 
+  setDataSelection, 
+  dataOptions,
+  durationHours,
+  recordsCount
+}: any) {
+  const [showValidation, setShowValidation] = useState(true);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'flagged' | 'passed'>('all');
+
+  // Calculate validated results with Rayleigh criterion and SNR < 2
+  const validatedResults = useMemo(() => {
+    if (!results || results.length === 0) return [];
+    const T_hours = durationHours && durationHours > 0 ? durationHours : 720;
+    const f_R = 1.0 / T_hours;
+
+    const PRIORITY = [
+      'M2', 'S2', 'K1', 'O1', 'N2', 'K2', 'P1', 'M4', 'MS4', 'Q1', 'J1', 
+      '2N2', 'MU2', 'NU2', 'L2', 'T2', 'S4', 'M6', 'S6', 'MN4', 'MSf', 'Mf', 
+      'Mm', 'Ssa', 'Sa', 'E2', 'La2', 'M3', 'M8', 'MKS2', 'MSqm', 'Mtm', 'N4', 'R2', 'S1'
+    ];
+
+    return results.map((r: any) => {
+      let rayleighPassed = true;
+      let rayleighReason = '';
+      let conflictingComp = '';
+      let deltaF = 0;
+      let requiredDays = 0;
+
+      // 1. Check frequency completion against total observation length (f >= 1/T)
+      if (r.freq < f_R) {
+        rayleighPassed = false;
+        requiredDays = Math.round(1 / r.freq / 24);
+        rayleighReason = `Frekuensi (${r.freq.toFixed(6)} cph) < Batas Rayleigh (${f_R.toFixed(6)} cph). Membutuhkan data ≥ ${requiredDays} hari untuk menyelesaikan 1 siklus penuh.`;
+      } else {
+        // 2. Check Rayleigh frequency separation against all other constituents in the active set
+        const rankR = PRIORITY.indexOf(r.comp) !== -1 ? PRIORITY.indexOf(r.comp) : 999;
+
+        for (const other of results) {
+          if (other.comp === r.comp) continue;
+          const diff = Math.abs(r.freq - other.freq);
+          if (diff < f_R) {
+            const rankOther = PRIORITY.indexOf(other.comp) !== -1 ? PRIORITY.indexOf(other.comp) : 999;
+            const otherIsDominant = rankOther < rankR || (rankOther === rankR && (other.amp || 0) > (r.amp || 0));
+            if (otherIsDominant) {
+              rayleighPassed = false;
+              conflictingComp = other.comp;
+              deltaF = diff;
+              requiredDays = Math.round(1 / diff / 24);
+              rayleighReason = `Konflik pemisahan frekuensi dengan ${other.comp} (|Δf| = ${diff.toFixed(6)} cph < Batas Rayleigh ${f_R.toFixed(6)} cph). Membutuhkan rekaman T ≥ ${requiredDays} hari.`;
+              break;
+            }
+          }
+        }
+      }
+
+      // 3. SNR evaluation
+      let snrVal = r.snr;
+      if (snrVal === undefined || isNaN(snrVal) || snrVal <= 0) {
+        if (rmse && rmse > 0) {
+          const N = Math.max(10, recordsCount || T_hours);
+          const noiseVar = (rmse * rmse) / N;
+          snrVal = (r.amp * r.amp / 2) / Math.max(1e-9, noiseVar);
+        } else {
+          snrVal = 0;
+        }
+      }
+      const snr = Number(snrVal.toFixed(2));
+      const snrPassed = snr >= 2.0;
+      const snrReason = !snrPassed 
+        ? `SNR (${snr.toFixed(2)}) < 2.0 (Amplitudo ${r.amp.toFixed(3)} m tidak signifikan secara statistik terhadap residual noise).` 
+        : undefined;
+
+      const isValid = rayleighPassed && snrPassed;
+      const hasWarning = !rayleighPassed || !snrPassed;
+
+      return {
+        ...r,
+        snr,
+        rayleighPassed,
+        rayleighReason,
+        conflictingComp,
+        deltaF,
+        requiredDays,
+        snrPassed,
+        snrReason,
+        isValid,
+        hasWarning
+      };
+    });
+  }, [results, durationHours, rmse, recordsCount]);
+
+  const validationSummary = useMemo(() => {
+    if (!validatedResults.length) return null;
+    const total = validatedResults.length;
+    const rayleighFailed = validatedResults.filter((r: any) => !r.rayleighPassed).length;
+    const snrFailed = validatedResults.filter((r: any) => !r.snrPassed).length;
+    const failedCount = validatedResults.filter((r: any) => r.hasWarning).length;
+    const passedCount = total - failedCount;
+    const T_hours = durationHours && durationHours > 0 ? durationHours : 720;
+    const f_R = 1.0 / T_hours;
+
+    return {
+      total,
+      rayleighFailed,
+      snrFailed,
+      failedCount,
+      passedCount,
+      durationHours: T_hours,
+      durationDays: (T_hours / 24).toFixed(1),
+      rayleighFreq: f_R.toFixed(6)
+    };
+  }, [validatedResults, durationHours]);
+
+  const displayedResults = useMemo(() => {
+    const list = [...validatedResults].sort((a: any, b: any) => b.amp - a.amp);
+    if (!showValidation || filterStatus === 'all') return list;
+    if (filterStatus === 'flagged') return list.filter((r: any) => r.hasWarning);
+    if (filterStatus === 'passed') return list.filter((r: any) => r.isValid);
+    return list;
+  }, [validatedResults, showValidation, filterStatus]);
+
   const handleDownloadCSV = () => {
-    if (!results || results.length === 0) return;
+    if (!validatedResults || validatedResults.length === 0) return;
     let csv = `# Data Selection,${dataSelection}\n`;
     csv += `# Metode Analisis,${harmonicMethod}\n`;
     csv += `# Constituent Set,${constituentSet}\n`;
-    csv += `# RMSE,${rmse !== undefined && rmse !== null ? rmse.toFixed(4) : 'N/A'}\n\n`;
-    csv += "Component,Definition,Frequency (cph),Amplitude (m),Phase (deg)\n";
-    [...results].sort((a: any, b: any) => b.amp - a.amp).forEach((r: any) => {
-      csv += `${r.comp},${r.desc},${r.freq.toFixed(8)},${r.amp.toFixed(5)},${r.phase.toFixed(3)}\n`;
+    csv += `# RMSE,${rmse !== undefined && rmse !== null ? rmse.toFixed(4) : 'N/A'}\n`;
+    if (durationHours) {
+      csv += `# Observation Duration (hours),${durationHours.toFixed(2)}\n`;
+      csv += `# Rayleigh Frequency Limit (cph),${(1.0 / durationHours).toFixed(6)}\n`;
+    }
+    csv += `\nComponent,Definition,Frequency (cph),Amplitude (m),Phase (deg),SNR,Rayleigh Criterion,Validation Status\n`;
+    [...validatedResults].sort((a: any, b: any) => b.amp - a.amp).forEach((r: any) => {
+      const rayleighStatus = r.rayleighPassed ? 'Pass' : `Fail (${r.rayleighReason})`;
+      const valStatus = r.isValid ? 'Valid' : (!r.rayleighPassed && !r.snrPassed ? 'Fail (Rayleigh & SNR < 2)' : (!r.rayleighPassed ? 'Fail (Rayleigh)' : 'Fail (SNR < 2)'));
+      csv += `"${r.comp}","${r.desc}",${r.freq.toFixed(8)},${r.amp.toFixed(5)},${r.phase.toFixed(3)},${r.snr.toFixed(2)},"${rayleighStatus}","${valStatus}"\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     download(blob, 'Harmonic_Constants.csv');
   };
 
   const handleDownloadTXT = () => {
-    if (!results || results.length === 0) return;
+    if (!validatedResults || validatedResults.length === 0) return;
     let txt = `# Data Selection: ${dataSelection}\n`;
     txt += `# Metode Analisis: ${harmonicMethod}\n`;
     txt += `# Constituent Set: ${constituentSet}\n`;
-    txt += `# RMSE: ${rmse !== undefined && rmse !== null ? rmse.toFixed(4) : 'N/A'}\n\n`;
-    txt += "Component\tDefinition\tFrequency(cph)\tAmplitude(m)\tPhase(deg)\n";
-    [...results].sort((a: any, b: any) => b.amp - a.amp).forEach((r: any) => {
-      txt += `${r.comp}\t${r.desc}\t${r.freq.toFixed(8)}\t${r.amp.toFixed(5)}\t${r.phase.toFixed(3)}\n`;
+    txt += `# RMSE: ${rmse !== undefined && rmse !== null ? rmse.toFixed(4) : 'N/A'}\n`;
+    if (durationHours) {
+      txt += `# Observation Duration (hours): ${durationHours.toFixed(2)}\n`;
+      txt += `# Rayleigh Frequency Limit (cph): ${(1.0 / durationHours).toFixed(6)}\n`;
+    }
+    txt += `\nComponent\tDefinition\tFrequency(cph)\tAmplitude(m)\tPhase(deg)\tSNR\tRayleigh\tStatus\n`;
+    [...validatedResults].sort((a: any, b: any) => b.amp - a.amp).forEach((r: any) => {
+      const valStatus = r.isValid ? 'Valid' : (!r.rayleighPassed && !r.snrPassed ? 'Rayleigh&SNR_Fail' : (!r.rayleighPassed ? 'RayleighFail' : 'SNR_Fail'));
+      txt += `${r.comp}\t${r.desc}\t${r.freq.toFixed(8)}\t${r.amp.toFixed(5)}\t${r.phase.toFixed(3)}\t${r.snr.toFixed(2)}\t${r.rayleighPassed ? 'Pass' : 'Fail'}\t${valStatus}\n`;
     });
     const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' });
     download(blob, 'Harmonic_Constants.txt');
@@ -6628,13 +6779,40 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
   return (
     <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm overflow-hidden flex flex-col gap-6">
        <div className="flex flex-col gap-4 w-full">
-          <div className="w-full border-b border-slate-100 pb-3">
-              <h3 className="text-lg font-black text-slate-800 px-2 font-display">Analisis Konstanta Harmonik</h3>
-              {rmse !== undefined && rmse !== null && results.length > 0 && (
-                  <div className="px-2 mt-1">
-                      <span className="text-xs font-semibold text-slate-500">Root Mean Square Error (RMSE): </span>
-                      <span className="text-[13px] font-black text-sky-600">{rmse.toFixed(4)} m</span>
-                  </div>
+          <div className="w-full border-b border-slate-100 pb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 px-2 font-display">Analisis Konstanta Harmonik</h3>
+                {rmse !== undefined && rmse !== null && results.length > 0 && (
+                    <div className="px-2 mt-1">
+                        <span className="text-xs font-semibold text-slate-500">Root Mean Square Error (RMSE): </span>
+                        <span className="text-[13px] font-black text-sky-600">{rmse.toFixed(4)} m</span>
+                    </div>
+                )}
+              </div>
+
+              {results.length > 0 && (
+                <div className="flex items-center gap-2 px-2">
+                  <button 
+                    id="btn-validate-harmonic-results"
+                    onClick={() => setShowValidation(prev => !prev)}
+                    className={`flex items-center justify-center gap-2 px-4 h-10 rounded-xl text-xs font-black tracking-wider transition-all shadow-xs border ${
+                      showValidation 
+                        ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-200' 
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                    title="Toggle validation indicators for Rayleigh criterion and SNR < 2"
+                  >
+                    <ShieldAlert size={16} className={showValidation ? 'text-amber-100' : 'text-amber-500'} />
+                    <span>Validate Harmonic Results</span>
+                    {validationSummary && (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                        showValidation ? 'bg-black/20 text-white' : 'bg-slate-100 text-slate-700'
+                      }`}>
+                        {validationSummary.failedCount > 0 ? `${validationSummary.failedCount} Flagged` : 'All Pass'}
+                      </span>
+                    )}
+                  </button>
+                </div>
               )}
           </div>
           
@@ -6690,8 +6868,6 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
                 </select>
              </div>
              
-
-             
              <button 
                 onClick={onCalculate}
                 disabled={isCalculating}
@@ -6714,7 +6890,80 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
           </div>
        </div>
 
-       {constituentSet === 'AUTO' && autoDiagnostics && (
+       {showValidation && validationSummary && (
+          <div className="p-4 bg-gradient-to-r from-amber-50/80 via-slate-50 to-sky-50/60 rounded-2xl border border-amber-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-1 shadow-xs">
+             <div className="flex flex-wrap items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-400/50 flex items-center justify-center text-amber-700 shrink-0">
+                   <ShieldAlert size={22} />
+                </div>
+                <div>
+                   <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Hasil Validasi Harmonik</h4>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                        validationSummary.failedCount > 0 
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300' 
+                          : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                      }`}>
+                        {validationSummary.failedCount > 0 ? `${validationSummary.failedCount} Konstanta Terflag` : 'Semua Lolos Validasi'}
+                      </span>
+                   </div>
+                   <p className="text-[11px] text-slate-600 font-medium mt-0.5">
+                      Durasi observasi: <strong className="text-slate-800 font-mono">{validationSummary.durationHours.toFixed(1)} jam ({validationSummary.durationDays} hari)</strong> • Batas Rayleigh (1/T): <strong className="text-slate-800 font-mono">{validationSummary.rayleighFreq} cph</strong> • Batas SNR: <strong className="text-slate-800 font-mono">≥ 2.0</strong>
+                   </p>
+                </div>
+             </div>
+
+             <div className="flex flex-wrap items-center gap-2">
+                <div className="px-3 py-1.5 bg-white rounded-xl border border-slate-200 shadow-xs flex items-center gap-2">
+                   <span className="text-[10px] font-black text-slate-400 uppercase">Lolos:</span>
+                   <span className="text-xs font-black text-emerald-600">{validationSummary.passedCount} / {validationSummary.total}</span>
+                </div>
+                <div className="px-3 py-1.5 bg-white rounded-xl border border-slate-200 shadow-xs flex items-center gap-2">
+                   <span className="text-[10px] font-black text-slate-400 uppercase">Gagal Rayleigh:</span>
+                   <span className={`text-xs font-black font-mono ${validationSummary.rayleighFailed > 0 ? 'text-amber-600' : 'text-slate-600'}`}>
+                      {validationSummary.rayleighFailed}
+                   </span>
+                </div>
+                <div className="px-3 py-1.5 bg-white rounded-xl border border-slate-200 shadow-xs flex items-center gap-2">
+                   <span className="text-[10px] font-black text-slate-400 uppercase">SNR &lt; 2:</span>
+                   <span className={`text-xs font-black font-mono ${validationSummary.snrFailed > 0 ? 'text-rose-600' : 'text-slate-600'}`}>
+                      {validationSummary.snrFailed}
+                   </span>
+                </div>
+
+                <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-xs ml-auto">
+                   <button
+                     onClick={() => setFilterStatus('all')}
+                     className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                       filterStatus === 'all' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                     }`}
+                   >
+                     Semua ({validationSummary.total})
+                   </button>
+                   <button
+                     onClick={() => setFilterStatus('flagged')}
+                     className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1 ${
+                       filterStatus === 'flagged' ? 'bg-amber-600 text-white shadow-xs' : 'text-amber-700 hover:bg-amber-50'
+                     }`}
+                   >
+                     <AlertTriangle size={11} />
+                     Terflag ({validationSummary.failedCount})
+                   </button>
+                   <button
+                     onClick={() => setFilterStatus('passed')}
+                     className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1 ${
+                       filterStatus === 'passed' ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-700 hover:bg-emerald-50'
+                     }`}
+                   >
+                     <CheckCircle2 size={11} />
+                     Lolos ({validationSummary.passedCount})
+                   </button>
+                </div>
+             </div>
+          </div>
+       )}
+
+       {constituentSet === 'AUTO' && autoDiagnostics && !showValidation && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-sky-50/70 rounded-xl border border-sky-100 animate-in fade-in slide-in-from-top-1">
              <div className="flex justify-between items-center px-2">
                 <span className="text-[9px] uppercase font-black text-slate-400 tracking-wider">Tested:</span>
@@ -6741,18 +6990,107 @@ function HarmonicView({ results, rmse, constituentSet, setConstituentSet, harmon
                   <th className="py-4 px-6 font-display text-center">Frequency (cph)</th>
                   <th className="py-4 px-6 font-display text-center">Amplitude (m)</th>
                   <th className="py-4 px-6 font-display text-center">Phase (deg)</th>
+                  {showValidation && (
+                    <>
+                      <th className="py-4 px-4 font-display text-center">SNR</th>
+                      <th className="py-4 px-6 font-display text-center">Validation Status</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {[...results].sort((a: any, b: any) => b.amp - a.amp).map((r: any) => (
-                   <tr key={r.comp} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="py-4 px-6 font-black text-[#0284c7]">{r.comp}</td>
-                    <td className="py-4 px-6 text-slate-500 text-xs leading-snug">{r.desc}</td>
-                    <td className="py-4 px-6 font-mono text-[10px] text-slate-400 text-center">{r.freq.toFixed(8)}</td>
-                    <td className="py-4 px-6 font-black text-slate-800 font-mono text-center">{r.amp.toFixed(3)}</td>
-                    <td className="py-4 px-6 font-black text-slate-800 font-mono text-center">{r.phase.toFixed(3)}°</td>
-                  </tr>
-                ))}
+                {displayedResults.map((r: any) => {
+                   const isFlagged = showValidation && r.hasWarning;
+                   const isRayleighFail = showValidation && !r.rayleighPassed;
+                   const isSnrFail = showValidation && !r.snrPassed;
+
+                   return (
+                     <tr 
+                       key={r.comp} 
+                       className={`transition-colors border-l-4 ${
+                         isFlagged 
+                           ? isRayleighFail && isSnrFail 
+                             ? 'bg-amber-50/70 hover:bg-amber-100/70 border-l-amber-600' 
+                             : isRayleighFail 
+                               ? 'bg-amber-50/50 hover:bg-amber-100/50 border-l-amber-500' 
+                               : 'bg-rose-50/50 hover:bg-rose-100/50 border-l-rose-500' 
+                           : 'hover:bg-slate-50/50 border-l-transparent'
+                       }`}
+                     >
+                      <td className="py-4 px-6 font-black text-[#0284c7]">
+                        <div className="flex items-center gap-1.5">
+                          <span>{r.comp}</span>
+                          {isFlagged && (
+                            <span title={!r.rayleighPassed ? r.rayleighReason : r.snrReason}>
+                              <AlertTriangle size={14} className={isRayleighFail ? "text-amber-600 shrink-0" : "text-rose-500 shrink-0"} />
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-4 px-6 text-slate-500 text-xs leading-snug">{r.desc}</td>
+                      <td className="py-4 px-6 font-mono text-[10px] text-slate-400 text-center">{r.freq.toFixed(8)}</td>
+                      <td className="py-4 px-6 font-black text-slate-800 font-mono text-center">{r.amp.toFixed(3)}</td>
+                      <td className="py-4 px-6 font-black text-slate-800 font-mono text-center">{r.phase.toFixed(3)}°</td>
+
+                      {showValidation && (
+                        <>
+                          <td className="py-4 px-4 text-center">
+                            {r.snrPassed ? (
+                              <span className="inline-flex items-center font-mono text-xs font-black text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
+                                {r.snr.toFixed(2)}
+                              </span>
+                            ) : (
+                              <span 
+                                className="inline-flex items-center gap-1 font-mono text-xs font-black text-rose-700 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-md cursor-help shadow-xs"
+                                title={r.snrReason}
+                              >
+                                <AlertTriangle size={12} className="text-rose-600 shrink-0" />
+                                {r.snr.toFixed(2)}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-4 px-6">
+                            <div className="flex flex-col gap-1 items-center justify-center">
+                              {r.isValid ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200/80 shadow-xs">
+                                  <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                                  <span>Valid</span>
+                                </span>
+                              ) : (
+                                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                                  {!r.rayleighPassed && (
+                                    <span 
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 shadow-xs cursor-help"
+                                      title={r.rayleighReason}
+                                    >
+                                      <AlertCircle size={12} className="text-amber-700 shrink-0" />
+                                      <span>Rayleigh Fail</span>
+                                    </span>
+                                  )}
+                                  {!r.snrPassed && (
+                                    <span 
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-900 border border-rose-300 shadow-xs cursor-help"
+                                      title={r.snrReason}
+                                    >
+                                      <AlertTriangle size={12} className="text-rose-700 shrink-0" />
+                                      <span>SNR &lt; 2</span>
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              {isFlagged && (
+                                <div className="text-[10px] text-slate-500 font-medium leading-tight text-center max-w-xs mt-0.5">
+                                  {!r.rayleighPassed ? r.rayleighReason : r.snrReason}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                   );
+                })}
               </tbody>
             </table>
           </div>
