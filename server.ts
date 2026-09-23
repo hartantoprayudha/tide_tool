@@ -19,6 +19,36 @@ if (proxyUrl) {
 
 // MySQL Connection Pool (Lazy initialized or created on demand based on connection details)
 
+function isPrivateHost(host: string): boolean {
+  if (!host) return false;
+  const trimmed = String(host).trim().toLowerCase();
+  if (trimmed === 'localhost' || trimmed === '127.0.0.1' || trimmed === '::1') return true;
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(trimmed)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(trimmed)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(trimmed)) return true;
+  return false;
+}
+
+function formatDbErrorMessage(error: any, host: string, port: any): string {
+  const isPriv = isPrivateHost(host);
+  if (error.code === 'ETIMEDOUT') {
+    if (isPriv) {
+      return `Koneksi timeout (ETIMEDOUT) ke ${host}:${port}. Alamat '${host}' adalah IP jaringan privat lokal (LAN/intranet). Server aplikasi Cloud Run di cloud tidak dapat menjangkau IP privat lokal secara langsung. Silakan gunakan IP Publik dengan port-forwarding, domain, tunnel (seperti ngrok / Cloudflare Tunnel), atau upload file data secara langsung.`;
+    }
+    return `Koneksi timeout (ETIMEDOUT) ke ${host}:${port}. Pastikan database aktif dan port ${port} terbuka di firewall internet publik.`;
+  }
+  if (error.code === 'ECONNREFUSED') {
+    return `Koneksi ditolak (ECONNREFUSED) pada ${host}:${port}. Pastikan layanan MySQL sedang berjalan dan mengizinkan koneksi dari luar (bind-address 0.0.0.0).`;
+  }
+  if (error.code === 'ER_ACCESS_DENIED_ERROR') {
+    return `Akses ditolak (ER_ACCESS_DENIED_ERROR). Periksa kembali username dan password database MySQL.`;
+  }
+  if (error.code === 'ENOTFOUND') {
+    return `Host '${host}' tidak ditemukan (ENOTFOUND). Pastikan hostname atau alamat IP sudah benar.`;
+  }
+  return error.message || 'Gagal terhubung ke database';
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -33,22 +63,19 @@ async function startServer() {
     try {
       connection = await mysql.createConnection({
         host,
-        port: parseInt(port, 10),
-        user,
-        password,
-        database,
-        connectTimeout: 5000,
+        port: parseInt(port, 10) || 3306,
+        user: user || 'root',
+        password: password || '',
+        database: database || undefined,
+        connectTimeout: 4000,
         dateStrings: true
       });
       await connection.execute("SELECT 1");
       res.json({ success: true, message: "Koneksi berhasil." });
     } catch (error: any) {
-      console.error("Database test error:", error);
-      let errMsg = error.message;
-      if (error.code === 'ETIMEDOUT') {
-        errMsg = `Koneksi timeout (ETIMEDOUT). Pastikan database di ${host}:${port} dapat diakses dari internet publik (bukan IP lokal seperti 10.x.x.x atau 192.x.x.x).`;
-      }
-      res.status(500).json({ success: false, error: errMsg });
+      console.warn(`[DB Test] ${error.code || 'FAIL'}: ${error.message} (${host}:${port})`);
+      const errMsg = formatDbErrorMessage(error, host, port);
+      res.json({ success: false, error: errMsg, code: error.code });
     } finally {
       if (connection) {
         await connection.end();
@@ -63,15 +90,28 @@ async function startServer() {
     try {
       connection = await mysql.createConnection({
         host,
-        port: parseInt(port, 10),
-        user,
-        password,
-        database,
-        connectTimeout: 5000,
+        port: parseInt(port, 10) || 3306,
+        user: user || 'root',
+        password: password || '',
+        database: database || undefined,
+        connectTimeout: 4000,
         dateStrings: true
       });
 
       let query = `SELECT * FROM \`${table}\``;
+      if (table.toLowerCase() === 'stationlist') {
+        let rows;
+        try {
+          [rows] = await connection.query(`SELECT * FROM \`stationlist\``);
+        } catch (e1) {
+          try {
+            [rows] = await connection.query(`SELECT * FROM \`StationList\``);
+          } catch (e2) {
+            [rows] = await connection.query(`SELECT * FROM \`station_list\``);
+          }
+        }
+        return res.json({ success: true, data: rows });
+      }
       if (table === 'validdata') {
         query = `SELECT StationId, TimeStamp, Interpolation as Intp FROM \`${table}\``;
       }
@@ -106,12 +146,9 @@ async function startServer() {
       
       res.json({ success: true, data: rows });
     } catch (error: any) {
-      console.error("Database connection error:", error);
-      let errMsg = error.message;
-      if (error.code === 'ETIMEDOUT') {
-        errMsg = `Koneksi timeout (ETIMEDOUT). Pastikan database di ${host}:${port} dapat diakses dari internet publik (bukan IP lokal seperti 10.x.x.x atau 192.x.x.x).`;
-      }
-      res.status(500).json({ success: false, error: errMsg });
+      console.warn(`[DB Connect] ${error.code || 'FAIL'}: ${error.message} (${host}:${port})`);
+      const errMsg = formatDbErrorMessage(error, host, port);
+      res.json({ success: false, error: errMsg, code: error.code });
     } finally {
       if (connection) {
         await connection.end();
@@ -125,23 +162,20 @@ async function startServer() {
     try {
       connection = await mysql.createConnection({
         host,
-        port: parseInt(port, 10),
-        user,
-        password,
-        database,
-        connectTimeout: 5000,
+        port: parseInt(port, 10) || 3306,
+        user: user || 'root',
+        password: password || '',
+        database: database || undefined,
+        connectTimeout: 4000,
         dateStrings: true
       });
 
       const [rows] = await connection.execute(query, params || []);
       res.json({ success: true, data: rows });
     } catch (error: any) {
-      console.error("Database query error:", error);
-      let errMsg = error.message;
-      if (error.code === 'ETIMEDOUT') {
-        errMsg = `Koneksi timeout (ETIMEDOUT). Pastikan database di ${host}:${port} dapat diakses dari internet publik.`;
-      }
-      res.status(500).json({ success: false, error: errMsg });
+      console.warn(`[DB Query] ${error.code || 'FAIL'}: ${error.message} (${host}:${port})`);
+      const errMsg = formatDbErrorMessage(error, host, port);
+      res.json({ success: false, error: errMsg, code: error.code });
     } finally {
       if (connection) {
         await connection.end();

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download, ChevronDown, Search, Server, Radio } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subHours, subDays, subMonths, startOfDay, endOfDay } from 'date-fns';
+import { registerDbStations, getAllStations, syncStationListFromDb, findStationByNameOrId } from './tideStations';
 
 export default function ConnectView({ 
   onDataLoaded, 
@@ -13,9 +14,9 @@ export default function ConnectView({
 }) {
   const [host, setHost] = useState('10.10.140.19');
   const [port, setPort] = useState('3306');
-  const [user, setUser] = useState('');
+  const [user, setUser] = useState('root');
   const [password, setPassword] = useState('');
-  const [database, setDatabase] = useState('');
+  const [database, setDatabase] = useState('bako');
   
   const [selectedTable, setSelectedTable] = useState('data_vsat5');
   const [stationQuery, setStationQuery] = useState('');
@@ -32,8 +33,35 @@ export default function ConnectView({
   const [connStatus, setConnStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [timePresetMenuPos, setTimePresetMenuPos] = useState<{ x: number, y: number } | null>(null);
 
-  // Load saved credentials on mount
+  const isPrivateHost = (h: string) => {
+    if (!h) return false;
+    const trimmed = h.trim().toLowerCase();
+    return trimmed === 'localhost' || trimmed === '127.0.0.1' || trimmed === '::1' ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(trimmed) ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(trimmed) ||
+      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(trimmed);
+  };
+
+  // Load saved credentials & initial stations on mount
   useEffect(() => {
+    const initialList = getAllStations();
+    if (initialList.length > 0) {
+      setStations(initialList.map(s => ({ id: s.id, name: s.name })));
+    }
+
+    // Lakukan sync latar belakang jika ada kredensial tersimpan
+    syncStationListFromDb().then(updated => {
+      if (updated && updated.length > 0) {
+        setStations(updated.map(s => ({ id: s.id, name: s.name })));
+      }
+    });
+
+    const handleStationsUpdated = () => {
+      const updated = getAllStations();
+      setStations(updated.map(s => ({ id: s.id, name: s.name })));
+    };
+    window.addEventListener('tide_stations_updated', handleStationsUpdated);
+
     const saved = localStorage.getItem('tide_db_credentials');
     if (saved) {
       try {
@@ -45,6 +73,10 @@ export default function ConnectView({
         if (parsed.database) setDatabase(parsed.database);
       } catch (e) {}
     }
+
+    return () => {
+      window.removeEventListener('tide_stations_updated', handleStationsUpdated);
+    };
   }, []);
 
   useEffect(() => {
@@ -168,6 +200,7 @@ export default function ConnectView({
       const data = await res.json();
       if (data.success) {
         setConnStatus('success');
+        setError('');
         localStorage.setItem('tide_db_connected', 'true');
         onConnectionChange?.(true, { host, port, user, database, password });
         
@@ -178,21 +211,21 @@ export default function ConnectView({
             body: JSON.stringify({ host, port, user, password, database, table: 'stationlist', limit: 1000 })
           });
           const stationData = await stationRes.json();
-          if (stationData.success && stationData.data) {
-            const loadedStations = stationData.data.map((st: any) => ({
-              id: st.StationID,
-              name: st.StationName || st.StationID
-            })).filter((st: any) => st.id);
-            setStations(loadedStations);
+          if (stationData.success && Array.isArray(stationData.data)) {
+            registerDbStations(stationData.data);
+            const updated = getAllStations();
+            setStations(updated.map((s: any) => ({ id: s.id, name: s.name })));
           }
         } catch (e) {
           console.warn("Could not fetch station list:", e);
         }
       } else {
         setConnStatus('error');
+        setError(data.error || 'Gagal terhubung ke database.');
       }
-    } catch (e) {
+    } catch (e: any) {
       setConnStatus('error');
+      setError(e.message || 'Gagal menghubungi server.');
     } finally {
       setIsTesting(false);
     }
@@ -225,12 +258,16 @@ export default function ConnectView({
           body: JSON.stringify({ host, port, user, password, database, table: 'stationlist', limit: 1000 })
         });
         const stationData = await stationRes.json();
-        if (stationData.success && stationData.data) {
+        if (stationData.success && Array.isArray(stationData.data)) {
           stationData.data.forEach((st: any) => {
-            if (st.StationID) {
-              stationMap[st.StationID] = st;
+            const stId = st.StationID || st.StationId || st.stationid || st.id;
+            if (stId) {
+              stationMap[stId] = st;
             }
           });
+          registerDbStations(stationData.data);
+          const updated = getAllStations();
+          setStations(updated.map((s: any) => ({ id: s.id, name: s.name })));
         }
       } catch (e) {
         console.warn("Could not fetch station list:", e);
@@ -303,9 +340,16 @@ export default function ConnectView({
         });
 
         // Call station meta loader if we found a station ID and mapping
-        if (stationIdFound && stationMap[stationIdFound]) {
-            const st = stationMap[stationIdFound];
-            onStationMetaLoaded(st.StationName || stationIdFound, (st.Latitude || "").toString(), (st.Longitude || "").toString());
+        if (stationIdFound) {
+            if (stationMap[stationIdFound]) {
+                const st = stationMap[stationIdFound];
+                onStationMetaLoaded(st.StationName || stationIdFound, (st.Latitude || "").toString(), (st.Longitude || "").toString());
+            } else {
+                const found = findStationByNameOrId(stationIdFound);
+                if (found) {
+                    onStationMetaLoaded(found.name, found.lat.toString(), found.lon.toString());
+                }
+            }
         }
 
         setSuccessMsg(`Berhasil memuat ${mappedData.length} baris dari tabel ${selectedTable === 'data_vsat5' ? 'Raw Data (data_vsat5)' : 'Valid Data (validdata)'}`);
@@ -368,8 +412,8 @@ export default function ConnectView({
             )}
           </div>
           
-          <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
-            <div className="sm:col-span-6 md:col-span-7">
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+            <div className="sm:col-span-8">
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                 Alamat Host
               </label>
@@ -378,13 +422,13 @@ export default function ConnectView({
                   type="text" 
                   value={host} 
                   onChange={e => setHost(e.target.value)} 
-                  placeholder="e.g. 10.10.140.19 atau localhost"
+                  placeholder="e.g. 10.10.140.19 atau localhost atau domain.com"
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-100 transition-all placeholder:text-slate-400" 
                 />
               </div>
             </div>
 
-            <div className="sm:col-span-3 md:col-span-2">
+            <div className="sm:col-span-4">
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                 Port
               </label>
@@ -397,20 +441,99 @@ export default function ConnectView({
               />
             </div>
 
-            <div className="sm:col-span-3 md:col-span-3">
-              <button 
-                onClick={handleTestConnection}
-                disabled={isTesting}
-                className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-bold tracking-wide transition-all shadow-sm ${
-                  connStatus === 'success' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' :
-                  connStatus === 'error' ? 'bg-red-600 hover:bg-red-700 text-white' :
-                  'bg-sky-600 hover:bg-sky-700 text-white'
-                } disabled:opacity-70 disabled:cursor-not-allowed`}
-              >
-                {isTesting ? <RotateCw className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
-                {isTesting ? 'Testing...' : connStatus === 'success' ? 'Connected' : connStatus === 'error' ? 'Retry' : 'Connect'}
-              </button>
+            <div className="sm:col-span-4">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                Nama Database
+              </label>
+              <input 
+                type="text" 
+                value={database} 
+                onChange={e => setDatabase(e.target.value)} 
+                placeholder="bako"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-100 transition-all placeholder:text-slate-400" 
+              />
             </div>
+
+            <div className="sm:col-span-4">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                User MySQL
+              </label>
+              <input 
+                type="text" 
+                value={user} 
+                onChange={e => setUser(e.target.value)} 
+                placeholder="root"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-100 transition-all placeholder:text-slate-400" 
+              />
+            </div>
+
+            <div className="sm:col-span-4">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                Password
+              </label>
+              <input 
+                type="password" 
+                value={password} 
+                onChange={e => setPassword(e.target.value)} 
+                placeholder="••••••••"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-700 outline-none focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-100 transition-all placeholder:text-slate-400" 
+              />
+            </div>
+          </div>
+
+          {isPrivateHost(host) && (
+            <div className="mt-4 p-3.5 rounded-xl bg-amber-50 border border-amber-200/90 text-amber-800 text-xs flex items-start gap-3">
+              <AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18} />
+              <div className="space-y-1">
+                <div className="font-bold text-amber-900">Alamat IP Jaringan Lokal/Privat Terdeteksi ({host})</div>
+                <p className="text-amber-800 leading-relaxed">
+                  Aplikasi ini berjalan di container cloud (Google Cloud Run) dan tidak dapat terhubung langsung ke IP privat/intranet lokal (10.x.x.x / 192.168.x.x / 127.0.0.1) tanpa tunnel jaringan.
+                </p>
+                <div className="pt-1 text-amber-900 font-medium">
+                  <strong>Opsi Menghubungkan:</strong>
+                  <ul className="list-disc pl-4 mt-0.5 space-y-0.5 text-amber-800">
+                    <li>Gunakan tunnel seperti <strong>ngrok</strong> di server lokal Anda (contoh: <code>ngrok tcp 3306</code>) lalu masukkan host & port ngrok di atas.</li>
+                    <li>Gunakan IP Publik / domain server yang port 3306-nya telah di-forward / dibuka di firewall.</li>
+                    <li>Atau unggah data langsung via menu <strong>Import CSV</strong> untuk analisis instan tanpa perlu koneksi database langsung.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {connStatus === 'error' && error && (
+            <div className="mt-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-start gap-3">
+              <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={18} />
+              <div>
+                <div className="font-bold text-red-900">Koneksi Database Gagal</div>
+                <p className="text-red-700 mt-0.5 leading-relaxed">{error}</p>
+              </div>
+            </div>
+          )}
+
+          {connStatus === 'success' && (
+            <div className="mt-4 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start gap-3">
+              <CheckCircle2 className="text-emerald-600 shrink-0 mt-0.5" size={18} />
+              <div>
+                <div className="font-bold text-emerald-900">Koneksi Database Berhasil</div>
+                <p className="text-emerald-700 mt-0.5">Terhubung ke database {database || 'MySQL'} di {host}:{port}. Silakan pilih tabel dan stasiun di bawah untuk menarik data.</p>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-5 flex justify-end">
+            <button 
+              onClick={handleTestConnection}
+              disabled={isTesting}
+              className={`flex items-center justify-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold tracking-wide transition-all shadow-sm ${
+                connStatus === 'success' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' :
+                connStatus === 'error' ? 'bg-red-600 hover:bg-red-700 text-white' :
+                'bg-sky-600 hover:bg-sky-700 text-white'
+              } disabled:opacity-70 disabled:cursor-not-allowed`}
+            >
+              {isTesting ? <RotateCw className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
+              {isTesting ? 'Menguji Koneksi...' : connStatus === 'success' ? 'Koneksi Terverifikasi (Uji Lagi)' : connStatus === 'error' ? 'Coba Hubungkan Ulang' : 'Uji & Simpan Koneksi'}
+            </button>
           </div>
         </div>
 
@@ -477,7 +600,17 @@ export default function ConnectView({
                        <div 
                          key={st.id} 
                          className={`px-3 py-2 text-sm cursor-pointer hover:bg-sky-50 ${stationQuery === st.id ? 'bg-sky-50 font-bold text-sky-700' : 'text-slate-700'}`}
-                         onClick={() => { setStationQuery(st.id); setIsStationDropdownOpen(false); setStationSearch(''); }}
+                         onClick={() => { 
+  setStationQuery(st.id); 
+  setIsStationDropdownOpen(false); 
+  setStationSearch(""); 
+  const found = findStationByNameOrId(st.id) || findStationByNameOrId(st.name);
+  if (found) {
+    onStationMetaLoaded(found.name, found.lat.toString(), found.lon.toString());
+  } else {
+    onStationMetaLoaded(st.name, "", "");
+  }
+}}
                        >
                          {st.name} <span className="text-slate-400 text-xs ml-1">({st.id})</span>
                        </div>

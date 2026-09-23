@@ -48,6 +48,7 @@ import ConnectView from './ConnectView';
 import SummarizeView from './SummarizeView';
 import UtilitiesView from './UtilitiesView';
 import TsunamiAnalysisView from './TsunamiAnalysisView';
+import { getAllStations, searchStations, findStationByNameOrId, registerDbStations, syncStationListFromDb, TideStation } from './tideStations';
 
 import { 
   ComposedChart,
@@ -744,6 +745,13 @@ export default function App() {
   const stationNameRef = useRef("");
   const stationLatRef = useRef("");
   const stationLonRef = useRef("");
+  const [stationLat, setStationLat] = useState("");
+  const [stationLon, setStationLon] = useState("");
+  const [stationAutoFilledToast, setStationAutoFilledToast] = useState<string | null>(null);
+  const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
+  const [selectedTitleSuggestionIndex, setSelectedTitleSuggestionIndex] = useState(-1);
+  const [showModalTitleSuggestions, setShowModalTitleSuggestions] = useState(false);
+  const [selectedModalSuggestionIndex, setSelectedModalSuggestionIndex] = useState(-1);
 
   // Configuration State
   const [availableSensors, setAvailableSensors] = useState<string[]>([]);
@@ -853,7 +861,37 @@ export default function App() {
 
   const [dataLengthWarning, setDataLengthWarning] = useState<string | null>(null);
   const [autoDiagnostics, setAutoDiagnostics] = useState<{ rayleighPassed: number, totalTested: number, snrPassed: number } | null>(null);
-  const [chartTitle, setChartTitle] = useState("Tide Analysis Visualization");
+  const [chartTitle, setChartTitle] = useState("");
+
+  const handleSelectStation = (station: { id: string; name: string; lat: number | string; lon: number | string }) => {
+    const latStr = String(station.lat !== undefined && station.lat !== null ? station.lat : "");
+    const lonStr = String(station.lon !== undefined && station.lon !== null ? station.lon : "");
+    setChartTitle(station.name);
+    stationNameRef.current = station.name;
+    stationLatRef.current = latStr;
+    stationLonRef.current = lonStr;
+    setStationLat(latStr);
+    setStationLon(lonStr);
+    setShowTitleSuggestions(false);
+    setShowModalTitleSuggestions(false);
+
+    const msg = `Stasiun ${station.name}: Lat ${latStr}, Lon ${lonStr} berhasil diisi otomatis sesuai stationlist.`;
+    setStationAutoFilledToast(msg);
+    setTimeout(() => {
+      setStationAutoFilledToast(prev => prev === msg ? null : prev);
+    }, 4500);
+  };
+
+  // Sinkronisasi daftar stasiun dari tabel stationlist database pada startup
+  useEffect(() => {
+    syncStationListFromDb();
+  }, []);
+
+  const titleSuggestions = useMemo(() => {
+    const query = (chartTitle || stationNameRef.current || "").trim();
+    if (!query) return [];
+    return searchStations(query, 12);
+  }, [chartTitle]);
 
   // Dynamic README Context for Github Sync
   const [readmeContent, setReadmeContent] = useState<string>('Memuat dokumentasi...');
@@ -3186,18 +3224,143 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
 
         <div className="mt-auto space-y-4 w-full">
           {isSidebarOpen && (
-            <div className="space-y-1.5 pt-4 border-t border-slate-100">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Custom Chart Title</label>
-              <input 
-                type="text" 
-                value={chartTitle}
-                onChange={(e) => {
-                  setChartTitle(e.target.value);
-                  stationNameRef.current = e.target.value;
-                }}
-                placeholder="Enter chart name..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 placeholder:text-slate-400 mb-2"
-              />
+            <div className="space-y-1.5 pt-4 border-t border-slate-100 relative">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-display">Custom Chart Title</label>
+                {(stationLat || stationLon || stationLatRef.current || stationLonRef.current) && (
+                  <span className="text-[9px] font-bold text-sky-600 bg-sky-50 border border-sky-100 px-1.5 py-0.5 rounded-full" title={`Latitude: ${stationLat || stationLatRef.current || '-'}, Longitude: ${stationLon || stationLonRef.current || '-'}`}>
+                    📍 Stasiun Terisi
+                  </span>
+                )}
+              </div>
+
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={chartTitle}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setChartTitle(val);
+                    stationNameRef.current = val;
+                    setShowTitleSuggestions(true);
+                    setSelectedTitleSuggestionIndex(-1);
+                  }}
+                  onFocus={() => {
+                    if (chartTitle.trim().length >= 1) {
+                      setShowTitleSuggestions(true);
+                    }
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setShowTitleSuggestions(false), 250);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                      if (!showTitleSuggestions && titleSuggestions.length > 0) {
+                        setShowTitleSuggestions(true);
+                        return;
+                      }
+                      e.preventDefault();
+                      setSelectedTitleSuggestionIndex(prev => Math.min(prev + 1, titleSuggestions.length - 1));
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setSelectedTitleSuggestionIndex(prev => Math.max(prev - 1, -1));
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (titleSuggestions.length > 0) {
+                        const targetStation = (selectedTitleSuggestionIndex >= 0 && titleSuggestions[selectedTitleSuggestionIndex])
+                          ? titleSuggestions[selectedTitleSuggestionIndex]
+                          : titleSuggestions[0];
+                        handleSelectStation(targetStation);
+                      } else {
+                        const found = findStationByNameOrId(chartTitle);
+                        if (found) {
+                          handleSelectStation(found);
+                        } else {
+                          setShowTitleSuggestions(false);
+                        }
+                      }
+                    } else if (e.key === 'Escape') {
+                      setShowTitleSuggestions(false);
+                    }
+                  }}
+                  placeholder="Ketik nama stasiun pasut..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100 placeholder:text-slate-400 mb-1"
+                />
+
+                {/* Autocomplete Dropdown List */}
+                {showTitleSuggestions && chartTitle.trim().length >= 1 && titleSuggestions.length > 0 && (
+                  <div className="absolute left-0 bottom-full mb-1.5 w-full bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden z-50 max-h-60 overflow-y-auto">
+                    <div className="px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-500 flex items-center justify-between">
+                      <span>Saran Stasiun Pasut ({titleSuggestions.length})</span>
+                      <span className="text-[9px] text-sky-600 font-bold">Tekan Enter ↵</span>
+                    </div>
+                    <div className="p-1 space-y-0.5">
+                      {titleSuggestions.map((st, idx) => {
+                        const isSelected = idx === selectedTitleSuggestionIndex || (selectedTitleSuggestionIndex === -1 && idx === 0);
+                        return (
+                          <div
+                            key={st.id + '-' + idx}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              handleSelectStation(st);
+                            }}
+                            onMouseEnter={() => setSelectedTitleSuggestionIndex(idx)}
+                            className={`px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors text-left flex flex-col gap-0.5 ${
+                              isSelected ? 'bg-sky-50 text-sky-900 border border-sky-100' : 'hover:bg-slate-50 text-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold text-xs truncate">{st.name}</span>
+                              {st.isFromStationList ? (
+                                <span className="text-[9px] font-bold px-1.5 py-0.2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
+                                  stationlist
+                                </span>
+                              ) : (
+                                <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
+                                  {st.id}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-slate-400">
+                              <span className="truncate max-w-[110px]">{st.region}</span>
+                              <span className="font-mono text-[9px] text-slate-500">
+                                {st.lat.toFixed(4)}°, {st.lon.toFixed(4)}°
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Station Coordinates Indicator */}
+              {(stationLat || stationLon || stationLatRef.current || stationLonRef.current) && (
+                <div className="px-2 py-1.5 bg-slate-50 border border-slate-200/70 rounded-lg text-[10px] flex items-center justify-between text-slate-600 mb-1">
+                  <div className="flex items-center gap-1 font-mono text-[9px] truncate">
+                    <span className="text-slate-400 font-sans">Lat:</span>
+                    <span className="font-bold text-slate-700">{stationLat || stationLatRef.current || '-'}</span>
+                    <span className="text-slate-400 font-sans ml-1">Lon:</span>
+                    <span className="font-bold text-slate-700">{stationLon || stationLonRef.current || '-'}</span>
+                  </div>
+                  <button
+                    onClick={() => setShowMetadataModal(true)}
+                    className="text-sky-600 hover:text-sky-700 font-bold text-[9px] ml-1 shrink-0 cursor-pointer"
+                    title="Edit Metadata Stasiun"
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
+
+              {/* Notification Toast when auto-filled */}
+              {stationAutoFilledToast && (
+                <div className="px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-[10px] text-emerald-800 font-medium leading-tight mb-2 flex items-start gap-1.5 shadow-sm animate-pulse">
+                  <span className="text-emerald-500 shrink-0 font-bold">✓</span>
+                  <span>{stationAutoFilledToast}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -3370,7 +3533,7 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                     </div>
                 </div>
             )}
-            {activeTab === 'tsunami' && <TsunamiAnalysisView records={records} selectedSensor={selectedSensor} availableSensors={availableSensors} stationName={chartTitle} stationLat={stationLatRef.current} stationLon={stationLonRef.current} />}
+            {activeTab === 'tsunami' && <TsunamiAnalysisView records={records} selectedSensor={selectedSensor} availableSensors={availableSensors} stationName={chartTitle || stationNameRef.current} stationLat={stationLat || stationLatRef.current} stationLon={stationLon || stationLonRef.current} />}
             {activeTab === 'summarize' && <SummarizeView />}
             {activeTab === 'utilities' && <UtilitiesView />}
             {activeTab === 'connect' && (
@@ -3409,6 +3572,8 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                       if (name) setChartTitle(name);
                       stationLatRef.current = lat;
                       stationLonRef.current = lon;
+                      setStationLat(lat);
+                      setStationLon(lon);
                   }}
                 />
             )}
@@ -3594,28 +3759,125 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                           </div>
                       </div>
                       <div className="p-6 space-y-4">
-                          <div className="space-y-1.5">
-                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Nama Stasiun</label>
+                          <div className="space-y-1.5 relative">
+                              <div className="flex items-center justify-between px-1">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-display">Nama Stasiun</label>
+                                {(stationLat || stationLon || stationLatRef.current || stationLonRef.current) && (
+                                  <span className="text-[9px] font-bold text-sky-600 bg-sky-50 px-1.5 py-0.5 rounded-full">
+                                    📍 Koordinat Tersedia
+                                  </span>
+                                )}
+                              </div>
                               <input 
                                   type="text" 
-                                  defaultValue={stationNameRef.current || chartTitle}
+                                  value={chartTitle || stationNameRef.current}
                                   onChange={(e) => {
-                                      stationNameRef.current = e.target.value;
-                                      if (e.target.value) {
-                                          setChartTitle(e.target.value);
-                                      }
+                                      const val = e.target.value;
+                                      stationNameRef.current = val;
+                                      setChartTitle(val);
+                                      setShowModalTitleSuggestions(true);
+                                      setSelectedModalSuggestionIndex(-1);
                                   }}
-                                  placeholder="Contoh: Stasiun Tanjung Priok"
+                                  onFocus={() => {
+                                    if ((chartTitle || stationNameRef.current).trim().length >= 1) {
+                                      setShowModalTitleSuggestions(true);
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    setTimeout(() => setShowModalTitleSuggestions(false), 250);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'ArrowDown') {
+                                      if (!showModalTitleSuggestions && titleSuggestions.length > 0) {
+                                        setShowModalTitleSuggestions(true);
+                                        return;
+                                      }
+                                      e.preventDefault();
+                                      setSelectedModalSuggestionIndex(prev => Math.min(prev + 1, titleSuggestions.length - 1));
+                                    } else if (e.key === 'ArrowUp') {
+                                      e.preventDefault();
+                                      setSelectedModalSuggestionIndex(prev => Math.max(prev - 1, -1));
+                                    } else if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      if (titleSuggestions.length > 0) {
+                                        const targetStation = (selectedModalSuggestionIndex >= 0 && titleSuggestions[selectedModalSuggestionIndex])
+                                          ? titleSuggestions[selectedModalSuggestionIndex]
+                                          : titleSuggestions[0];
+                                        handleSelectStation(targetStation);
+                                        setShowModalTitleSuggestions(false);
+                                      } else {
+                                        const query = chartTitle || stationNameRef.current;
+                                        const found = findStationByNameOrId(query);
+                                        if (found) {
+                                          handleSelectStation(found);
+                                        }
+                                        setShowModalTitleSuggestions(false);
+                                      }
+                                    } else if (e.key === 'Escape') {
+                                      setShowModalTitleSuggestions(false);
+                                    }
+                                  }}
+                                  placeholder="Ketik nama stasiun pasut (misal: Tanjung Priok)..."
                                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
                               />
+
+                              {/* Autocomplete Dropdown List for Modal */}
+                              {showModalTitleSuggestions && (chartTitle || stationNameRef.current).trim().length >= 1 && titleSuggestions.length > 0 && (
+                                <div className="absolute left-0 top-full mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden z-50 max-h-56 overflow-y-auto">
+                                  <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-500 flex items-center justify-between">
+                                    <span>Saran Stasiun Pasut ({titleSuggestions.length})</span>
+                                    <span className="text-[9px] text-sky-600 font-bold">Tekan Enter ↵</span>
+                                  </div>
+                                  <div className="p-1 space-y-0.5">
+                                    {titleSuggestions.map((st, idx) => {
+                                      const isSelected = idx === selectedModalSuggestionIndex || (selectedModalSuggestionIndex === -1 && idx === 0);
+                                      return (
+                                        <div
+                                          key={st.id + '-' + idx}
+                                          onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            handleSelectStation(st);
+                                            setShowModalTitleSuggestions(false);
+                                          }}
+                                          onMouseEnter={() => setSelectedModalSuggestionIndex(idx)}
+                                          className={`px-3 py-2 rounded-lg cursor-pointer transition-colors text-left flex flex-col gap-0.5 ${
+                                            isSelected ? 'bg-sky-50 text-sky-900 border border-sky-100' : 'hover:bg-slate-50 text-slate-700'
+                                          }`}
+                                        >
+                                          <div className="flex items-center justify-between gap-1">
+                                            <span className="font-bold text-xs truncate">{st.name}</span>
+                                            {st.isFromStationList ? (
+                                              <span className="text-[9px] font-bold px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
+                                                stationlist
+                                              </span>
+                                            ) : (
+                                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
+                                                {st.id}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                            <span className="truncate">{st.region}</span>
+                                            <span className="font-mono text-[10px] text-slate-500">
+                                              Lat: {st.lat.toFixed(4)}°, Lon: {st.lon.toFixed(4)}°
+                                            </span>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
                           </div>
                           <div className="space-y-1.5">
                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Latitude (Degrees)</label>
                               <input 
-                                  type="number" 
-                                  step="0.000001"
-                                  defaultValue={stationLatRef.current}
-                                  onChange={(e) => stationLatRef.current = e.target.value}
+                                  type="text" 
+                                  value={stationLat || stationLatRef.current || ""}
+                                  onChange={(e) => {
+                                      setStationLat(e.target.value);
+                                      stationLatRef.current = e.target.value;
+                                  }}
                                   placeholder="Contoh: -6.103000"
                                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
                               />
@@ -3623,10 +3885,12 @@ Dokumen dan pemodelan ini dirancang mengikuti pedoman IHO (International Hydrogr
                           <div className="space-y-1.5">
                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 font-display">Longitude (Degrees)</label>
                               <input 
-                                  type="number" 
-                                  step="0.000001"
-                                  defaultValue={stationLonRef.current}
-                                  onChange={(e) => stationLonRef.current = e.target.value}
+                                  type="text" 
+                                  value={stationLon || stationLonRef.current || ""}
+                                  onChange={(e) => {
+                                      setStationLon(e.target.value);
+                                      stationLonRef.current = e.target.value;
+                                  }}
                                   placeholder="Contoh: 106.883000"
                                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
                               />
@@ -4809,7 +5073,11 @@ function DashboardView({ records, z0, trend, datums, title, availableSensors, se
     <div className="space-y-6">
       <div className="flex flex-col xl:flex-row gap-6">
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-5">
-            <StatCard label="Z0 (MSL)" value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} trend="Least Squares Fit" />
+            <StatCard 
+              label="Z0 (MSL)" 
+              value={`${isNaN(z0) ? "---" : z0.toFixed(3)} m`} 
+              trend="Least Squares Fit" 
+            />
             <div className="relative group h-full">
                 <StatCard 
                   label="Sea Level Trend" 
@@ -7781,14 +8049,19 @@ function CombinationModal({ availableSensors, onApply, onCancel, currentSettings
     );
 }
 
-function StatCard({ label, value, trend, trendColor, valueClassName }: { label: string, value: React.ReactNode, trend: string, trendColor?: string, valueClassName?: string }) {
+function StatCard({ label, value, trend, trendColor, valueClassName, rightElement }: { label: string, value: React.ReactNode, trend: string, trendColor?: string, valueClassName?: string, rightElement?: React.ReactNode }) {
   return (
-    <div className="relative h-full min-h-[140px] overflow-hidden bg-white p-5 lg:p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-lg transition-all flex flex-col items-center justify-center gap-1 group text-center">
-      <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-sky-100/50 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
-      <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-indigo-50/40 to-transparent rounded-tr-full -ml-4 -mb-4 transition-transform group-hover:scale-110" />
+    <div className="relative h-full min-h-[140px] bg-white p-5 lg:p-6 rounded-2xl border border-slate-200/60 shadow-sm hover:shadow-lg transition-all flex flex-col items-center justify-center gap-1 group text-center">
+      <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-sky-100/50 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-indigo-50/40 to-transparent rounded-tr-full -ml-4 -mb-4 transition-transform group-hover:scale-110" />
+      </div>
       
       <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest font-display z-10 mb-1">{label}</div>
-      <div className={cn("text-4xl xl:text-[2.5rem] 2xl:text-5xl leading-tight font-black text-transparent bg-clip-text bg-gradient-to-br from-sky-600 to-indigo-600 font-display tracking-tighter drop-shadow-sm z-10 break-words", valueClassName)}>{value}</div>
+      <div className="flex items-center justify-center gap-3 sm:gap-4 z-10 w-full max-w-full">
+        <div className={cn("text-3xl sm:text-4xl xl:text-[2.35rem] 2xl:text-5xl leading-tight font-black text-transparent bg-clip-text bg-gradient-to-br from-sky-600 to-indigo-600 font-display tracking-tighter drop-shadow-sm break-words", valueClassName)}>{value}</div>
+        {rightElement}
+      </div>
       <div className={cn("text-[11px] font-bold z-10 mt-3 bg-slate-50/80 px-3 py-1 rounded-full border border-slate-100 whitespace-nowrap", trendColor || "text-slate-400")}>{trend}</div>
     </div>
   );
