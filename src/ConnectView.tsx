@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download, ChevronDown, Search, Server, Radio } from 'lucide-react';
+import { Database, AlertCircle, CheckCircle2, RotateCw, Table as TableIcon, Calendar, MapPin, Download, ChevronDown, Search, Server, Radio, Wrench, AlertTriangle, ShieldCheck, Terminal, Copy, Check, Sparkles, PlusCircle } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subHours, subDays, subMonths, startOfDay, endOfDay } from 'date-fns';
 import { registerDbStations, getAllStations, syncStationListFromDb, findStationByNameOrId } from './tideStations';
 
@@ -32,6 +32,18 @@ export default function ConnectView({
   const [successMsg, setSuccessMsg] = useState('');
   const [connStatus, setConnStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [timePresetMenuPos, setTimePresetMenuPos] = useState<{ x: number, y: number } | null>(null);
+
+  // Table Repair & Maintenance States
+  const [isRepairing, setIsRepairing] = useState(false);
+  const [isCreatingTable, setIsCreatingTable] = useState(false);
+  const [isCrashedError, setIsCrashedError] = useState(false);
+  const [tableNotFound, setTableNotFound] = useState(false);
+  const [repairReport, setRepairReport] = useState<{ message: string, details?: any } | null>(null);
+  const [showToolsPanel, setShowToolsPanel] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+
+  const isLocalhostApp = typeof window !== 'undefined' && 
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '0.0.0.0');
 
   const isPrivateHost = (h: string) => {
     if (!h) return false;
@@ -291,8 +303,11 @@ export default function ConnectView({
       if (data.success) {
         localStorage.setItem('tide_db_connected', 'true');
         onConnectionChange?.(true, { host, port, user, database, password });
+        setIsCrashedError(false);
+        setTableNotFound(false);
+
         if (!data.data || data.data.length === 0) {
-          setError('Tabel kosong atau tidak ditemukan data yang sesuai kriteria.');
+          setError(`Tabel '${selectedTable}' kosong atau tidak ditemukan baris data yang cocok dengan filter yang dipilih.`);
           setIsLoading(false);
           return;
         }
@@ -300,7 +315,7 @@ export default function ConnectView({
         let stationIdFound = "";
         
         // Map database result to format expected by App.tsx
-        // App.tsx expects objects like { Timestamp: 'yyyy-MM-dd HH:mm:ss', Sensor1: value, Sensor2: value }
+        // App.tsx expects objects like { Timestamp: 'yyyy-MM-dd HH:mm:ss', Sensor1: value, Sensor2: value, Intp: value, ... }
         const mappedData = data.data.map((row: any) => {
           const newRow: any = {};
           
@@ -312,7 +327,6 @@ export default function ConnectView({
           if (rawTs) {
              let tsStr = "";
              if (rawTs instanceof Date) {
-                 // Format manually to standard SQL format
                  tsStr = format(rawTs, 'yyyy-MM-dd HH:mm:ss');
              } else {
                  tsStr = String(rawTs);
@@ -320,8 +334,19 @@ export default function ConnectView({
              newRow['Timestamp'] = tsStr;
           }
           
-          // Determine generic sensor columns from row keys. Exclude RecId, StationID, TimeStamp, ErCd...
-          const excludeKeys = ['RecId', 'StationID', 'StationId', 'TimeStamp', 'Timestamp', 'CreateData', 'CreateBy', 'Last_Update', 'UpdateBy', 'Prediction', 'Source', 'Operator', 'Remark', 'Interpolation'];
+          // Map Intp and combination if present in validdata / validdata2
+          if (row.Intp !== undefined && row.Intp !== null) {
+             newRow['Intp'] = row.Intp;
+          } else if (row.Interpolation !== undefined && row.Interpolation !== null && selectedTable !== 'data_vsat5') {
+             newRow['Intp'] = row.Interpolation;
+          }
+          
+          if (row.combination !== undefined && row.combination !== null) {
+             newRow['combination'] = row.combination;
+          }
+
+          // Determine generic sensor columns from row keys. Exclude metadata columns
+          const excludeKeys = ['RecId', 'StationID', 'StationId', 'TimeStamp', 'Timestamp', 'CreateData', 'CreateBy', 'Last_Update', 'UpdateBy', 'Prediction', 'Source', 'Operator', 'Remark', 'Interpolation', 'combination', 'Intp'];
           
           Object.keys(row).forEach(k => {
              if (!excludeKeys.includes(k) && !k.startsWith('ErCd')) {
@@ -352,24 +377,138 @@ export default function ConnectView({
             }
         }
 
-        setSuccessMsg(`Berhasil memuat ${mappedData.length} baris dari tabel ${selectedTable === 'data_vsat5' ? 'Raw Data (data_vsat5)' : 'Valid Data (validdata)'}`);
+        const tableNames: Record<string, string> = {
+          data_vsat5: 'Raw Data (data_vsat5)',
+          validdata: 'Valid Data (validdata)',
+          validdata2: 'Valid Data 2 (validdata2)'
+        };
+        const currentTableLabel = tableNames[selectedTable] || selectedTable;
+
+        if (data.autoRepaired) {
+          setSuccessMsg(data.repairNotice || `Tabel ${currentTableLabel} otomatis diperbaiki dan berhasil memuat ${mappedData.length} baris data!`);
+        } else {
+          setSuccessMsg(`Berhasil memuat ${mappedData.length} baris dari tabel ${currentTableLabel}`);
+        }
         
-        // Find default sensor Name (usually Sensor1)
+        // Find default sensor Name (usually Sensor1, or Intp, or combination)
         const sampleRow = mappedData[0] || {};
         const sensorColumns = Object.keys(sampleRow).filter(k => k !== 'Timestamp');
         
+        let preferredSensor = '';
+        if (sensorColumns.includes('Sensor1') && mappedData.some((r: any) => r.Sensor1 != null && r.Sensor1 !== '')) {
+          preferredSensor = 'Sensor1';
+        } else if (sensorColumns.includes('Intp') && mappedData.some((r: any) => r.Intp != null && r.Intp !== '')) {
+          preferredSensor = 'Intp';
+        } else if (sensorColumns.includes('combination') && mappedData.some((r: any) => r.combination != null && r.combination !== '')) {
+          preferredSensor = 'combination';
+        } else {
+          preferredSensor = sensorColumns.find((c: any) => mappedData.some((r: any) => r[c] != null && r[c] !== '')) || sensorColumns[0] || 'Sensor1';
+        }
+        
         setTimeout(() => {
-            onDataLoaded(mappedData, sensorColumns.includes('Sensor1') ? 'Sensor1' : sensorColumns[0]);
+            onDataLoaded(mappedData, preferredSensor);
         }, 1500);
 
       } else {
-        setError(data.error || 'Gagal terhubung ke database.');
+        const errMsg = data.error || 'Gagal terhubung ke database.';
+        setError(errMsg);
+        if (data.isCrashedTable || errMsg.toLowerCase().includes('marked as crashed') || errMsg.toLowerCase().includes('should be repaired')) {
+          setIsCrashedError(true);
+        }
+        if (data.tableNotFound || data.code === 'ER_NO_SUCH_TABLE') {
+          setTableNotFound(true);
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Terjadi kesalahan jaringan.');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleRepairTable = async (tableToRepair = selectedTable, mode = 'extended') => {
+    setIsRepairing(true);
+    setRepairReport(null);
+    setError('');
+    saveCredentials();
+
+    try {
+      const res = await fetch('/api/db/repair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host,
+          port,
+          user,
+          password,
+          database,
+          table: tableToRepair,
+          mode
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setIsCrashedError(false);
+        setRepairReport({
+          message: data.message || `Perbaikan tabel ${tableToRepair} selesai.`,
+          details: data.repairResult
+        });
+        setSuccessMsg(`Tabel '${tableToRepair}' berhasil diperbaiki. Mengambil ulang data...`);
+        // Otomatis tarik data kembali
+        setTimeout(() => {
+          handleFetchData();
+        }, 1200);
+      } else {
+        setError(data.error || `Gagal memperbaiki tabel ${tableToRepair}.`);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Gagal mengirim permintaan perbaikan tabel.');
+    } finally {
+      setIsRepairing(false);
+    }
+  };
+
+  const handleCreateTable = async (targetTable = selectedTable) => {
+    setIsCreatingTable(true);
+    setError('');
+    saveCredentials();
+
+    try {
+      const res = await fetch('/api/db/create-table', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host,
+          port,
+          user,
+          password,
+          database,
+          table: targetTable
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setTableNotFound(false);
+        setSuccessMsg(data.message || `Tabel '${targetTable}' berhasil dibuat di basis data ${database || 'bako'}.`);
+        setTimeout(() => {
+          handleFetchData();
+        }, 800);
+      } else {
+        setError(data.error || `Gagal membuat tabel ${targetTable}.`);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Gagal mengirim perintah pembuatan tabel.');
+    } finally {
+      setIsCreatingTable(false);
+    }
+  };
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCmd(id);
+    setTimeout(() => setCopiedCmd(null), 2500);
   };
 
   return (
@@ -481,7 +620,40 @@ export default function ConnectView({
             </div>
           </div>
 
-          {isPrivateHost(host) && (
+          {isLocalhostApp ? (
+            <div className="mt-4 p-3.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 animate-pulse"></span>
+                <div>
+                  <span className="font-bold text-slate-800">Mode Server Lokal (Localhost):</span>{' '}
+                  <span className="text-slate-600">Aplikasi berjalan pada server lokal. Koneksi langsung ke database MySQL pada mesin ini didukung penuh.</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setHost('localhost')}
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-bold transition border ${host === 'localhost' ? 'bg-sky-600 text-white border-sky-600' : 'bg-white hover:bg-sky-100 text-sky-700 border-sky-200'}`}
+                >
+                  localhost
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHost('127.0.0.1')}
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-bold transition border ${host === '127.0.0.1' ? 'bg-sky-600 text-white border-sky-600' : 'bg-white hover:bg-sky-100 text-sky-700 border-sky-200'}`}
+                >
+                  127.0.0.1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHost('10.10.140.19')}
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-bold transition border ${host === '10.10.140.19' ? 'bg-sky-600 text-white border-sky-600' : 'bg-white hover:bg-sky-100 text-sky-700 border-sky-200'}`}
+                >
+                  10.10.140.19
+                </button>
+              </div>
+            </div>
+          ) : isPrivateHost(host) && (
             <div className="mt-4 p-3.5 rounded-xl bg-amber-50 border border-amber-200/90 text-amber-800 text-xs flex items-start gap-3">
               <AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18} />
               <div className="space-y-1">
@@ -492,6 +664,7 @@ export default function ConnectView({
                 <div className="pt-1 text-amber-900 font-medium">
                   <strong>Opsi Menghubungkan:</strong>
                   <ul className="list-disc pl-4 mt-0.5 space-y-0.5 text-amber-800">
+                    <li>Jalankan aplikasi di komputer lokal Anda menggunakan <code>Start-Tide-Tools.bat</code> atau <code>npm run dev</code> untuk terhubung langsung ke localhost.</li>
                     <li>Gunakan tunnel seperti <strong>ngrok</strong> di server lokal Anda (contoh: <code>ngrok tcp 3306</code>) lalu masukkan host & port ngrok di atas.</li>
                     <li>Gunakan IP Publik / domain server yang port 3306-nya telah di-forward / dibuka di firewall.</li>
                     <li>Atau unggah data langsung via menu <strong>Import CSV</strong> untuk analisis instan tanpa perlu koneksi database langsung.</li>
@@ -539,7 +712,18 @@ export default function ConnectView({
 
         {/* Query Target Section */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-          <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4">Query to Database</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest">Query to Database</h2>
+            <button
+              type="button"
+              onClick={() => setShowToolsPanel(!showToolsPanel)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 transition"
+              title="Periksa atau perbaiki tabel MyISAM (REPAIR TABLE)"
+            >
+              <Wrench size={13} />
+              <span>{showToolsPanel ? 'Sembunyikan Menu Perbaikan' : 'Pemeliharaan / Perbaiki Tabel'}</span>
+            </button>
+          </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -548,12 +732,21 @@ export default function ConnectView({
                 <TableIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                 <select 
                   value={selectedTable} 
-                  onChange={e => setSelectedTable(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-500 appearance-none"
+                  onChange={e => {
+                    setSelectedTable(e.target.value);
+                    setError('');
+                    setIsCrashedError(false);
+                    setTableNotFound(false);
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-sky-500 appearance-none cursor-pointer"
                 >
                   <option value="data_vsat5">Raw Data (data_vsat5)</option>
                   <option value="validdata">Valid Data (validdata)</option>
+                  <option value="validdata2">Valid Data 2 (validdata2)</option>
                 </select>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                  <ChevronDown size={16} />
+                </div>
               </div>
             </div>
             
@@ -642,10 +835,163 @@ export default function ConnectView({
             </div>
 
           </div>
+
+          {/* Table Not Found (ER_NO_SUCH_TABLE) Box */}
+          {tableNotFound && (
+            <div className="mt-5 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="text-amber-600 mt-0.5 shrink-0" size={18} />
+                <div className="flex-1 space-y-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-amber-900">Tabel '{selectedTable}' Belum Ada di Database</h4>
+                    <p className="text-amber-800 mt-0.5">
+                      Tabel <code className="font-mono font-bold bg-amber-100 px-1 py-0.5 rounded">{selectedTable}</code> belum ada dalam skema basis data <code className="font-mono font-bold bg-amber-100 px-1 py-0.5 rounded">{database || 'bako'}</code>.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 pt-1">
+                    <button
+                      type="button"
+                      disabled={isCreatingTable}
+                      onClick={() => handleCreateTable(selectedTable)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-lg text-xs font-bold transition shadow-sm disabled:opacity-50"
+                    >
+                      {isCreatingTable ? <RotateCw className="animate-spin" size={14} /> : <PlusCircle size={14} />}
+                      {isCreatingTable ? 'Sedang Membuat Tabel...' : `Buat Tabel '${selectedTable}' Sekarang (Auto-Create)`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Crashed Table / Repair Tools Panel */}
+          {(isCrashedError || showToolsPanel) && (
+            <div className={`mt-5 p-4 rounded-xl border text-xs ${isCrashedError ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-slate-50 border-slate-200 text-slate-800'}`}>
+              <div className="flex items-start gap-3">
+                <Wrench className={`${isCrashedError ? 'text-rose-600' : 'text-sky-600'} mt-0.5 shrink-0`} size={20} />
+                <div className="flex-1 space-y-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className={`text-sm font-bold ${isCrashedError ? 'text-rose-900' : 'text-slate-900'}`}>
+                        {isCrashedError ? `Peringatan: Tabel '${selectedTable}' Ditandai Crashed / Corrupt` : `Alat Perbaikan Tabel MyISAM (${selectedTable})`}
+                      </h4>
+                      {isCrashedError && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-200 text-rose-800">
+                          Error 145 / Crashed
+                        </span>
+                      )}
+                    </div>
+                    <p className={`mt-1 leading-relaxed ${isCrashedError ? 'text-rose-800' : 'text-slate-600'}`}>
+                      Pada MySQL MyISAM, jika komputer atau layanan MySQL berhenti mendadak saat operasi tulis berlangsung, berkas indeks (<code className="font-mono font-bold">.MYI</code>) dapat mengalami korupsi dan MySQL memunculkan pesan <em className="font-serif">"Table is marked as crashed and should be repaired"</em>. Jalankan perintah perbaikan di bawah untuk memperbaiki tabel secara otomatis:
+                    </p>
+                  </div>
+
+                  {/* 1-Click Action Buttons */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={isRepairing}
+                      onClick={() => handleRepairTable(selectedTable, 'extended')}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition shadow-sm disabled:opacity-50"
+                    >
+                      {isRepairing ? <RotateCw className="animate-spin" size={14} /> : <Wrench size={14} />}
+                      {isRepairing ? 'Sedang Memperbaiki...' : `Perbaiki '${selectedTable}' Sekarang (REPAIR TABLE EXTENDED)`}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isRepairing}
+                      onClick={() => handleRepairTable(selectedTable, 'quick')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition disabled:opacity-50"
+                    >
+                      Perbaikan Cepat (QUICK)
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isRepairing}
+                      onClick={() => handleRepairTable(selectedTable, 'use_frm')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition disabled:opacity-50"
+                      title="Gunakan berkas format .frm jika header index rusak parah"
+                    >
+                      Gunakan Header .frm (USE_FRM)
+                    </button>
+                  </div>
+
+                  {/* Repair Output Message if available */}
+                  {repairReport && (
+                    <div className="p-3 bg-white border border-emerald-200 rounded-lg text-emerald-800 space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <CheckCircle2 size={15} className="text-emerald-600" />
+                        <span>{repairReport.message}</span>
+                      </div>
+                      {Array.isArray(repairReport.details) && repairReport.details.length > 0 && (
+                        <div className="font-mono text-[11px] text-slate-600 bg-slate-50 p-2 rounded border border-slate-200 mt-1">
+                          {repairReport.details.map((d: any, idx: number) => (
+                            <div key={idx}>
+                              {d.Table} &bull; {d.Op} &bull; {d.Msg_type}: <span className="font-bold text-emerald-700">{d.Msg_text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Manual Commands Accordion for Localhost/Windows/XAMPP */}
+                  <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                    <div className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                      <Terminal size={13} />
+                      <span>Atau Jalankan Manual di Localhost / XAMPP:</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                      {/* Option A: SQL Query */}
+                      <div className="p-2.5 bg-white rounded-lg border border-slate-200 flex flex-col justify-between">
+                        <div>
+                          <span className="font-bold text-slate-700 block mb-1">Via phpMyAdmin / HeidiSQL / MySQL Console:</span>
+                          <code className="block font-mono bg-slate-100 text-slate-800 p-1.5 rounded select-all text-[10.5px]">
+                            USE {database || 'bako'};<br />
+                            REPAIR TABLE {selectedTable} EXTENDED;
+                          </code>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(`USE ${database || 'bako'};\nREPAIR TABLE ${selectedTable} EXTENDED;`, 'sql')}
+                          className="mt-2 text-[10px] font-bold text-sky-700 hover:text-sky-900 inline-flex items-center gap-1 self-end"
+                        >
+                          {copiedCmd === 'sql' ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                          {copiedCmd === 'sql' ? 'Tersalin' : 'Salin Perintah SQL'}
+                        </button>
+                      </div>
+
+                      {/* Option B: Windows Command Prompt (myisamchk) */}
+                      <div className="p-2.5 bg-white rounded-lg border border-slate-200 flex flex-col justify-between">
+                        <div>
+                          <span className="font-bold text-slate-700 block mb-1">Via Windows Command Prompt (myisamchk):</span>
+                          <code className="block font-mono bg-slate-100 text-slate-800 p-1.5 rounded select-all text-[10.5px]">
+                            myisamchk -r -v "C:\xampp\mysql\data\{database || 'bako'}\{selectedTable}.MYI"
+                          </code>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(`myisamchk -r -v "C:\\xampp\\mysql\\data\\${database || 'bako'}\\${selectedTable}.MYI"`, 'cli')}
+                          className="mt-2 text-[10px] font-bold text-sky-700 hover:text-sky-900 inline-flex items-center gap-1 self-end"
+                        >
+                          {copiedCmd === 'cli' ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                          {copiedCmd === 'cli' ? 'Tersalin' : 'Salin Perintah CLI'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          )}
           
-          {error && (
+          {error && !isCrashedError && !tableNotFound && (
             <div className="mt-6 p-4 rounded-xl bg-red-50 border border-red-100 flex items-start gap-3">
-              <AlertCircle className="text-red-500 mt-0.5" size={18} />
+              <AlertCircle className="text-red-500 mt-0.5 shrink-0" size={18} />
               <div>
                 <h4 className="text-sm font-bold text-red-800">Gagal Mengambil Data</h4>
                 <p className="text-xs text-red-600 mt-1">{error}</p>
@@ -655,7 +1001,7 @@ export default function ConnectView({
           
           {successMsg && (
             <div className="mt-6 p-4 rounded-xl bg-emerald-50 border border-emerald-100 flex items-start gap-3">
-              <CheckCircle2 className="text-emerald-500 mt-0.5" size={18} />
+              <CheckCircle2 className="text-emerald-500 mt-0.5 shrink-0" size={18} />
               <div>
                 <h4 className="text-sm font-bold text-emerald-800">Berhasil Ditarik</h4>
                 <p className="text-xs text-emerald-600 mt-1">{successMsg}</p>
@@ -663,10 +1009,21 @@ export default function ConnectView({
             </div>
           )}
 
-          <div className="mt-6 flex justify-end">
+          <div className="mt-6 flex justify-end gap-3">
+            {isCrashedError && (
+              <button
+                type="button"
+                disabled={isRepairing}
+                onClick={() => handleRepairTable(selectedTable, 'extended')}
+                className="flex items-center gap-2 px-5 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-bold tracking-wide transition-colors shadow-md disabled:opacity-70"
+              >
+                {isRepairing ? <RotateCw className="animate-spin" size={18} /> : <Wrench size={18} />}
+                {isRepairing ? "Memperbaiki..." : `Perbaiki ${selectedTable}`}
+              </button>
+            )}
             <button 
               onClick={handleFetchData}
-              disabled={isLoading}
+              disabled={isLoading || isRepairing}
               className="flex items-center gap-2 px-6 py-3 bg-[#1e293b] hover:bg-black text-white rounded-xl text-sm font-black tracking-widest uppercase transition-colors shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {isLoading ? <RotateCw className="animate-spin" size={18} /> : <Download size={18} />}

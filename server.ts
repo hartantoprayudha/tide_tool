@@ -31,14 +31,21 @@ function isPrivateHost(host: string): boolean {
 
 function formatDbErrorMessage(error: any, host: string, port: any): string {
   const isPriv = isPrivateHost(host);
+  const msg = String(error?.message || '');
+  if (msg.toLowerCase().includes('marked as crashed') || error.errno === 145 || error.errno === 1194 || error.errno === 144) {
+    return `${msg}. File tabel MyISAM rusak (crashed). Anda dapat memperbaikinya secara langsung menggunakan tombol 'Perbaiki Tabel' (REPAIR TABLE).`;
+  }
+  if (error.code === 'ER_NO_SUCH_TABLE') {
+    return `Tabel tidak ditemukan di database (${msg}). Silakan periksa nama tabel atau buat tabel baru.`;
+  }
   if (error.code === 'ETIMEDOUT') {
     if (isPriv) {
-      return `Koneksi timeout (ETIMEDOUT) ke ${host}:${port}. Alamat '${host}' adalah IP jaringan privat lokal (LAN/intranet). Server aplikasi Cloud Run di cloud tidak dapat menjangkau IP privat lokal secara langsung. Silakan gunakan IP Publik dengan port-forwarding, domain, tunnel (seperti ngrok / Cloudflare Tunnel), atau upload file data secara langsung.`;
+      return `Koneksi timeout (ETIMEDOUT) ke ${host}:${port}. Alamat '${host}' adalah IP jaringan privat lokal (LAN/intranet). Jika aplikasi berjalan di cloud, gunakan tunnel atau jalankan aplikasi di localhost.`;
     }
     return `Koneksi timeout (ETIMEDOUT) ke ${host}:${port}. Pastikan database aktif dan port ${port} terbuka di firewall internet publik.`;
   }
   if (error.code === 'ECONNREFUSED') {
-    return `Koneksi ditolak (ECONNREFUSED) pada ${host}:${port}. Pastikan layanan MySQL sedang berjalan dan mengizinkan koneksi dari luar (bind-address 0.0.0.0).`;
+    return `Koneksi ditolak (ECONNREFUSED) pada ${host}:${port}. Pastikan layanan MySQL sedang berjalan dan mengizinkan koneksi (bind-address 0.0.0.0 atau localhost).`;
   }
   if (error.code === 'ER_ACCESS_DENIED_ERROR') {
     return `Akses ditolak (ER_ACCESS_DENIED_ERROR). Periksa kembali username dan password database MySQL.`;
@@ -83,7 +90,7 @@ async function startServer() {
     }
   });
 
-  // API POST route to fetch data from dynamic connection
+  // API POST route to fetch data from dynamic connection with auto-repair support
   app.post("/api/db/connect", async (req, res) => {
     const { host, port, user, password, database, table, station, startDate, endDate } = req.body;
     let connection;
@@ -94,7 +101,7 @@ async function startServer() {
         user: user || 'root',
         password: password || '',
         database: database || undefined,
-        connectTimeout: 4000,
+        connectTimeout: 5000,
         dateStrings: true
       });
 
@@ -112,13 +119,15 @@ async function startServer() {
         }
         return res.json({ success: true, data: rows });
       }
-      if (table === 'validdata') {
-        query = `SELECT StationId, TimeStamp, Interpolation as Intp FROM \`${table}\``;
+
+      if (table === 'validdata' || table === 'validdata2') {
+        query = `SELECT StationId, TimeStamp, Interpolation as Intp, Interpolation, combination, Sensor1, Sensor2, Sensor3, Source, Operator FROM \`${table}\``;
       }
+
       const params: any[] = [];
       const conditions: string[] = [];
 
-      if (table === 'data_vsat5' || table === 'validdata') {
+      if (table === 'data_vsat5' || table === 'validdata' || table === 'validdata2') {
           if (station && station.trim() !== '') {
               const stationCol = table === 'data_vsat5' ? 'StationID' : 'StationId'; // Due to schema inconsistencies
               conditions.push(`\`${stationCol}\` = ?`);
@@ -136,17 +145,165 @@ async function startServer() {
           if (conditions.length > 0) {
               query += ` WHERE ${conditions.join(' AND ')}`;
           }
-          
-          // Removed ORDER BY TimeStamp DESC because validdata has a TEXT column (Remark)
-          // which forces MySQL to use a slow on-disk temporary table for sorting.
-          // The frontend already sorts the data chronologically in ConnectView.tsx anyway.
       }
       
-      const [rows] = await connection.query(query, params);
-      
-      res.json({ success: true, data: rows });
+      try {
+        const [rows] = await connection.query(query, params);
+        res.json({ success: true, data: rows });
+      } catch (queryErr: any) {
+        const errStr = (queryErr.message || '') + ' ' + (queryErr.code || '');
+        const isCrashed = errStr.toLowerCase().includes('marked as crashed') ||
+                          queryErr.errno === 145 ||
+                          queryErr.errno === 1194 ||
+                          queryErr.errno === 144;
+
+        if (isCrashed) {
+          console.warn(`[Auto-Repair] Table '${table}' is marked as crashed (${queryErr.message}). Menjalankan REPAIR TABLE otomatis...`);
+          try {
+            const [repairRows]: any = await connection.query(`REPAIR TABLE \`${table}\` EXTENDED`);
+            console.log(`[Auto-Repair] Hasil REPAIR TABLE ${table}:`, repairRows);
+
+            // Coba query ulang setelah perbaikan
+            const [retryRows] = await connection.query(query, params);
+            return res.json({
+              success: true,
+              data: retryRows,
+              autoRepaired: true,
+              repairNotice: `Tabel '${table}' sebelumnya corrupt (marked as crashed), tetapi telah otomatis diperbaiki menggunakan 'REPAIR TABLE \`${table}\` EXTENDED' dan data berhasil ditarik!`,
+              repairDetails: repairRows
+            });
+          } catch (repairErr: any) {
+            console.error(`[Auto-Repair] Gagal memperbaiki tabel '${table}' secara otomatis:`, repairErr);
+            return res.json({
+              success: false,
+              error: `Tabel '${table}' ditandai crash/rusak: ${queryErr.message}. Upaya auto-repair gagal (${repairErr.message}). Gunakan tombol 'Perbaiki Tabel' di bawah atau jalankan 'REPAIR TABLE ${table} EXTENDED;' di MySQL.`,
+              isCrashedTable: true,
+              tableToRepair: table,
+              code: queryErr.code
+            });
+          }
+        }
+
+        if (queryErr.code === 'ER_NO_SUCH_TABLE') {
+          return res.json({
+            success: false,
+            error: `Tabel '${table}' belum ada di basis data '${database || 'bako'}'. Anda dapat membuatnya secara otomatis dengan klik tombol 'Buat Tabel ${table}'.`,
+            tableNotFound: true,
+            tableToCreate: table
+          });
+        }
+
+        throw queryErr;
+      }
     } catch (error: any) {
       console.warn(`[DB Connect] ${error.code || 'FAIL'}: ${error.message} (${host}:${port})`);
+      const errMsg = formatDbErrorMessage(error, host, port);
+      const isCrashed = (error.message || '').toLowerCase().includes('marked as crashed') || error.errno === 145 || error.errno === 1194;
+      res.json({ 
+        success: false, 
+        error: errMsg, 
+        code: error.code,
+        isCrashedTable: isCrashed,
+        tableToRepair: table
+      });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  });
+
+  // API POST route to repair a crashed MyISAM table (e.g. validdata, validdata2, data_vsat5)
+  app.post("/api/db/repair", async (req, res) => {
+    const { host, port, user, password, database, table, mode } = req.body;
+    let connection;
+    try {
+      connection = await mysql.createConnection({
+        host,
+        port: parseInt(port, 10) || 3306,
+        user: user || 'root',
+        password: password || '',
+        database: database || undefined,
+        connectTimeout: 8000,
+        dateStrings: true
+      });
+
+      const targetTable = table || 'validdata';
+      let repairSql = `REPAIR TABLE \`${targetTable}\` EXTENDED`;
+      if (mode === 'quick') {
+        repairSql = `REPAIR TABLE \`${targetTable}\` QUICK`;
+      } else if (mode === 'use_frm') {
+        repairSql = `REPAIR TABLE \`${targetTable}\` USE_FRM`;
+      } else if (mode === 'standard') {
+        repairSql = `REPAIR TABLE \`${targetTable}\``;
+      }
+
+      console.log(`[DB Repair] Menjalankan: ${repairSql}`);
+      const [repairResult]: any = await connection.query(repairSql);
+
+      let checkResult: any = [];
+      try {
+        const [cRes]: any = await connection.query(`CHECK TABLE \`${targetTable}\``);
+        checkResult = cRes;
+      } catch (e) {}
+
+      res.json({
+        success: true,
+        message: `Perintah '${repairSql}' berhasil dijalankan.`,
+        repairResult,
+        checkResult,
+        targetTable
+      });
+    } catch (error: any) {
+      console.error(`[DB Repair Error]:`, error);
+      const errMsg = formatDbErrorMessage(error, host, port);
+      res.json({ success: false, error: errMsg, code: error.code });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  });
+
+  // API POST route to create table structure for validdata or validdata2 if missing
+  app.post("/api/db/create-table", async (req, res) => {
+    const { host, port, user, password, database, table } = req.body;
+    let connection;
+    try {
+      connection = await mysql.createConnection({
+        host,
+        port: parseInt(port, 10) || 3306,
+        user: user || 'root',
+        password: password || '',
+        database: database || undefined,
+        connectTimeout: 8000,
+        dateStrings: true
+      });
+
+      const targetTable = table || 'validdata2';
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`${targetTable}\` (
+          \`RecId\` bigint(20) NOT NULL AUTO_INCREMENT,
+          \`StationId\` varchar(10) NOT NULL,
+          \`TimeStamp\` datetime NOT NULL,
+          \`combination\` float DEFAULT NULL,
+          \`Interpolation\` float NOT NULL,
+          \`Sensor1\` float DEFAULT NULL,
+          \`Sensor2\` float DEFAULT NULL,
+          \`Sensor3\` float DEFAULT NULL,
+          \`Source\` varchar(20) DEFAULT NULL,
+          \`Operator\` varchar(20) DEFAULT NULL,
+          \`Remark\` text,
+          PRIMARY KEY (\`RecId\`)
+        ) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+      `);
+
+      res.json({ 
+        success: true, 
+        message: `Tabel '${targetTable}' berhasil dibuat di database '${database || 'bako'}'.` 
+      });
+    } catch (error: any) {
+      console.error(`[DB Create Table Error]:`, error);
       const errMsg = formatDbErrorMessage(error, host, port);
       res.json({ success: false, error: errMsg, code: error.code });
     } finally {
@@ -166,7 +323,7 @@ async function startServer() {
         user: user || 'root',
         password: password || '',
         database: database || undefined,
-        connectTimeout: 4000,
+        connectTimeout: 5000,
         dateStrings: true
       });
 
